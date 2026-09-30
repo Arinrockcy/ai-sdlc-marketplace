@@ -35,9 +35,11 @@ Each plugin has its own version and `CHANGELOG.md` (Keep a Changelog format).
 - DAG validation and ordering
 - gates
 - hook resolution and execution
-- registry regeneration
+- registry regeneration and search
+- review scaffolds (`governance review`) and pre-switch checks (`goal preflight`)
+- the code graph: Graphify setup, freshness and queries
 
-Skills call the script (written `$AISDLC` in the skill files) and should never hand-edit state the script owns. Every `$AISDLC …` span in a skill must be a complete, runnable invocation. Write placeholders as `<G-id>`, `<T-id>`, `<ADR-id>`, `<GOV-id>` or `<name>`, alternatives as `a|b`, optional parts as `[...]`, and `…` only as an option's value. `tests/skills.test.mjs` runs each one and fails if the script no longer understands it. The script rejects unknown options, so every option must be in `OPTIONS`. The state the script owns: `status`, `gate_*`, `govern_fingerprint` and `cancel_reason` fields, the `## Cancellations` log in `goal.md`, the rules table in `governance.md`, `registry.md`, `registry-archive.md`, `tasks.md`, and goal folder moves. When adding workflow behavior, put invariants in the script with tests, and keep instructions in the skill.
+Skills call the script (written `$AISDLC` in the skill files) and should never hand-edit state the script owns. Every `$AISDLC …` span in a skill must be a complete, runnable invocation. Write placeholders as `<G-id>`, `<T-id>`, `<ADR-id>`, `<GOV-id>`, `<keywords>` or `<name>`, alternatives as `a|b`, optional parts as `[...]`, and `…` only as an option's value. `tests/skills.test.mjs` runs each one and fails if the script no longer understands it. The script rejects unknown options, so every option must be in `OPTIONS`. The state the script owns: `status`, `gate_*`, `govern_fingerprint` and `cancel_reason` fields, the `## Cancellations` log in `goal.md`, the rules table in `governance.md`, `registry.md`, `registry-archive.md`, `tasks.md`, and goal folder moves. When adding workflow behavior, put invariants in the script with tests, and keep instructions in the skill.
 
 **State model.** Everything lives in the target project's `.aisdlc/`, stored as markdown with flat frontmatter. The parser only supports `key: value` scalars and inline `[a, b]` arrays; there is no nested YAML.
 - A goal's status is the folder it sits in: `goals/<status>/G-NNN-slug/`.
@@ -93,4 +95,5 @@ These were settled with the repo owner:
 - `/aisdlc:govern` offers `templates/governance-catalog.md` rules as choices and never adds one silently. `governance add` requires an explicit severity and stage.
 - `/aisdlc:implement` runs one task per invocation unless `--all` or `implement.mode: "auto"` is set.
 - A goal auto-completes once all tasks pass.
-- Graphify is optional. Init offers it. Without it, skills search the code directly. `registry.md` indexes goals and ADRs, never code.
+- Graphify is optional and used only to save tokens. Init offers it. The script runs it code-only (no model calls), and `graph query` rebuilds it whenever the code changed, so no skill asks about rebuilding. A missing or failing Graphify never blocks the workflow: skills fall back to searching the code. `registry.md` indexes goals and ADRs, never code.
+- When a skill step is deterministic (a lookup, a git check, a scaffold, a mapping), it goes in the script. Skills keep only judgment and user interaction.

@@ -5,7 +5,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { execSync } from 'node:child_process';
+import { execSync, execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 
@@ -168,7 +168,7 @@ function setPath(obj, dotted, value) {
 
 // Every option takes a value, even one that starts with "--" (e.g. --verify "--version").
 // Unknown options fail, so a typo in a skill can't be silently ignored.
-export const OPTIONS = new Set(['depends', 'risk', 'verify', 'reason', 'evidence', 'goal', 'task', 'status', 'stack', 'graph', 'base-branch', 'dir', 'severity', 'stage', 'check']);
+export const OPTIONS = new Set(['depends', 'risk', 'verify', 'reason', 'evidence', 'goal', 'task', 'status', 'stack', 'graph', 'base-branch', 'dir', 'severity', 'stage', 'check', 'budget']);
 
 function parseArgs(argv) {
   const pos = [];
@@ -474,6 +474,116 @@ function statusFilter(value, allowed) {
   const bad = allowed ? wanted.filter((x) => !allowed.includes(x)) : [];
   if (!wanted.length || bad.length) fail(`Unknown status "${bad.join(', ') || value}". Valid: ${(allowed || []).join(', ') || 'any status name'}, comma-separated.`);
   return (status) => wanted.includes(status);
+}
+
+const STOPWORDS = new Set(['the', 'and', 'for', 'with', 'add', 'from', 'into', 'that', 'this', 'use', 'new', 'when', 'all']);
+
+// Rows of registry.md and the archive that mention any keyword, best match first. A keyword matches a word it
+// starts, so "limit" finds "limiting". Saves reading the archive, which keeps every finished goal.
+function registrySearch(root, words) {
+  const terms = [...new Set(words.join(' ').toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length > 2 && !STOPWORDS.has(w)))];
+  if (!terms.length) fail('Usage: registry search <keywords> (words of 3 or more letters)');
+  const rows = [];
+  for (const name of ['registry.md', 'registry-archive.md']) {
+    const file = path.join(aisdlcDir(root), name);
+    if (!fs.existsSync(file)) continue;
+    for (const line of fs.readFileSync(file, 'utf8').split('\n')) {
+      if (!/^\| [A-Z]+-\d+ \|/.test(line)) continue;
+      const lineWords = line.toLowerCase().split(/[^a-z0-9]+/);
+      const score = terms.filter((t) => lineWords.some((w) => w.startsWith(t))).length;
+      if (score) rows.push({ line, score });
+    }
+  }
+  rows.sort((a, b) => b.score - a.score);
+  return { terms, matches: rows.slice(0, 10).map((r) => r.line), more: Math.max(0, rows.length - 10) };
+}
+
+// ---------- graph ----------
+
+// Graphify is only here to cut the tokens the workflow spends finding code. It runs code-only (local parsing, no
+// model calls, no API key) and always writes graphify-out/ in the project root. `.aisdlc/` is kept out of the graph
+// through .graphifyignore, so workflow state never makes it stale.
+const GRAPH_DIR = 'graphify-out';
+const GRAPH_STAMP = path.join(GRAPH_DIR, '.aisdlc-stamp');
+const GRAPH_IGNORED = ['.aisdlc/', `${GRAPH_DIR}/`];
+const GRAPH_FEATURES = { update: /^\s*update <path>/m, query: /^\s*query "<question>"/m, budget: /--budget N/ };
+const GRAPH_INSTALL = 'Install Graphify 0.9 or later (Python 3.10+) so `graphify` is on PATH, for example `pipx install graphifyy`. The workflow only needs the CLI, not `graphify install`.';
+const DEFAULT_BUDGET = 1500;
+
+const graphBin = () => process.env.AISDLC_GRAPHIFY || 'graphify';
+const graphify = (root, args) => execFileSync(graphBin(), args, { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+
+function git(root, args, input) {
+  try { return execFileSync('git', args, { cwd: root, encoding: 'utf8', input, stdio: ['pipe', 'pipe', 'ignore'], maxBuffer: 1 << 28 }); } catch { return null; }
+}
+
+function graphConfig(root) {
+  const g = loadConfig(root).graph || {};
+  // Graphify's update has no output option, so the graph can only live in graphify-out/.
+  if (g.path && g.path !== GRAPH_DIR) fail(`graph.path "${g.path}" is not supported: Graphify always writes ${GRAPH_DIR}/ in the project root. Remove graph.path from .aisdlc/config.json.`);
+  return { provider: g.provider || 'none' };
+}
+
+// Whether graphify is on PATH and has the commands the workflow uses.
+function graphTool(root) {
+  let help;
+  try { help = graphify(root, ['--help']); } catch { return { installed: false, install: GRAPH_INSTALL }; }
+  let version = null;
+  try { version = graphify(root, ['--version']).trim().replace(/^graphify\s+/, ''); } catch { /* older releases have no --version */ }
+  const missing = Object.keys(GRAPH_FEATURES).filter((f) => !GRAPH_FEATURES[f].test(help));
+  return { installed: true, version, supported: !missing.length, ...(missing.length && { missing, install: GRAPH_INSTALL }) };
+}
+
+const graphIgnoreOk = (root) => {
+  const file = path.join(root, '.graphifyignore');
+  return fs.existsSync(file) && fs.readFileSync(file, 'utf8').split(/\r?\n/).some((l) => /^\/?\.aisdlc\/?$/.test(l.trim()));
+};
+
+// A fingerprint of the code in the working tree: the blob hash of every file git tracks or would track, without
+// workflow files. It depends on content only, so committing code the graph already has never forces a rebuild.
+function codeStamp(root) {
+  const list = (...args) => git(root, ['ls-files', '-z', ...args])?.split('\0').filter(Boolean);
+  const staged = list('-s');
+  if (!staged) return null;
+  const keep = (f) => !GRAPH_IGNORED.some((d) => f.startsWith(d));
+  const blobs = new Map(staged.map((l) => { const [meta, f] = l.split('\t'); return [f, meta.split(' ')[1]]; }));
+  for (const f of list('-d')) blobs.delete(f);
+  const changed = [...new Set([...list('-m'), ...list('-o', '--exclude-standard')])].filter((f) => keep(f) && fs.existsSync(path.join(root, f)));
+  const hashes = changed.length ? git(root, ['hash-object', '--stdin-paths'], changed.join('\n')).trim().split('\n') : [];
+  changed.forEach((f, i) => blobs.set(f, hashes[i]));
+  const entries = [...blobs].filter(([f]) => keep(f)).sort(([a], [b]) => (a < b ? -1 : 1));
+  return createHash('sha256').update(JSON.stringify(entries)).digest('hex').slice(0, 16);
+}
+
+function graphFreshness(root) {
+  const graphFile = path.join(root, GRAPH_DIR, 'graph.json');
+  if (!fs.existsSync(graphFile)) return { built: false, stale: true, reason: 'no graph built yet' };
+  const built = { built: true, built_at: new Date(fs.statSync(graphFile).mtimeMs).toISOString() };
+  const now = codeStamp(root);
+  if (now === null) return { ...built, stale: true, reason: 'not a git repository, so changes cannot be tracked' };
+  const stampFile = path.join(root, GRAPH_STAMP);
+  const was = fs.existsSync(stampFile) ? fs.readFileSync(stampFile, 'utf8').trim() : null;
+  if (was === now) return { ...built, stale: false };
+  return { ...built, stale: true, reason: was ? 'code changed since the graph was built' : 'graph was not built by aisdlc' };
+}
+
+// Rebuilds the graph if the code changed. Incremental and model-free, but it still takes seconds on a large repo.
+function graphUpdate(root) {
+  const fresh = graphFreshness(root);
+  if (!fresh.stale) return { updated: false };
+  const started = Date.now();
+  const graphFile = path.join(root, GRAPH_DIR, 'graph.json');
+  const before = fs.existsSync(graphFile) ? fs.statSync(graphFile).mtimeMs : null;
+  try { graphify(root, ['update', '.']); } catch (e) {
+    fail(`graphify update failed: ${String(e.stderr || e.message).trim().split('\n').slice(-3).join(' ')}`);
+  }
+  // Graphify can decline to overwrite a graph (for example one that shrank); never mark such a graph fresh.
+  if (!fs.existsSync(graphFile) || fs.statSync(graphFile).mtimeMs === before) {
+    return { updated: false, warning: `graphify update left ${GRAPH_DIR}/graph.json unchanged, so it may be out of date. Run \`graphify update . --force\` to rebuild it.` };
+  }
+  const stamp = codeStamp(root);
+  if (stamp) fs.writeFileSync(path.join(root, GRAPH_STAMP), `${stamp}\n`);
+  return { updated: true, reason: fresh.reason, ms: Date.now() - started };
 }
 
 // ---------- governance ----------
@@ -868,15 +978,34 @@ const commands = {
       const match = statusFilter(opts.status, GOAL_STATES);
       return out(listGoals(root).filter((g) => match(g.status)).map((g) => ({
         id: g.id, title: g.title, status: g.status, dir: path.relative(root, g.dir),
-        gates: gatesOf(g),
+        gates: gatesOf(g), next: nextStep(root, g),
       })));
+    }
+    if (action === 'preflight') {
+      const g = getGoal(root, rest[0]);
+      const base = loadConfig(root).git?.base_branch || 'develop';
+      const commands = resolveHookFor(root, 'before_goal', { goal: g.id }).commands;
+      const switches = commands.some((c) => /\bgit\s+(checkout|switch)\b/.test(c));
+      const others = listGoals(root).filter((x) => x.status === 'in-progress' && x.id !== g.id).map((x) => x.id);
+      const warnings = [];
+      if (switches) {
+        const goalFile = path.relative(root, g.file).split(path.sep).join('/');
+        const baseRef = [base, `origin/${base}`].find((r) => git(root, ['rev-parse', '--verify', '--quiet', `${r}^{commit}`]) !== null);
+        const committed = !!git(root, ['ls-files', '--', goalFile])?.trim();
+        if (others.length) warnings.push(`${others.join(', ')} ${others.length > 1 ? 'are' : 'is'} in progress. Switching branches moves the working tree away from that work, unless it lives in another worktree.`);
+        if (!baseRef) warnings.push(`The base branch ${base} exists neither locally nor as origin/${base}, so the before_goal hook may fail.`);
+        else if (committed && !git(root, ['ls-tree', '--name-only', baseRef, '--', goalFile])?.trim()) {
+          warnings.push(`The goal's planning files are committed on the current branch but not on ${baseRef}, so the checkout leaves them behind. Bring .aisdlc/ onto ${base} first, or disable the before_goal hook.`);
+        }
+      }
+      return out({ goal: g.id, before_goal: commands, switches_branch: switches, base_branch: base, other_in_progress: others, warnings });
     }
     if (action === 'show') {
       const g = getGoal(root, rest[0]);
       const tasks = listTasks(g);
       return out({
         id: g.id, title: g.title, status: g.status, dir: path.relative(root, g.dir),
-        gates: gatesOf(g),
+        gates: gatesOf(g), next: nextStep(root, g),
         final_review_required: activeRules(root, 'final').length > 0,
         governance: { plan: reviewSummary(root, g, 'plan'), final: reviewSummary(root, g, 'final') },
         ...(g.status === 'cancelled' && { cancel_reason: g.data.cancel_reason || null }),
@@ -1134,7 +1263,33 @@ const commands = {
       if (!RULE_STAGES.includes(stage)) fail(`Invalid stage "${stage}". Valid: ${RULE_STAGES.join(', ')}`);
       return out(runChecks(root, getGoal(root, rest[0]), activeRules(root, stage)));
     }
-    if (action !== 'add' && action !== 'set') fail('Usage: governance list | checks <G-id> [--stage plan|final] | add <rule> --severity must|should --stage plan|final [--check <name>] | set <rule-id> rule|severity|stage|check <value>');
+    if (action === 'review') {
+      const g = getGoal(root, rest[0]);
+      assertOpen(g);
+      const stage = opts.stage || 'plan';
+      if (!RULE_STAGES.includes(stage)) fail(`Invalid stage "${stage}". Valid: ${RULE_STAGES.join(', ')}`);
+      const file = path.join(g.dir, REVIEW_FILE[stage]);
+      const gate = stage === 'plan' ? 'govern' : 'final';
+      if (fs.existsSync(file)) fail(`${path.relative(root, file)} already exists. Run \`gate set ${g.id} ${gate} pending\` first; it archives the old review.`);
+      const rules = activeRules(root, stage);
+      const checks = new Map(runChecks(root, g, rules).map((c) => [c.rule, c]));
+      const cell = (v) => v.replace(/\|/g, '\\|').replace(/\s*\n\s*/g, ' ');
+      // A failed automatic check can only be a fail, so its row is filled in; every other row is left to the reviewer.
+      const rows = rules.map((r) => {
+        const c = checks.get(r.id);
+        return c && !c.ok ? `| ${r.id} | fail | ${cell(`check ${c.check}: ${c.problems.join('; ')}`)} |` : `| ${r.id} |  |  |`;
+      });
+      const text = render('governance-review.md', { goal: g.id, stage, result: '', date: today() }).replace(/(\|-+\|-+\|-+\|\n)/, `$1${rows.map((r) => `${r}\n`).join('')}`);
+      fs.writeFileSync(file, text);
+      return out({
+        file: path.relative(root, file),
+        rules: rules.map((r) => {
+          const c = checks.get(r.id);
+          return { id: r.id, rule: r.rule, severity: r.severity, ...(c && { check: c.check, check_ok: c.ok, ...(!c.ok && { problems: c.problems }) }) };
+        }),
+      });
+    }
+    if (action !== 'add' && action !== 'set') fail('Usage: governance list | checks <G-id> [--stage plan|final] | review <G-id> [--stage plan|final] | add <rule> --severity must|should --stage plan|final [--check <name>] | set <rule-id> rule|severity|stage|check <value>');
     if (gov.text === null) fail('No .aisdlc/governance.md; run init first.');
     let rule;
     if (action === 'add') {
@@ -1158,11 +1313,61 @@ const commands = {
     return out(rule);
   },
 
-  registry([action]) {
-    if (action !== 'sync') fail('Usage: registry sync');
+  registry([action, ...words]) {
     const root = findRoot();
+    if (action === 'search') return out(registrySearch(root, words));
+    if (action !== 'sync') fail('Usage: registry sync | search <keywords>');
     const rel = (name) => path.relative(root, path.join(aisdlcDir(root), name));
     out({ ...registrySync(root), file: rel('registry.md'), archive: rel('registry-archive.md') });
+  },
+
+  graph([action, ...words], opts) {
+    const root = findRoot();
+    const { provider } = graphConfig(root);
+    if (action === 'status') {
+      const tool = graphTool(root);
+      return out({ provider, dir: GRAPH_DIR, ...tool, aisdlc_ignored: graphIgnoreOk(root), ...graphFreshness(root) });
+    }
+    if (action === 'setup') {
+      const tool = graphTool(root);
+      if (!tool.installed || !tool.supported) fail(`${tool.installed ? `Graphify ${tool.version || ''} lacks ${tool.missing.join(', ')}.` : 'Graphify is not installed.'} ${GRAPH_INSTALL}`);
+      const ignore = path.join(root, '.graphifyignore');
+      const addedIgnore = !graphIgnoreOk(root);
+      if (addedIgnore) {
+        const text = fs.existsSync(ignore) ? fs.readFileSync(ignore, 'utf8') : '';
+        fs.writeFileSync(ignore, `${text}${text && !text.endsWith('\n') ? '\n' : ''}.aisdlc/\n`);
+      }
+      const cfg = loadConfig(root);
+      cfg.graph = { provider: 'graphify' };
+      saveConfig(root, cfg);
+      return out({ provider: 'graphify', version: tool.version, dir: GRAPH_DIR, ignore_added: addedIgnore, ...graphUpdate(root) });
+    }
+    if (provider !== 'graphify') {
+      if (action === 'update' || action === 'query') return out({ provider, note: 'No code graph is set up; search the code directly.' });
+      fail('Usage: graph status | setup | update | query "<question>" [--budget N]');
+    }
+    if (action === 'update') return out(graphUpdate(root));
+    if (action === 'query') {
+      const question = words.join(' ').trim();
+      if (!question) fail('Usage: graph query "<question>" [--budget N]');
+      const budget = opts.budget === undefined ? DEFAULT_BUDGET : Number(opts.budget);
+      if (!Number.isInteger(budget) || budget < 100) fail('--budget must be a whole number of tokens, 100 or more');
+      let refresh;
+      try { refresh = graphUpdate(root); } catch (e) {
+        // A missing or broken Graphify must never block the workflow: the graph is only an optimization.
+        if (!(e instanceof UserError) && e.code !== 'ENOENT') throw e;
+        return out({ provider, note: `Graph unavailable (${e.code === 'ENOENT' ? 'graphify is not installed' : e.message}); search the code directly.` });
+      }
+      let result;
+      try { result = graphify(root, ['query', question, '--budget', String(budget), '--graph', path.join(GRAPH_DIR, 'graph.json')]); } catch (e) {
+        return out({ provider, note: `Graph query failed (${e.code === 'ENOENT' ? 'graphify is not installed' : String(e.stderr || e.message).trim().split('\n').pop()}); search the code directly.` });
+      }
+      if (refresh.updated) process.stdout.write(`[aisdlc] graph refreshed in ${refresh.ms} ms (${refresh.reason})\n`);
+      if (refresh.warning) process.stdout.write(`[aisdlc] ${refresh.warning}\n`);
+      process.stdout.write(result);
+      return;
+    }
+    fail('Usage: graph status | setup | update | query "<question>" [--budget N]');
   },
 };
 
@@ -1192,6 +1397,17 @@ function linkAdr(root, adrId, goalId) {
   updateDoc(g.file, { adrs: [...adrs, adrId], adr_reason: '' });
   // The ADR gate judged the old set of decisions; a new link has to be settled again.
   return invalidate(g, 'adr');
+}
+
+// The workflow step that moves a goal on: challenge, adr, govern, implement, reopen, or null once completed.
+function nextStep(root, g) {
+  const d = g.data;
+  if (g.status === 'completed') return null;
+  if (g.status === 'cancelled') return 'reopen';
+  if (g.status === 'pending' && d.gate_challenge !== 'done') return 'challenge';
+  if (d.gate_adr !== 'done') return 'adr';
+  if (d.gate_govern !== 'passed' || d.govern_fingerprint !== planFingerprint(root, g)) return 'govern';
+  return 'implement';
 }
 
 const gatesOf = (g) => ({ challenge: g.data.gate_challenge, adr: g.data.gate_adr, govern: g.data.gate_govern, final: g.data.gate_final || 'pending' });

@@ -38,21 +38,14 @@ The script owns the rules table. Change it only through the `governance add` and
 ## Mode B: `<G-id>` (the plan review)
 1. Run `$AISDLC gate require <G-id> govern`. If it exits non-zero, show the `problems` and stop. Otherwise run `$AISDLC hooks run pre_govern`.
 2. Run `$AISDLC gate set <G-id> govern pending`. This starts a fresh review and archives any earlier `governance-review.md` as `governance-review.stale-N.md`. Use the archived reviews only as a reference, and review every rule again.
-3. Gather these inputs:
-   - `$AISDLC goal show <G-id>` (gates, tasks, progress, DAG status)
-   - `goal.md`, the task files and the linked ADRs
-   - `$AISDLC governance list`, and review only rules whose stage is `plan` and whose severity isn't `retired`
-   - `$AISDLC governance checks <G-id>` for the automatic check results
+3. Run `$AISDLC governance review <G-id>`. It writes `governance-review.md` with one row per active plan rule and returns each rule's text and automatic check result. A rule whose check failed is already filled in as `fail`, with the check's problems in Notes. Then read `goal.md`, the task files and the linked ADRs.
 4. Check each active plan rule strictly, and base every result on evidence in the files:
    - `pass`
    - `fail`, with a concrete reason and the fix
    - `n/a`, with a reason
 
-   Every result needs a note. For `pass`, cite the evidence: the file and section, task or ADR that shows the rule holds. "Looks fine" is not evidence. A rule whose automatic check failed must be `fail`. Put the check's problems in Notes. A passing check only proves structure (for example, that criteria exist). Still judge the content yourself.
-5. Write `governance-review.md` in the goal folder from `${CLAUDE_PLUGIN_ROOT}/templates/governance-review.md`, with `stage: plan`. The rule table has one row per active plan rule:
-   - the rule ID in the Rule column
-   - `pass`, `fail` or `n/a` in the Result column
-   - the evidence (for `pass`) or the reason (for `fail` and `n/a`) in Notes. The script refuses a row without one.
+   Every result needs a note. For `pass`, cite the evidence: the file and section, task or ADR that shows the rule holds. "Looks fine" is not evidence. A rule whose automatic check failed stays `fail`; add the fix to its Notes. A passing check only proves structure (for example, that criteria exist). Still judge the content yourself.
+5. Fill in `governance-review.md`: the Result (`pass`, `fail` or `n/a`) and Notes of every empty row, with the evidence for `pass` or the reason for `fail` and `n/a`. The script refuses a row without a note. Don't add or remove rows.
 
    Add a Required Fixes list. Set `result: pass` only if no `must` rule failed. A failed `should` rule is listed but doesn't block.
 6. Set the gate. The script re-checks the review: it refuses `passed` if an active rule is missing, a `must` rule failed, any row has no note, or a rule is marked `pass`/`n/a` while its automatic check fails.
@@ -64,13 +57,12 @@ Runs once every task is done or skipped, and only when governance.md has active 
 1. Run `$AISDLC gate require <G-id> final`. If it exits non-zero, show the `problems` and stop. Otherwise run `$AISDLC hooks run pre_govern`.
 2. Run `$AISDLC gate set <G-id> final pending`. This archives any earlier `governance-final.md`.
 3. Gather these inputs:
+   - `$AISDLC governance review <G-id> --stage final`. It writes `governance-final.md` with one row per active final rule, returns each rule's text and check result, and fills in rules whose check failed as `fail`.
    - `$AISDLC goal show <G-id>`, `goal.md`, the task files (including their Notes and `verify_evidence`) and the linked ADRs
    - the goal's changes. Use the diff between the goal's `branch` and `git.base_branch` (`$AISDLC config get git.base_branch`, default `develop`). If the goal was built on a branch shared with other work, or no branch was recorded, ask the user which commits or range belong to this goal. Don't guess.
-   - `$AISDLC governance list`, and review only active rules whose stage is `final`
-   - `$AISDLC governance checks <G-id> --stage final` if any final rule has a check
-4. Check each active final rule against the actual code. Cite files and lines as evidence. To find the code a rule concerns, start from the diff. If `graph.provider` is `graphify`, query the graph for code outside the diff rather than searching broadly, but cite the files themselves, not the graph, which may lag the code. If a rule names a skill (for example a stack's standards skill), load that skill and check against it.
+4. Check each active final rule against the actual code. Cite files and lines as evidence. To find the code a rule concerns, start from the diff. For code outside it, run `$AISDLC graph query "<question>"` rather than searching broadly, and cite the files themselves, not the graph. If a rule names a skill (for example a stack's standards skill), load that skill and check against it.
    For a rule with the `criteria-met` check, go through each acceptance criterion in `goal.md` and in every done task. Tick a criterion (`- [x]`) only when the code shows it is met, and cite where. Untick any task criterion that turns out not to be met. The check fails while any criterion of the goal or a done task is unticked, so the rule must then be `fail`.
-5. Write `governance-final.md` in the goal folder from the same template, with `stage: final`, following the same table and Required Fixes rules as Mode B.
+5. Fill in `governance-final.md` and its Required Fixes the same way as in Mode B.
 6. Set the gate:
    - **Pass:** run `$AISDLC gate set <G-id> final passed`. The goal can now complete.
    - **Fail:** run `$AISDLC gate set <G-id> final failed`. Show the Required Fixes and ask the user how to handle each one:

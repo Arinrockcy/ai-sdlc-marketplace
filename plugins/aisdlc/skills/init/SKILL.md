@@ -29,10 +29,12 @@ Init is idempotent. It only creates what is missing and never overwrites existin
    - **Not available:** tell the user that the stack plugin `aisdlc-<stack>` is not installed. They can install it from the aisdlc marketplace, or continue without it. Without it, core default hooks are used and there are no stack standards. They can also set their own hooks in `.aisdlc/config.json`.
 
 4. **Knowledge graph.** Ask the user to choose one:
-   - **Graphify (recommended for larger codebases).** It builds a code knowledge graph so later steps read less. Install it with `pip install graphifyy && graphify install` (needs Python 3.10+), then build the graph with `/graphify .`. Offer to run the install command, but only with the user's approval. Then run `$AISDLC config set graph.provider graphify`. Graphify writes to `graphify-out/` by default. Ask the user whether their output directory differs, and if it does, run `$AISDLC config set graph.path <dir>`. `/aisdlc:implement` offers to rebuild the graph when a goal completes.
+   - **Graphify (recommended for larger codebases).** A code graph that later steps query instead of searching and reading files, which saves tokens. The workflow runs it code-only: local parsing, no model calls, no API key.
+     1. Run `$AISDLC graph status`. If `installed` or `supported` is false, show the `install` hint. Offer to run an install command, only with the user's approval. The workflow needs only the `graphify` CLI, not `graphify install`.
+     2. Run `$AISDLC graph setup`. It adds `.aisdlc/` to `.graphifyignore`, sets `graph.provider` to `graphify` and builds the graph in `graphify-out/`, which takes seconds on a large codebase. From then on, `$AISDLC graph query "<question>"` refreshes the graph whenever the code has changed.
    - **No graph.** Run `$AISDLC config set graph.provider none`. Skills then find code by searching and reading files directly. `.aisdlc/registry.md` is still kept either way, but it indexes goals and ADRs, not code, so it doesn't replace a graph.
 
-5. **Git hygiene.** `.aisdlc/` is meant to be committed; `.aisdlc/cache/` ignores itself. If Graphify was chosen, suggest adding its output directory (`graph.path`) to `.gitignore`. Do this only if the user agrees.
+5. **Git hygiene.** `.aisdlc/` is meant to be committed; `.aisdlc/cache/` ignores itself. If Graphify was chosen, suggest adding `graphify-out/` to `.gitignore` and committing `.graphifyignore`. Do this only if the user agrees.
 
 6. **Governance.** Run `$AISDLC governance list` and show the user the rules. A new project starts with:
    - GOV-01 to GOV-05, `plan` rules that `/aisdlc:govern <G-id>` checks before implementation

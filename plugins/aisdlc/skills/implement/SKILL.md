@@ -30,9 +30,7 @@ Once `pre_implement` has run, every way this run ends (a finished task in single
    If none are resolved, ask whether to leave the goal blocked or cancel it. To cancel, ask the user why and pass their answer in their own words: `$AISDLC state move <G-id> cancelled --reason "<why>"`. Never write a reason for them. Either way, run `post_implement` and stop.
 4. **First run** (status `pending`):
    1. **Auto-commit.** If `auto_commit` is empty, ask the user whether to commit automatically after each passing task. Save the answer with `$AISDLC goal set <G-id> auto_commit true|false`.
-   2. **Before-goal hook.** Run `$AISDLC hooks resolve before_goal --goal <G-id>` to see what it will run. By default it fetches, checks out and pulls the base branch. If it switches branches, check two things first, and if either applies, tell the user and ask whether to continue or stop:
-      - **Another goal in progress.** Run `$AISDLC goal list --status in-progress`. If another goal is listed, its work may be on the current branch, and the checkout moves the working tree away from it. Don't refuse: the user may work in separate worktrees.
-      - **Planning files left behind.** The goal's folder (`dir` from `goal show`) must exist on the branch the hook checks out. Uncommitted files carry over a checkout. Files committed only on the current branch don't. Check with `git status --porcelain -- <dir>` and `git ls-tree --name-only <base_branch> -- <dir>` (use the `git.base_branch` value).
+   2. **Before-goal hook.** Run `$AISDLC goal preflight <G-id>`. It shows what the hook will run (`before_goal`; by default it fetches, checks out and pulls the base branch). When the hook switches branches, `warnings` says whether another goal is in progress or whether the checkout would leave this goal's planning files behind. If there are warnings, show them and ask whether to continue or stop. Don't refuse: the user may work in separate worktrees.
 
       Then run `$AISDLC hooks run before_goal --goal <G-id>`. If it fails, show the output and ask the user whether to retry, continue anyway or stop.
       Then run `$AISDLC goal show <G-id>` again. If the goal is no longer found, its planning files were committed on a different branch than the one the hook switched to. Tell the user to bring `.aisdlc/` onto this branch (or disable the hook), and stop.
@@ -53,7 +51,7 @@ Repeat these steps for each task:
 2. **Start.** Run `$AISDLC task set <G-id> <T-id> in-progress`, then `$AISDLC hooks run before_task --goal <G-id> --task <T-id>`.
    If `task set` refuses because governance is pending or the plan changed after governance passed, show the message, run `post_implement` and stop. The user runs `/aisdlc:govern <G-id>`, then `/aisdlc:implement <G-id>` again.
 3. **Implement** against the task's acceptance criteria and its linked ADRs.
-   - Read only what the task needs. If `graph.provider` is `graphify`, consult the graph in `graph.path` before searching broadly. It doesn't reflect code changed since it was last built, including earlier tasks of this goal.
+   - Read only what the task needs. Run `$AISDLC graph query "<question>"` before searching broadly. It refreshes the graph when the code changed, including in earlier tasks, and says so when no graph is set up.
    - If the task, its acceptance criteria and its ADRs don't settle a choice you have to make (behavior, a public name, error handling, data shape), and the repo's conventions don't either, stop and ask the user. Record the answer in the task file's Notes.
    - Stay inside the task's scope. If you discover extra work, don't do it. Write it down and add it after this task is done (step 6). Adding a task resets governance, and a task can't be marked done while governance is pending.
 4. **Verify.**
@@ -84,8 +82,7 @@ All tasks are done or skipped at this point.
 1. **Final review.** Run `$AISDLC goal show <G-id>`. If `final_review_required` is true and `gates.final` isn't `passed`, run the govern skill's final review (`/aisdlc:govern <G-id> --final`, Mode C) now. If it fails, show the Required Fixes, handle them as Mode C describes, run `post_implement` and stop.
 2. Run `$AISDLC hooks run after_goal --goal <G-id>`. If it fails, show the output and ask the user whether to retry or finish anyway.
 3. Run `$AISDLC state move <G-id> completed`. The goal completes automatically once every task passes and, if there are final rules, the final review passes. The registry updates itself.
-4. **Graph.** If `graph.provider` is `graphify` (`$AISDLC config get graph`), the graph no longer matches the code this goal changed. Ask the user whether to rebuild it now with `/graphify .`. Rebuild only if they agree.
-5. Run `$AISDLC hooks run post_implement`. Summarize:
+4. Run `$AISDLC hooks run post_implement`. Summarize:
    - the tasks completed
    - any skipped tasks, with their reasons
    - the commits made

@@ -643,3 +643,131 @@ test('cli: goal list filters by several states and rejects unknown ones', () => 
   assert.doesNotMatch(fs.readFileSync(path.join(dir, '.aisdlc/registry-archive.md'), 'utf8'), /G-002/);
   assert.deepEqual(run(['registry', 'sync']).json, { rows: 3, archived: 0, file: '.aisdlc/registry.md', archive: '.aisdlc/registry-archive.md' });
 });
+
+const gitIn = (dir, ...args) => spawnSync('git', ['-c', 'user.email=t@t', '-c', 'user.name=t', ...args], { cwd: dir, encoding: 'utf8' });
+
+// A stand-in for the graphify CLI: the commands the workflow uses, with `update` writing a graph and counting runs.
+function fakeGraphify(dir) {
+  const bin = path.join(dir, 'fake-graphify');
+  fs.writeFileSync(bin, `#!/bin/sh
+case "$1" in
+  --help) printf '  update <path>   re-extract code\\n  query "<question>"  BFS\\n    --budget N  cap\\n' ;;
+  --version) echo "graphify 9.9.9" ;;
+  update) [ -n "$FAKE_NOOP" ] && exit 0; mkdir -p graphify-out && echo '{}' > graphify-out/graph.json && echo run >> graphify-out/runs ;;
+  query) echo "QUERY $2 $3 $4" ;;
+esac
+`, { mode: 0o755 });
+  return bin;
+}
+
+test('cli: registry search finds open and archived goals by keyword prefix', () => {
+  const { run } = project();
+  run(['init']);
+  run(['goal', 'new', 'Add rate limiting to the API']);
+  run(['goal', 'new', 'Export invoices']);
+  run(['state', 'move', 'G-001', 'cancelled', '--reason', 'later']);
+  const r = run(['registry', 'search', 'limit', 'api', 'the']).json;
+  assert.deepEqual(r.terms, ['limit', 'api']);
+  assert.equal(r.matches.length, 1);
+  assert.match(r.matches[0], /\| G-001 \| goal \| Add rate limiting to the API \| cancelled/);
+  assert.match(run(['registry', 'search', 'an']).stderr, /Usage: registry search/);
+});
+
+test('cli: goal list and show name the next step from status and gates', () => {
+  const { run } = project();
+  run(['init']);
+  run(['goal', 'new', 'A']);
+  const next = () => run(['goal', 'show', 'G-001']).json.next;
+  assert.equal(next(), 'challenge');
+  run(['gate', 'set', 'G-001', 'challenge', 'done']);
+  assert.equal(next(), 'adr');
+  run(['adr', 'none', 'G-001', '--reason', 'no decision']);
+  run(['gate', 'set', 'G-001', 'adr', 'done']);
+  assert.equal(run(['goal', 'list']).json[0].next, 'govern');
+  run(['state', 'move', 'G-001', 'cancelled', '--reason', 'x']);
+  assert.equal(next(), 'reopen');
+});
+
+test('cli: governance review writes one row per active rule and fills in failed checks', () => {
+  const { run, dir } = project();
+  run(['init']);
+  run(['goal', 'new', 'A']);
+  const r = run(['governance', 'review', 'G-001']);
+  assert.equal(r.code, 0, r.stderr);
+  assert.deepEqual(r.json.rules.map((x) => x.id), BASELINE_RULES);
+  assert.deepEqual(r.json.rules[0].problems, ['goal has no Problem statement', 'goal has no acceptance criteria']);
+  const text = fs.readFileSync(path.join(dir, r.json.file), 'utf8');
+  assert.match(text, /\| GOV-01 \| fail \| check goal-defined: goal has no Problem statement; goal has no acceptance criteria \|/);
+  assert.match(text, /\| GOV-05 \| {2}\| {2}\|/);
+  assert.match(run(['governance', 'review', 'G-001']).stderr, /already exists\. Run `gate set G-001 govern pending` first/);
+  assert.equal(run(['governance', 'review', 'G-001', '--stage', 'final']).json.rules[0].id, 'GOV-06');
+});
+
+test('cli: goal preflight warns before before_goal switches branches away from work', () => {
+  const { run, dir } = project();
+  gitIn(dir, 'init', '-q', '-b', 'develop');
+  run(['init']);
+  run(['goal', 'new', 'A']);
+  run(['goal', 'new', 'B']);
+  gitIn(dir, 'add', '-A');
+  gitIn(dir, 'commit', '-qm', 'plan');
+  assert.deepEqual(run(['goal', 'preflight', 'G-001']).json.warnings, []);
+
+  gitIn(dir, 'checkout', '-q', '-b', 'feature/c');
+  run(['goal', 'new', 'C']);
+  gitIn(dir, 'add', '-A');
+  gitIn(dir, 'commit', '-qm', 'c');
+  const p = run(['goal', 'preflight', 'G-003']).json;
+  assert.equal(p.switches_branch, true);
+  assert.match(p.warnings.join('\n'), /committed on the current branch but not on develop/);
+
+  run(['config', 'set', 'hooks.before_goal', 'null']);
+  assert.deepEqual(run(['goal', 'preflight', 'G-003']).json, { goal: 'G-003', before_goal: [], switches_branch: false, base_branch: 'develop', other_in_progress: [], warnings: [] });
+});
+
+test('cli: graph setup, freshness and query drive graphify without the model', { skip: process.platform === 'win32' }, () => {
+  const { run, dir } = project();
+  gitIn(dir, 'init', '-q');
+  fs.writeFileSync(path.join(dir, 'app.js'), 'export const a = 1;\n');
+  fs.writeFileSync(path.join(dir, '.gitignore'), 'graphify-out/\nfake-graphify\n');
+  run(['init']);
+  const env = { AISDLC_GRAPHIFY: fakeGraphify(dir) };
+  const runs = () => fs.readFileSync(path.join(dir, 'graphify-out/runs'), 'utf8').split('\n').filter(Boolean).length;
+
+  // Without a graph the workflow keeps going: query tells the agent to search directly.
+  assert.equal(run(['graph', 'query', 'where'], env).json.provider, 'none');
+  assert.equal(run(['graph', 'status'], { AISDLC_GRAPHIFY: path.join(dir, 'missing') }).json.installed, false);
+  assert.match(run(['graph', 'setup'], { AISDLC_GRAPHIFY: path.join(dir, 'missing') }).stderr, /not installed/);
+
+  const setup = run(['graph', 'setup'], env);
+  assert.equal(setup.code, 0, setup.stderr);
+  assert.deepEqual([setup.json.provider, setup.json.version, setup.json.ignore_added, setup.json.updated], ['graphify', '9.9.9', true, true]);
+  assert.equal(fs.readFileSync(path.join(dir, '.graphifyignore'), 'utf8'), '.aisdlc/\n');
+  assert.equal(run(['config', 'get', 'graph.provider']).json, 'graphify');
+  const status = run(['graph', 'status'], env).json;
+  assert.deepEqual([status.supported, status.aisdlc_ignored, status.stale], [true, true, false]);
+
+  // Workflow files and commits of code already in the graph never make it stale; code changes do.
+  run(['goal', 'new', 'A']);
+  gitIn(dir, 'add', '-A');
+  gitIn(dir, 'commit', '-qm', 'all');
+  assert.equal(run(['graph', 'update'], env).json.updated, false);
+  fs.appendFileSync(path.join(dir, 'app.js'), 'export const b = 2;\n');
+  const q = run(['graph', 'query', 'who uses a', '--budget', '400'], env);
+  assert.match(q.stdout, /^\[aisdlc\] graph refreshed in \d+ ms \(code changed since the graph was built\)\nQUERY who uses a --budget 400\n$/);
+  assert.equal(runs(), 2);
+  assert.equal(run(['graph', 'query', 'again'], env).stdout, 'QUERY again --budget 1500\n');
+  assert.match(run(['graph', 'query', 'x', '--budget', 'lots'], env).stderr, /--budget must be/);
+
+  // An update that leaves the graph untouched is reported, and the graph stays stale so the next query retries.
+  fs.appendFileSync(path.join(dir, 'app.js'), 'export const d = 4;\n');
+  assert.match(run(['graph', 'update'], { ...env, FAKE_NOOP: '1' }).json.warning, /left graphify-out\/graph\.json unchanged/);
+  assert.equal(run(['graph', 'status'], env).json.stale, true);
+
+  // A missing graphify never blocks the workflow.
+  fs.appendFileSync(path.join(dir, 'app.js'), 'export const c = 3;\n');
+  assert.match(run(['graph', 'query', 'where'], { AISDLC_GRAPHIFY: path.join(dir, 'missing') }).json.note, /Graph unavailable.*search the code directly/);
+
+  run(['config', 'set', 'graph.path', 'docs/graph']);
+  assert.match(run(['graph', 'status'], env).stderr, /graph\.path "docs\/graph" is not supported/);
+});

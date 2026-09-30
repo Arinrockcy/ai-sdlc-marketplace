@@ -17,7 +17,7 @@ const SCRIPT = path.join(REPO, 'plugins/aisdlc/scripts/aisdlc.mjs');
 const NOT_UNDERSTOOD = /Usage:|Unknown |Invalid |needs a value/;
 
 // Values for placeholders. `<name>` placeholders are keyed by name; `…` after an option by the option.
-const PLACEHOLDERS = { 'G-id': 'G-001', 'T-id': 'T-01', 'ADR-id': 'ADR-001', 'GOV-id': 'GOV-01' };
+const PLACEHOLDERS = { 'G-id': 'G-001', 'T-id': 'T-01', 'ADR-id': 'ADR-001', 'GOV-id': 'GOV-01', keywords: 'rate limiting' };
 const OPTION_SAMPLES = { risk: 'medium', depends: 'T-01', verify: 'true', stage: 'plan', severity: 'must' };
 
 function skillFiles() {
@@ -55,7 +55,8 @@ export function expand(text) {
 function project() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'aisdlc-skills-'));
   // Hooks are disabled: this test is about arguments, not about what the hooks run.
-  const env = { ...process.env, ...Object.fromEntries(HOOK_POINTS.map((p) => [`AISDLC_HOOK_${p.toUpperCase()}`, 'none'])) };
+  // Graphify is pointed at a missing binary, so `graph` commands never run a real one installed on this machine.
+  const env = { ...process.env, AISDLC_GRAPHIFY: path.join(dir, 'no-graphify'), ...Object.fromEntries(HOOK_POINTS.map((p) => [`AISDLC_HOOK_${p.toUpperCase()}`, 'none'])) };
   const run = (args) => spawnSync(process.execPath, [SCRIPT, ...args], { cwd: dir, encoding: 'utf8', env });
   for (const args of [['init'], ['goal', 'new', 'Sample'], ['task', 'new', 'G-001', 'Sample', '--verify', 'true'], ['adr', 'new', 'Sample', '--goal', 'G-001']]) {
     assert.equal(run(args).status, 0);

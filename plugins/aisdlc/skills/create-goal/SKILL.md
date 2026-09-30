@@ -15,8 +15,8 @@ Input: `$ARGUMENTS` is the goal description. If it is empty, ask the user for on
 ## 0. Context (keep it cheap)
 - Run `$AISDLC hooks run pre_create_goal`.
 - Read `.aisdlc/registry.md`. It lists the unfinished goals and every ADR. Reuse existing ADRs and avoid duplicating an unfinished goal.
-- Search `.aisdlc/registry-archive.md` for a few keywords from the description (for example with `grep -i`) to find completed or cancelled goals that overlap it. Don't read the archive whole: it keeps every finished goal, so it only grows.
-- Run `$AISDLC config get graph`. If `provider` is `graphify`, query the graph with the `/graphify` query tooling to find the modules involved, instead of grepping broadly. Read only the parts of `<path>/GRAPH_REPORT.md` you need, where `<path>` is the `path` value, never the whole report or graph file: both grow with the codebase. If the report is missing, or older than the latest commit (`git log -1 --format=%cI`), tell the user and ask whether to rebuild it with `/graphify .` first or go on without it. If `provider` is `none`, read only the files you need.
+- Run `$AISDLC registry search <keywords>` with a few keywords from the description, to find completed or cancelled goals that overlap it. Don't read `registry-archive.md` whole: it keeps every finished goal, so it only grows.
+- Run `$AISDLC graph query "<question>"` to find the modules the goal touches, before searching the code. It refreshes the graph if the code changed, and says so when no graph is set up; then read only the files you need. Never read `graphify-out/` files whole: they grow with the codebase.
 
 ## 1. Unfinished goals (before anything else)
 Run `$AISDLC goal list --status pending,in-progress,blocked` to get the unfinished goals. If there are none, go to section 2. If the archive search found a `cancelled` goal that overlaps the new description, tell the user and offer **Reopen `<G-id>`** below.
@@ -24,13 +24,7 @@ Run `$AISDLC goal list --status pending,in-progress,blocked` to get the unfinish
 Otherwise tell the user which goals are unfinished: ID, title, status and gates. Say whether the new description overlaps any of them. Then ask what to do, one question, with these choices:
 
 - **Merge into `<G-id>`.** Offer this only for `pending` goals, with one choice per pending goal. An in-progress or blocked goal can't be challenged again, so it can't take on new scope.
-- **Finish `<G-id>` first.** Don't create anything. Tell the user the next command for that goal, from its gates and status:
-  - `/aisdlc:challenge <G-id>` if the challenge gate isn't done
-  - `/aisdlc:adr <G-id>` if the adr gate isn't done
-  - `/aisdlc:govern <G-id>` if the govern gate hasn't passed
-  - otherwise `/aisdlc:implement <G-id>`
-
-  They re-run `/aisdlc:create-goal` afterwards. Run `$AISDLC hooks run post_create_goal` and stop.
+- **Finish `<G-id>` first.** Don't create anything. Tell the user the next command for that goal: `/aisdlc:<next> <G-id>`, where `<next>` is the goal's `next` field from `goal list`. They re-run `/aisdlc:create-goal` afterwards. Run `$AISDLC hooks run post_create_goal` and stop.
 - **Cancel `<G-id>`.** For a goal the user no longer wants. Ask the user why, and pass their answer in their own words: `$AISDLC state move <G-id> cancelled --reason "<why>"`. Never write a reason for them. The script keeps every reason in the goal's `## Cancellations` log, and the goal keeps its ID and files and can be reopened later. Then start this section again, because other goals may still be unfinished.
 - **Reopen `<G-id>`.** Offer this only for a `cancelled` goal the description overlaps. Show why it was cancelled (`cancellations` in `goal show`), so the user decides with that in mind. How it reopens depends on whether its work had started (any task not `pending` in `goal show`):
   - **Not started:** run `$AISDLC state move <G-id> pending`, then merge into it as below.

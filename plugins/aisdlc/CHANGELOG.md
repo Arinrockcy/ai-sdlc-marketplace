@@ -2,6 +2,28 @@
 
 All notable changes to the `aisdlc` plugin. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/). Until 1.0.0, a minor version may include breaking changes; each one is listed under **Breaking** with its upgrade step.
 
+## [0.5.0] - 2026-09-30
+
+Work the agent used to do by hand now happens in the script, where it costs no tokens. Graphify is driven by the script as a token saver only: code-only, with no model calls, and refreshed automatically. See [Upgrading to 0.5.0](../../README.md#upgrading) if the project uses Graphify.
+
+### Breaking
+- `graph.path` is no longer supported. Graphify's `update` can only write `graphify-out/` in the project root, so `graph` commands fail while `graph.path` names another directory. Remove it from `.aisdlc/config.json`.
+
+### Added
+- `graph status` reports whether Graphify is installed and new enough (it needs `update`, `query` and `--budget`), whether `.aisdlc/` is kept out of the graph, and whether the graph is stale.
+- `graph setup` adds `.aisdlc/` to `.graphifyignore`, sets `graph.provider` to `graphify`, and builds the graph with `graphify update .`: local parsing, no model calls, no API key.
+- `graph update` rebuilds the graph only when the code changed. It compares a fingerprint of file contents, so committing code already in the graph, or changing `.aisdlc/`, doesn't trigger a rebuild. If Graphify leaves the graph untouched, the graph stays marked stale and a warning says so.
+- `graph query "<question>" [--budget N]` refreshes a stale graph, then answers from it within a token budget (default 1500). Without a graph, or when Graphify is missing or fails, it says so and exits 0, so the workflow falls back to searching the code instead of stopping.
+- `registry search <keywords>` returns the matching rows of `registry.md` and `registry-archive.md`, best match first. It replaces reading or grepping the archive, and works where `grep` doesn't.
+- `goal preflight <G-id>` shows what `before_goal` runs and warns when it switches branches while another goal is in progress, or away from planning files committed only on the current branch.
+- `governance review <G-id> [--stage plan|final]` writes the review file with one row per active rule, fills in rules whose automatic check failed, and returns each rule's text and check result.
+- `goal list` and `goal show` return `next`: the step that moves the goal on (`challenge`, `adr`, `govern`, `implement` or `reopen`).
+
+### Changed
+- `/aisdlc:init` checks and sets up Graphify through `graph status` and `graph setup`, instead of `graphify install` and `/graphify .`.
+- `/aisdlc:create-goal`, `/aisdlc:adr`, `/aisdlc:challenge`, `/aisdlc:implement` and `/aisdlc:govern --final` look up code with `graph query`. `/aisdlc:implement` and `/aisdlc:create-goal` no longer ask about rebuilding the graph.
+- `/aisdlc:create-goal` uses `registry search` and the `next` field. `/aisdlc:implement` uses `goal preflight` in place of its own git checks. `/aisdlc:govern` fills in the file that `governance review` writes, in place of `governance list`, `governance checks` and the template.
+
 ## [0.4.0] - 2026-09-30
 
 Skills read less as a project grows. Before, `/aisdlc:create-goal` read the whole registry and listed every goal, about 64k tokens at 500 goals, most of it finished work. See [Upgrading to 0.4.0](../../README.md#upgrading) if anything outside the workflow reads `registry.md`.

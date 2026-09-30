@@ -9,8 +9,7 @@
     "mode": "single"
   },
   "graph": {
-    "provider": "none",
-    "path": "graphify-out"
+    "provider": "none"
   },
   "hooks": {}
 }

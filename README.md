@@ -79,6 +79,13 @@ See [`plugins/aisdlc/docs/stack-plugin-contract.md`](plugins/aisdlc/docs/stack-p
 
 Each plugin keeps a changelog: [`aisdlc`](plugins/aisdlc/CHANGELOG.md), [`aisdlc-nodejs`](plugins/aisdlc-nodejs/CHANGELOG.md). Breaking changes are listed there with their upgrade step.
 
+### 0.4.0 → 0.5.0 (`aisdlc`)
+
+Update the plugin. Only projects that use Graphify need anything:
+
+1. **Remove `graph.path`** from `.aisdlc/config.json` if it is set. The graph always lives in `graphify-out/`.
+2. **Run `node <plugin>/scripts/aisdlc.mjs graph setup`.** It adds `.aisdlc/` to `.graphifyignore` and rebuilds the graph code-only, so it no longer needs the model or the `/graphify` skill. Commit `.graphifyignore`.
+
 ### 0.3.x → 0.4.0 (`aisdlc`)
 
 Update the plugin, then in each project that already has `.aisdlc/`:
