@@ -15,6 +15,7 @@ Skills must stay agent-neutral markdown, because Codex and Cursor adapters are p
 - `npm test`: runs every `plugins/*/tests/*.test.mjs` with `node:test`.
 - Single test: `node --test --test-name-pattern "hooks: precedence" plugins/aisdlc/tests/aisdlc.test.mjs`
 - `npm run validate`: runs `claude plugin validate` on the marketplace and on each plugin.
+- `npm run bench [-- 10,100,500]`: measures what skills read and what commands print (approximate tokens) as a project grows. Run it when a change touches what skills read or what the script prints.
 - Try the script by hand: `node plugins/aisdlc/scripts/aisdlc.mjs <cmd>` from inside any scratch project.
 
 There is no build step and there are no npm dependencies. Keep it that way.

@@ -136,6 +136,7 @@ Goal files from 0.1.0 need no edits. Missing `gate_final` and `govern_fingerprin
 
 ```
 npm test            # node:test suite for scripts/aisdlc.mjs
+npm run bench       # token cost of registry files and command output at 10/100/500 goals
 npm run validate    # claude plugin validate (marketplace and both plugins)
 ```
 
