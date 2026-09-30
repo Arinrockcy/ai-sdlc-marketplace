@@ -8,6 +8,8 @@ argument-hint: "[G-id]"
 
 `$AISDLC` below means `node "${CLAUDE_PLUGIN_ROOT}/scripts/aisdlc.mjs"`. Run it from the project root.
 
+**Don't assume.** If something this step needs is unclear, missing or under-documented, and neither the code nor the `.aisdlc/` files answer it, ask the user. Never fill a gap with a guess or a silent default. If a rule's wording leaves unclear how it applies to this goal, ask the user how to read it and record that reading in the Notes column.
+
 Run `$AISDLC hooks run post_govern` last in both modes.
 
 ## Mode A: no argument (edit the rules)

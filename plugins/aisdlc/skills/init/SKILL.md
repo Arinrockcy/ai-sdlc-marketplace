@@ -8,6 +8,8 @@ argument-hint: "[--base-branch <branch>]"
 
 `$AISDLC` below means `node "${CLAUDE_PLUGIN_ROOT}/scripts/aisdlc.mjs"`. Run every command from the project root. The script prints JSON.
 
+**Don't assume.** If something this step needs is unclear, missing or under-documented, and neither the code nor the `.aisdlc/` files answer it, ask the user. Never fill a gap with a guess or a silent default. Detected values (stack, base branch, package manager) are suggestions: confirm them with the user.
+
 Init is idempotent. It only creates what is missing and never overwrites existing files, so it is safe to re-run.
 
 ## Steps

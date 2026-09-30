@@ -11,6 +11,8 @@ description: Node.js / TypeScript implementation standards for aisdlc tasks — 
 - the ESLint and Prettier config
 - the test framework in use (jest, vitest, mocha or `node:test`) and where tests live
 
+If these conflict (for example, two test frameworks or mixed module systems) or say nothing about a choice that matters, ask the user instead of picking one.
+
 ## Code
 - Use the module system the project already uses. Never mix `require` and `import` in one package.
 - In TypeScript projects, write TypeScript and respect `strict`. Don't use `any` to silence errors; narrow the type or use `unknown`.

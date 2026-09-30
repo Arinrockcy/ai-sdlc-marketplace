@@ -17,6 +17,7 @@ Prerequisite: `.aisdlc/` must exist. If it doesn't, tell the user to run `/aisdl
    | `package-lock.json` or none | npm |
 
    If `package.json` has a `packageManager` field, it takes priority.
+   If there is no `packageManager` field and more than one lockfile exists, ask the user which manager the project uses.
 
 2. **Test command.** Read `scripts` in `package.json` and pick the default after-task command:
    - If `scripts.test` exists and isn't npm's placeholder (`echo "Error: no test specified" && exit 1`), use `<pm> test` (for npm, `npm test`).

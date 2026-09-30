@@ -8,6 +8,8 @@ argument-hint: "<G-id> [--all]"
 
 `$AISDLC` below means `node "${CLAUDE_PLUGIN_ROOT}/scripts/aisdlc.mjs"`. Run it from the project root.
 
+**Don't assume.** If something this step needs is unclear, missing or under-documented, and neither the code nor the `.aisdlc/` files answer it, ask the user. Never fill a gap with a guess or a silent default. This holds in `--all` mode too: stop and ask.
+
 Input: `$ARGUMENTS` is `<G-id>`, optionally followed by `--all`.
 
 The script enforces the order: a goal only starts once governance passed, a task only starts once its dependencies are done or skipped, and a task can only be marked done after `task verify` passed. If a command refuses, show its message; don't work around it.
@@ -39,6 +41,7 @@ Repeat these steps for each task:
 2. **Start.** Run `$AISDLC task set <G-id> <T-id> in-progress`, then `$AISDLC hooks run before_task --goal <G-id> --task <T-id>`.
 3. **Implement** against the task's acceptance criteria and its linked ADRs.
    - Read only what the task needs. If `graph.provider` is `graphify`, consult the graph before searching broadly.
+   - If the task, its acceptance criteria and its ADRs don't settle a choice you have to make (behavior, a public name, error handling, data shape), and the repo's conventions don't either, stop and ask the user. Record the answer in the task file's Notes.
    - Stay inside the task's scope. If you discover extra work, don't do it. Add it as a new task with `$AISDLC task new … --depends …`, then run `dag write`, and tell the user.
 4. **Verify.**
    - Run `$AISDLC task verify <G-id> <T-id>`. It runs the task's `verify` command and then the `after_task` hook (for example, the stack's test command), and records the result.

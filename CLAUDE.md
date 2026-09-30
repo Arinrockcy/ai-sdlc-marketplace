@@ -60,6 +60,8 @@ These were settled with the repo owner:
 - Branch creation and per-task auto-commit are always **asked**, never forced.
 - The `before_goal` default only pulls the base branch (default `develop`).
 - On a verify failure, `/aisdlc:implement` asks the user to retry, skip or block. It does not auto-retry.
+- No skill assumes. Anything unclear or under-documented that the code doesn't answer is asked, never guessed or defaulted silently.
+- `/aisdlc:create-goal` starts with intake questions about the gaps in the description, before writing the goal. Answers go under Clarifications so challenge doesn't repeat them.
 - `/aisdlc:challenge` is clarification Q&A, one question at a time. It is not a critique.
 - There is no governance waiver.
 - `/aisdlc:implement` runs one task per invocation unless `--all` or `implement.mode: "auto"` is set.

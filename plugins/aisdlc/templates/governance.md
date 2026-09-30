@@ -11,7 +11,7 @@ Edit via `/aisdlc:govern` (no argument). Severity is `must`, `should` or `retire
 | GOV-02 | Every task has its own acceptance criteria and a verify command (or a `manual: <check>` when no command exists). | must |
 | GOV-03 | Task DAG is valid (no cycles, no unknown dependencies). | must |
 | GOV-04 | Architectural decisions are recorded as ADRs, or `adrs: none` has a reason. | must |
-| GOV-05 | Open questions from /challenge are resolved. | must |
+| GOV-05 | Open questions are resolved with the user, and the goal and tasks rest on no unconfirmed assumptions. | must |
 
 ## Definition of Done
 

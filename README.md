@@ -21,13 +21,15 @@ Requires Node.js 18+. Graphify is optional; `/aisdlc:init` offers to set it up.
 
 ```
 /aisdlc:init
-/aisdlc:create-goal <description>   → goal + task DAG (waves, risk-first)
+/aisdlc:create-goal <description>   → intake questions first, then goal + task DAG (waves, risk-first)
 /aisdlc:challenge G-001             → one-question-at-a-time clarification
 /aisdlc:adr G-001                   → ADRs, or "none needed" with a reason
 /aisdlc:govern                      → edit project rules (no argument)
 /aisdlc:govern G-001                → gate: pass or fail against the rules
 /aisdlc:implement G-001 [--all]     → task by task in DAG order, with hooks
 ```
+
+No step works from assumptions. When something is unclear or under-documented and the code doesn't answer it, the skill asks you, and answers are recorded under the goal's Clarifications.
 
 Each step refuses to run until the previous gate passes, and the script enforces it: a goal cannot start before governance passes, tasks run in dependency order, and a task is done only after `task verify` passes. Re-running `challenge` or `adr` resets the governance gate and marks the old review stale.
 

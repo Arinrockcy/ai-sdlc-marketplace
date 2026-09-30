@@ -8,14 +8,17 @@ argument-hint: "<G-id>"
 
 `$AISDLC` below means `node "${CLAUDE_PLUGIN_ROOT}/scripts/aisdlc.mjs"`. Run it from the project root.
 
+**Don't assume.** If something this step needs is unclear, missing or under-documented, and neither the code nor the `.aisdlc/` files answer it, ask the user. Never fill a gap with a guess or a silent default. Resolve a question only with the user's answer, never with your own inference.
+
 Input: `$ARGUMENTS` is the goal ID. If it is missing, run `$AISDLC goal list --status pending` and ask the user which goal.
 
 ## Steps
 1. Run `$AISDLC gate require <G-id> challenge`. If it exits non-zero, show the `problems` and stop.
 2. Run `$AISDLC hooks run pre_challenge`.
-3. Run `$AISDLC goal show <G-id>`. Read `goal.md` and the task files.
+3. Run `$AISDLC goal show <G-id>`. Read `goal.md` and the task files. The Clarifications section already holds the answers from `/aisdlc:create-goal`'s intake questions; don't ask those again.
 4. Build an internal list of ambiguities. Sources:
    - the goal's Risks & Unknowns section
+   - statements in the goal or tasks that rest on an assumption, not on the user's words, a Clarification or the code
    - vague acceptance criteria (not measurable)
    - unclear scope boundaries
    - assumptions hidden in tasks

@@ -31,4 +31,4 @@ updated: {{date}}
 
 ## Clarifications
 
-<!-- Appended by /aisdlc:challenge as Q/A pairs. -->
+<!-- Q/A pairs from /aisdlc:create-goal intake and /aisdlc:challenge. -->
