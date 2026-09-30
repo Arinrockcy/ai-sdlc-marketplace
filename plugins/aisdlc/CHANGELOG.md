@@ -2,6 +2,14 @@
 
 All notable changes to the `aisdlc` plugin. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/). Until 1.0.0, a minor version may include breaking changes; each one is listed under **Breaking** with its upgrade step.
 
+## [0.9.0] - 2026-09-30
+
+### Breaking
+- When the project has several stack markers and `stack` is `auto`, the one stack with a manifest in `.aisdlc/stacks/` is now active. Before, no stack was active, so a Node.js manifest registered in a mixed repo ran no `after_task` gate and `coverage check` passed with a note. See [Upgrading to 0.9.0](../../README.md#upgrading).
+
+### Changed
+- `/aisdlc:init` checks what the stack's register skill installed: `detect-stack` must report that stack as active with its manifest, and `hooks resolve after_task` must come from the stack. It reports an environment override, and asks about a config override.
+
 ## [0.8.0] - 2026-09-30
 
 ### Breaking

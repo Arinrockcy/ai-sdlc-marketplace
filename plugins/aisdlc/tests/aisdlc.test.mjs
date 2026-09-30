@@ -243,6 +243,23 @@ test('cli: hooks resolve uses stack manifest, config and env, with variables', (
   assert.equal(run(['hooks', 'run', 'on_block']).code, 3);
 });
 
+test('cli: in a mixed repo, the one installed stack manifest picks the active stack', () => {
+  const { run, dir } = project();
+  fs.writeFileSync(path.join(dir, 'package.json'), '{}');
+  fs.writeFileSync(path.join(dir, 'pyproject.toml'), '');
+  run(['init']);
+  assert.equal(run(['detect-stack']).json.active, null);
+
+  fs.writeFileSync(path.join(dir, '.aisdlc/stacks/nodejs.json'), JSON.stringify({ name: 'nodejs', hooks: { after_task: { run: 'npm test' } } }));
+  assert.deepEqual(run(['detect-stack']).json, { configured: 'auto', detected: ['nodejs', 'python'], active: 'nodejs', manifest_installed: true, standards_skill: null });
+  assert.deepEqual(run(['hooks', 'resolve', 'after_task']).json.commands, ['npm test']);
+
+  fs.writeFileSync(path.join(dir, '.aisdlc/stacks/python.json'), JSON.stringify({ name: 'python' }));
+  assert.equal(run(['detect-stack']).json.active, null);
+  run(['config', 'set', 'stack', 'python']);
+  assert.equal(run(['detect-stack']).json.active, 'python');
+});
+
 test('cli: after_goal checks the coverage report, then pushes the goal branch, by default', () => {
   const { run } = project();
   run(['init']);

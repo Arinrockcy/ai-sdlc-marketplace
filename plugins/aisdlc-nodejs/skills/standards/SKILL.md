@@ -70,6 +70,7 @@ If these conflict (for example, a `type` that disagrees with `runtime.module_typ
 - Keep tests deterministic: control clocks and randomness, avoid order dependence, and make performance tests use stable workloads and tolerant documented limits.
 - With ES modules, Jest's `jest.mock` hoisting does not apply. Import `jest` from `@jest/globals`, prefer passing mocks through class constructors, and mock a module only with `jest.unstable_mockModule` followed by a dynamic `import()`.
 - Jest is the default runner. A user-selected alternative is acceptable only when it provides the same test layers and enforceable coverage. Global branches, functions, lines, and statements must each be at least 80%; existing higher thresholds win.
+- Every new source module gets a test that loads it. The coverage configuration counts all source files (Jest's `collectCoverageFrom` or the runner's equivalent), so an untested module lowers the percentage. Don't narrow that configuration to leave a file out. node:test can't count a file no test loads, so there this rule is checked in review.
 - Coverage is a floor, not the test design target. Give extra attention to negative cases, boundary conditions, concurrency, resource cleanup, and measured performance risks.
 - The `after_task` hook must run `lint` and `test:coverage` after every task. Both commands and the task's own `verify` command must pass before the task is done.
 - Every `test:coverage` run writes the report named in the manifest's `quality_gate.coverage_report`. The core `after_goal` hook checks that report before the goal completes: it must exist, be newer than every file the goal changed, and meet the thresholds. Don't remove its reporter, move its output, or commit the coverage directory.
@@ -80,6 +81,7 @@ If these conflict (for example, a `type` that disagrees with `runtime.module_typ
 - [ ] Public `.d.ts` files match the implementation (editor hints only; no TypeScript tooling added to a JavaScript project)
 - [ ] Mock-based unit tests and non-mocked data-driven tests pass
 - [ ] Coverage is at least 80% for branches, functions, lines, and statements; custom library replacements are 100%
+- [ ] Every new source module has a test that loads it, and the coverage configuration still counts every source file
 - [ ] The last `test:coverage` run wrote the coverage report named in `quality_gate.coverage_report`
 - [ ] Negative, boundary, cleanup, and relevant performance cases are covered
 - [ ] Static constants are grouped by purpose under the nearest `constant/`; deployable configuration is validated in `config/`

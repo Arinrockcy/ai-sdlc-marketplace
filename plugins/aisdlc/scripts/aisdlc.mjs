@@ -386,10 +386,14 @@ function detectStacks(root) {
   return found;
 }
 
+// With several stacks detected and none configured, a single installed manifest decides: registering a stack is
+// explicit, and without it a mixed repo would silently lose that stack's hooks and coverage check.
 function activeStack(root, cfg = loadConfig(root)) {
   if (cfg.stack && cfg.stack !== 'auto') return cfg.stack;
   const found = detectStacks(root);
-  return found.length === 1 ? found[0] : null;
+  if (found.length === 1) return found[0];
+  const installed = found.filter((s) => fs.existsSync(path.join(aisdlcDir(root), 'stacks', `${s}.json`)));
+  return installed.length === 1 ? installed[0] : null;
 }
 
 function loadStackManifest(root, stack) {

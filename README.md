@@ -5,7 +5,7 @@ A stack-agnostic AI-SDLC workflow for Claude Code. Its skills are written in neu
 | Plugin | Purpose |
 |--------|---------|
 | `aisdlc` | Core workflow: init, create-goal, challenge, adr, govern, implement |
-| `aisdlc-nodejs` | Node.js stack: Node.js 24+, ES modules by default, class-oriented coding standards and required ESLint/coverage hooks |
+| `aisdlc-nodejs` | Node.js stack: Node.js 24+, ES modules, coding standards, ESLint/coverage gates, and Express REST API/auth practices |
 
 ## Install
 
@@ -14,6 +14,8 @@ A stack-agnostic AI-SDLC workflow for Claude Code. Its skills are written in neu
 /plugin install aisdlc@aisdlc-marketplace
 /plugin install aisdlc-nodejs@aisdlc-marketplace   # optional, per stack
 ```
+
+The Node.js plugin also provides `/aisdlc-nodejs:express-rest-api` for designing, implementing, or reviewing Express endpoints, authentication, authorization, sessions/tokens, and production API security.
 
 Requires Node.js 24+. Graphify is optional; `/aisdlc:init` offers to set it up.
 
@@ -85,6 +87,14 @@ See [`plugins/aisdlc/docs/stack-plugin-contract.md`](plugins/aisdlc/docs/stack-p
 ## Upgrading
 
 Each plugin keeps a changelog: [`aisdlc`](plugins/aisdlc/CHANGELOG.md), [`aisdlc-nodejs`](plugins/aisdlc-nodejs/CHANGELOG.md). Breaking changes are listed there with their upgrade step.
+
+### 0.8.x → 0.9.0 (`aisdlc`)
+
+This only affects a project with more than one stack marker (for example `package.json` and `pyproject.toml`), `stack` set to `auto` in `.aisdlc/config.json`, and exactly one manifest in `.aisdlc/stacks/`. Until now no stack was active there, so `after_task` ran nothing and `coverage check` passed with a note. Now that manifest's stack is active, so its task gate and coverage check run. Run `aisdlc.mjs detect-stack` to see which stack is active. To choose another one, set `stack` in `.aisdlc/config.json`.
+
+### `aisdlc-nodejs` 0.4.0 → 0.4.1
+
+Nothing is required. Re-run `/aisdlc-nodejs:register` to pick up the fixes: coverage then counts source files that no test loads (Jest's `collectCoverageFrom`), so the percentage can drop. A node:test setup gets a `test:coverage` command that creates the report folder on a fresh clone and fails below the thresholds. Commit the tooling changes on their own.
 
 ### 0.7.x → 0.8.0 (`aisdlc`)
 

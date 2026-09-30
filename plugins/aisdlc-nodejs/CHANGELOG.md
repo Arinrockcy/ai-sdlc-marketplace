@@ -2,6 +2,23 @@
 
 All notable changes to the `aisdlc-nodejs` plugin. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/).
 
+## [0.5.0] - 2026-09-30
+
+### Added
+- `express-rest-api` skill for production Express API design and review, including HTTP contracts, middleware/error boundaries, authentication and authorization, sessions and tokens, abuse resistance, operations, and security-focused tests.
+- Focused references for REST semantics, OAuth/OIDC and JWT or cookie-based authentication, object/tenant authorization, API keys and webhooks, Express proxy/CORS/parser hardening, observability, and graceful shutdown.
+
+## [0.4.1] - 2026-09-30
+
+### Fixed
+- `register`'s node:test command creates the `coverage` folder first. Node doesn't create it, so on a fresh clone the command failed before running a test.
+- `register`'s node:test command enforces the thresholds with `--test-coverage-lines`, `--test-coverage-branches` and `--test-coverage-functions`. Before, it passed at any coverage.
+- `register` makes coverage count every source file (Jest's `collectCoverageFrom`, Vitest's `coverage.include`, c8/nyc `--all`). Before, a module no test loaded was left out of the percentage. For node:test, which can't count such files, it tells the user.
+- `register` checks that the workflow will use its manifest: the `stack` setting in a mixed repo, and an `AISDLC_HOOK_AFTER_TASK` override in the environment, besides the config override.
+
+### Changed
+- `standards` requires a test that loads every new source module, and forbids narrowing the coverage configuration to leave a file out.
+
 ## [0.4.0] - 2026-09-30
 
 ### Breaking
