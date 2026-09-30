@@ -187,6 +187,40 @@ For `/dependency-guardian:audit fix`:
 7. Run the repository’s existing tests and `deps:check`.
 8. Report failures without automatically reverting unrelated or user-owned changes.
 
+## Reuse from aisdlc
+
+`guardian.mjs` is vendored into adopting repositories, so it cannot import `plugins/aisdlc/scripts/aisdlc.mjs`. Copy the patterns below instead. Look up each one by its function name, because line numbers drift.
+
+### Works without changes
+
+- `plugins/aisdlc/tests/release.test.mjs` iterates `marketplace.json`, so it checks the new plugin's version and changelog as soon as the marketplace entry exists.
+- `npm test` globs `plugins/*/tests/*.test.mjs`, so it picks up the new tests.
+- `npm run validate` lists each plugin by name. Add `claude plugin validate plugins/dependency-guardian`.
+
+### Copy and adapt
+
+From `plugins/aisdlc/scripts/aisdlc.mjs`:
+
+- `MIN_NODE_MAJOR` and `nodeVersionError`: the Node.js 24+ check. Copy as is.
+- The last line's `main()` guard (`path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)`): lets tests import the scanner's functions without running it. Copy as is.
+- `OPTIONS` and `parseArgs`: strict option parsing, where an unknown option fails. aisdlc's options all take a value, so extend it for the boolean flags (`--ci`, `--json`, `--signatures`) and for the `--` separator that `preflight` takes.
+- `UserError`, `fail` and the `try`/`catch` in `main`: print a clean error and exit. aisdlc exits `1`, but configuration, registry and assessment errors here must exit `2`.
+- `git()`: runs a command with `execFileSync` and no shell. Call `npm` the same way in preflight, so shell expansions are never evaluated.
+- `runCommands`: shows the `mkdtempSync` and `rmSync` pattern for temporary directories. In preflight, wrap the cleanup in `try`/`finally` so temporary data is always removed.
+
+From `plugins/aisdlc/tests/aisdlc.test.mjs`:
+
+- `project()`: creates a temporary project and runs the script in it, with parsed JSON output. Adapt it to build npm fixture projects, and add a fake `npm` on `PATH` for the deterministic tests.
+
+### Not reusable
+
+- `parseDoc` and `formatDoc` parse flat markdown frontmatter. The guardian's configuration is JSON.
+- `resolveHook` and `defaults/hooks.json` are aisdlc workflow hooks, which are shell commands run at workflow steps. They are not Claude Code hooks. The order `resolveHook` uses (environment variable, then project config, then built-in default) is still a reasonable precedence for guardian configuration.
+
+### Build from scratch
+
+The repository has no Claude Code `PreToolUse` or `PostToolUse` hooks yet. The plugin's hook registration, the parsing of the hook's JSON input on stdin, and its allow, deny and ask responses are all new, with nothing in this repository to copy.
+
 ## Test Plan
 
 - Unit-test npm audit normalization using npm 9, 10, and 11 JSON fixtures.
