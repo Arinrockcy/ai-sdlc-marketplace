@@ -1572,10 +1572,11 @@ const commands = {
   },
 };
 
-// The test count a runner prints last: node:test's `# tests/pass/fail N` lines, or a line such as Jest's
+// The test count a runner prints last: node:test's `tests/pass/fail N` lines (`# ` in TAP, `ℹ ` in its default
+// spec reporter), or a line such as Jest's
 // "Tests: 12 passed, 12 total", Mocha's "12 passing" or pytest's "12 passed in 0.5s".
 export function testCounts(output) {
-  const tap = [...output.matchAll(/^# (tests|pass|fail) (\d+)$/gm)];
+  const tap = [...output.matchAll(/^(?:#|ℹ) (tests|pass|fail) (\d+)$/gm)];
   if (tap.length) return Object.entries(Object.fromEntries(tap.map((m) => [m[1], m[2]]))).map(([k, n]) => `${k} ${n}`).join(', ');
   const line = output.split('\n').reverse().find((l) => /\b\d+ (passed|passing|failed|failing)\b/i.test(l));
   return line ? line.replace(/\x1b\[[0-9;]*m/g, '').replace(/^[\s=]+|[\s=]+$/g, '').replace(/\s+/g, ' ').slice(0, 120) : '';

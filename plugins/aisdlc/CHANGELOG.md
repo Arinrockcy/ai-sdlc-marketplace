@@ -2,6 +2,11 @@
 
 All notable changes to the `aisdlc` plugin. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/). Until 1.0.0, a minor version may include breaking changes; each one is listed under **Breaking** with its upgrade step.
 
+## [0.6.1] - 2026-09-30
+
+### Fixed
+- `task verify` records the test count for node:test's default spec reporter (`ℹ tests 21`), not only its TAP output (`# tests 21`). Before, `verify_evidence` for a node:test suite held only the exit codes.
+
 ## [0.6.0] - 2026-09-30
 
 Fixes from a dogfood run, in which a plan review took seven rounds to pass. Reviews now separate questions for the user from real defects, carry earlier answers forward, and see the stack's standards at plan time. See [Upgrading to 0.6.0](../../README.md#upgrading) for a review that hasn't passed yet.

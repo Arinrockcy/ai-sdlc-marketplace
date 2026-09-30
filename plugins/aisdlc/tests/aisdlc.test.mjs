@@ -931,6 +931,7 @@ test('cli: task verify records a one-line summary of what ran', () => {
 
   assert.equal(testCounts('  12 passing (40ms)\n'), '12 passing (40ms)');
   assert.equal(testCounts('==== 5 passed, 1 skipped in 0.2s ====\n'), '5 passed, 1 skipped in 0.2s');
+  assert.equal(testCounts('✔ a (1ms)\nℹ tests 21\nℹ suites 0\nℹ pass 21\nℹ fail 0\nℹ file | line %\n'), 'tests 21, pass 21, fail 0');
   assert.equal(testCounts('built\n'), '');
 });
 
