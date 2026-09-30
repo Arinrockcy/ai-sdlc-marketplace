@@ -1,0 +1,10 @@
+{
+  "name": "nodejs",
+  "version": "0.1.0",
+  "detect": ["package.json"],
+  "standards_skill": "aisdlc-nodejs:standards",
+  "hooks": {
+    "before_task": null,
+    "after_task": { "run": "npm test --if-present" }
+  }
+}

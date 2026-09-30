@@ -1,0 +1,8 @@
+{
+  "name": "aisdlc-nodejs",
+  "version": "0.1.0",
+  "description": "Node.js stack plugin for aisdlc: coding/testing standards and lifecycle hook overrides.",
+  "author": {
+    "name": "arin"
+  }
+}

@@ -1,0 +1,23 @@
+{
+  "name": "aisdlc-marketplace",
+  "description": "Stack-agnostic AI-SDLC workflow (goals, clarification, ADRs, governance gates, dependency-ordered implementation) plus pluggable stack plugins.",
+  "owner": {
+    "name": "arin"
+  },
+  "plugins": [
+    {
+      "name": "aisdlc",
+      "source": "./plugins/aisdlc",
+      "description": "Core AI-SDLC workflow: init, create-goal, challenge, adr, govern, implement.",
+      "version": "0.1.0",
+      "category": "development"
+    },
+    {
+      "name": "aisdlc-nodejs",
+      "source": "./plugins/aisdlc-nodejs",
+      "description": "Node.js stack plugin for aisdlc: coding/testing standards and lifecycle hook overrides.",
+      "version": "0.1.0",
+      "category": "development"
+    }
+  ]
+}

@@ -1,0 +1,16 @@
+{
+  "version": 1,
+  "stack": "auto",
+  "git": {
+    "base_branch": "develop",
+    "branch_prefix": "feature/"
+  },
+  "implement": {
+    "mode": "single"
+  },
+  "graph": {
+    "provider": "none",
+    "path": "graphify-out"
+  },
+  "hooks": {}
+}

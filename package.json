@@ -1,0 +1,9 @@
+{
+  "name": "aisdlc-marketplace",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test plugins/*/tests/*.test.mjs",
+    "validate": "claude plugin validate . && claude plugin validate plugins/aisdlc && claude plugin validate plugins/aisdlc-nodejs"
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "before_goal": { "run": "git fetch origin {base_branch} && git checkout {base_branch} && git pull --ff-only origin {base_branch}" },
+  "after_goal": null,
+  "before_task": null,
+  "after_task": { "use": "stack" },
+  "on_block": null,
+  "pre_init": null, "post_init": null,
+  "pre_create_goal": null, "post_create_goal": null,
+  "pre_challenge": null, "post_challenge": null,
+  "pre_adr": null, "post_adr": null,
+  "pre_govern": null, "post_govern": null,
+  "pre_implement": null, "post_implement": null
+}
