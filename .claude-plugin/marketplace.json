@@ -15,8 +15,8 @@
     {
       "name": "aisdlc-nodejs",
       "source": "./plugins/aisdlc-nodejs",
-      "description": "Node.js stack plugin for aisdlc: coding/testing standards and lifecycle hook overrides.",
-      "version": "0.1.0",
+      "description": "Node.js stack plugin for aisdlc: class-oriented coding standards and lint/coverage quality gates.",
+      "version": "0.2.0",
       "category": "development"
     }
   ]

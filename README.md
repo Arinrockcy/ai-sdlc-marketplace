@@ -5,7 +5,7 @@ A stack-agnostic AI-SDLC workflow for Claude Code. Its skills are written in neu
 | Plugin | Purpose |
 |--------|---------|
 | `aisdlc` | Core workflow: init, create-goal, challenge, adr, govern, implement |
-| `aisdlc-nodejs` | Node.js stack: standards skill and test-hook overrides |
+| `aisdlc-nodejs` | Node.js stack: class-oriented coding standards and required ESLint/coverage hooks |
 
 ## Install
 
@@ -78,6 +78,14 @@ See [`plugins/aisdlc/docs/stack-plugin-contract.md`](plugins/aisdlc/docs/stack-p
 ## Upgrading
 
 Each plugin keeps a changelog: [`aisdlc`](plugins/aisdlc/CHANGELOG.md), [`aisdlc-nodejs`](plugins/aisdlc-nodejs/CHANGELOG.md). Breaking changes are listed there with their upgrade step.
+
+### `aisdlc-nodejs` 0.1.0 → 0.2.0
+
+The Node.js after-task gate now requires two package scripts: `lint` and `test:coverage`. The latter must enforce at least 80% coverage for branches, functions, lines and statements (Jest is the default).
+
+1. Re-run `/aisdlc-nodejs:register` and select the lint/test tooling. It will ask before adding or changing third-party packages.
+2. Add or update the two scripts and their configuration as prompted. Existing stricter coverage thresholds should stay unchanged.
+3. Commit the updated `.aisdlc/stacks/nodejs.json`, `package.json`, lockfile and tool configuration.
 
 ### 0.4.0 → 0.5.0 (`aisdlc`)
 
