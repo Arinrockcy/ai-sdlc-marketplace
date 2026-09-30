@@ -22,7 +22,7 @@ Add `plugins/dependency-guardian/` with:
 - Claude plugin manifest, version `0.1.0`.
 - One `audit` skill, automatically discoverable and callable as `/dependency-guardian:audit`.
 - Claude `PreToolUse` and `PostToolUse` hooks.
-- A dependency-free Node.js 18+ scanner.
+- A dependency-free Node.js 24+ scanner.
 - A versioned npm policy catalog, tests, and changelog.
 - Marketplace entry and README installation/usage documentation.
 
