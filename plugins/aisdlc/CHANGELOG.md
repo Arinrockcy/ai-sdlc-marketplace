@@ -2,6 +2,11 @@
 
 All notable changes to the `aisdlc` plugin. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/). Until 1.0.0, a minor version may include breaking changes; each one is listed under **Breaking** with its upgrade step.
 
+## [0.5.1] - 2026-09-30
+
+### Fixed
+- An edit that changes no symbol or edge in the code graph (a comment, or a change inside a function body) no longer leaves the graph stale for good. Graphify leaves `graph.json` untouched in that case because the graph is still current. `graph update` used to take that as a refused write: it warned, and every later `graph query` ran the rebuild again (about 1.7 s on a 100-file repo). Now it marks the graph fresh.
+
 ## [0.5.0] - 2026-09-30
 
 Work the agent used to do by hand now happens in the script, where it costs no tokens. Graphify is driven by the script as a token saver only: code-only, with no model calls, and refreshed automatically. See [Upgrading to 0.5.0](../../README.md#upgrading) if the project uses Graphify.

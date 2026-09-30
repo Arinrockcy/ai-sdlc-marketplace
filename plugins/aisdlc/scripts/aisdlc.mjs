@@ -574,11 +574,14 @@ function graphUpdate(root) {
   const started = Date.now();
   const graphFile = path.join(root, GRAPH_DIR, 'graph.json');
   const before = fs.existsSync(graphFile) ? fs.statSync(graphFile).mtimeMs : null;
-  try { graphify(root, ['update', '.']); } catch (e) {
+  let log;
+  try { log = graphify(root, ['update', '.']); } catch (e) {
     fail(`graphify update failed: ${String(e.stderr || e.message).trim().split('\n').slice(-3).join(' ')}`);
   }
-  // Graphify can decline to overwrite a graph (for example one that shrank); never mark such a graph fresh.
-  if (!fs.existsSync(graphFile) || fs.statSync(graphFile).mtimeMs === before) {
+  // An edit that changes no symbol or edge (a comment, a function body) leaves graph.json untouched but current.
+  const current = /No code-graph topology changes detected/.test(log);
+  // Graphify can also decline to overwrite a graph (for example one that shrank); never mark such a graph fresh.
+  if (!current && (!fs.existsSync(graphFile) || fs.statSync(graphFile).mtimeMs === before)) {
     return { updated: false, warning: `graphify update left ${GRAPH_DIR}/graph.json unchanged, so it may be out of date. Run \`graphify update . --force\` to rebuild it.` };
   }
   const stamp = codeStamp(root);

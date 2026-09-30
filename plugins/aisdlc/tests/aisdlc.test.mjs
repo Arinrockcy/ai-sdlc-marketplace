@@ -653,7 +653,8 @@ function fakeGraphify(dir) {
 case "$1" in
   --help) printf '  update <path>   re-extract code\\n  query "<question>"  BFS\\n    --budget N  cap\\n' ;;
   --version) echo "graphify 9.9.9" ;;
-  update) [ -n "$FAKE_NOOP" ] && exit 0; mkdir -p graphify-out && echo '{}' > graphify-out/graph.json && echo run >> graphify-out/runs ;;
+  update) [ -n "$FAKE_SAME" ] && echo '[graphify watch] No code-graph topology changes detected; outputs left untouched.' && exit 0
+    [ -n "$FAKE_NOOP" ] && exit 0; mkdir -p graphify-out && echo '{}' > graphify-out/graph.json && echo run >> graphify-out/runs ;;
   query) echo "QUERY $2 $3 $4" ;;
 esac
 `, { mode: 0o755 });
@@ -763,6 +764,11 @@ test('cli: graph setup, freshness and query drive graphify without the model', {
   fs.appendFileSync(path.join(dir, 'app.js'), 'export const d = 4;\n');
   assert.match(run(['graph', 'update'], { ...env, FAKE_NOOP: '1' }).json.warning, /left graphify-out\/graph\.json unchanged/);
   assert.equal(run(['graph', 'status'], env).json.stale, true);
+
+  // An edit that leaves the graph's topology unchanged still makes the graph current, so queries stop rebuilding.
+  const same = run(['graph', 'update'], { ...env, FAKE_SAME: '1' }).json;
+  assert.deepEqual([same.updated, same.warning], [true, undefined]);
+  assert.equal(run(['graph', 'status'], env).json.stale, false);
 
   // A missing graphify never blocks the workflow.
   fs.appendFileSync(path.join(dir, 'app.js'), 'export const c = 3;\n');

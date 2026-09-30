@@ -1,6 +1,6 @@
 {
   "name": "aisdlc",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "description": "Stack-agnostic AI-SDLC workflow: init, create-goal, challenge, adr, govern, implement.",
   "author": {
     "name": "arin"
