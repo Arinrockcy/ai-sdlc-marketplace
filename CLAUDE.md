@@ -19,6 +19,14 @@ Skills must stay agent-neutral markdown, because Codex and Cursor adapters are p
 
 There is no build step and there are no npm dependencies. Keep it that way.
 
+## Releases
+
+Each plugin has its own version and `CHANGELOG.md` (Keep a Changelog format).
+- When a change alters a plugin's behavior, add it to that plugin's changelog.
+- Bump the version in the plugin's `.claude-plugin/plugin.json` and in `.claude-plugin/marketplace.json`, and keep them identical. `npm test` enforces this.
+- Changes that make existing `.aisdlc/` state refuse, fail or mean something different go under **Breaking**, with an upgrade step in the README's Upgrading section.
+- Before 1.0.0, a breaking change bumps the minor version.
+
 ## Architecture
 
 **Split of responsibilities.** Skills (`plugins/aisdlc/skills/*/SKILL.md`) handle the judgment and the user interaction. `plugins/aisdlc/scripts/aisdlc.mjs` handles every deterministic state change:

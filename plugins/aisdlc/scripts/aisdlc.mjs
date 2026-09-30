@@ -618,6 +618,7 @@ function requireStep(root, goal, step) {
   } else if (step === 'implement' || step === 'final') {
     if (goal.status === 'completed') problems.push('goal is already completed');
     if (d.gate_govern !== 'passed') problems.push(`run /aisdlc:govern ${goal.id} first (gate_govern = ${d.gate_govern || 'pending'})`);
+    else if (!d.govern_fingerprint) problems.push(`governance passed before aisdlc 0.2.0, which records what it reviewed; re-run /aisdlc:govern ${goal.id}`);
     else if (d.govern_fingerprint !== planFingerprint(root, goal)) {
       problems.push(`the plan (goal, tasks, linked ADRs or plan rules) changed after governance passed; re-run /aisdlc:govern ${goal.id}`);
     }

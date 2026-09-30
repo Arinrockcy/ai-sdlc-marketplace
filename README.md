@@ -72,9 +72,37 @@ Core defaults: `before_goal` pulls the base branch (`git.base_branch`, default `
 
 See [`plugins/aisdlc/docs/stack-plugin-contract.md`](plugins/aisdlc/docs/stack-plugin-contract.md) to add a stack.
 
+## Upgrading
+
+Each plugin keeps a changelog: [`aisdlc`](plugins/aisdlc/CHANGELOG.md), [`aisdlc-nodejs`](plugins/aisdlc-nodejs/CHANGELOG.md). Breaking changes are listed there with their upgrade step.
+
+### 0.1.0 → 0.2.0 (`aisdlc`)
+
+Update the plugin, then in each project that already has `.aisdlc/`:
+
+1. **Re-govern goals that already passed.** Run `/aisdlc:govern <G-id>` for every goal that is past governance but not completed. 0.2.0 records what each review covered, and older reviews have no such record. Until you re-govern, `/aisdlc:implement` refuses with "governance passed before aisdlc 0.2.0". The earlier review is archived as `governance-review.stale-N.md`. Completed goals need nothing.
+2. **Turn on the automatic checks (recommended).** Your `governance.md` keeps working as it is: every rule becomes a `plan` rule with no check. To get the checks new projects start with, run `/aisdlc:govern` and ask it to set these checks (or run the script's `governance set <id> check <name>` yourself):
+
+   | Rule | Check |
+   |------|-------|
+   | GOV-01 | `goal-defined` |
+   | GOV-02 | `tasks-verifiable` |
+   | GOV-03 | `dag-valid` |
+   | GOV-04 | `adr-recorded` |
+
+   The first change rewrites the rules table in the new `ID | Rule | Severity | Stage | Check` format and keeps the rest of the file. With checks on, re-governing fails any goal whose `goal.md` lacks a Problem or acceptance criteria, or whose tasks lack acceptance criteria or a `verify` command. Fill those in first.
+3. **Optionally add final-stage rules.** `/aisdlc:govern` now offers a rule catalog. Rules with stage `final` are checked against the finished code before a goal completes. Goals in progress pick them up automatically, so their completion then needs `/aisdlc:govern <G-id> --final`.
+4. **Check any tooling around `.aisdlc/`.** If you have scripts that depend on the following, update them:
+   - `governance-review.stale.md`: archives are now numbered.
+   - `task verify` passing a task that has no verify command and no `after_task` hook: it now requires `--evidence`.
+
+Goal files from 0.1.0 need no edits. Missing `gate_final` and `govern_fingerprint` fields count as pending.
+
 ## Development
 
 ```
 npm test            # node:test suite for scripts/aisdlc.mjs
 npm run validate    # claude plugin validate (marketplace and both plugins)
 ```
+
+When a change alters a plugin's behavior, add an entry under that plugin's `CHANGELOG.md` and bump its version in both its `plugin.json` and `.claude-plugin/marketplace.json`. Breaking changes (anything that makes existing `.aisdlc/` state refuse, fail or mean something else) go under **Breaking**, with an upgrade step in the README. `npm test` checks that the versions and changelogs agree.

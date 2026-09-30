@@ -372,6 +372,13 @@ test('cli: a plan change after governance passed needs a new review; progress do
   edit(task, (s) => s.replace('It works fast', 'It works'));
   assert.equal(stale(), '');
 
+  // A goal governed before fingerprints existed (0.1.0) is told why it must be re-governed.
+  const goalFile = path.join(goalDir, 'goal.md');
+  const governed = fs.readFileSync(goalFile, 'utf8');
+  edit(goalFile, (s) => s.replace(/^govern_fingerprint: .*$/m, 'govern_fingerprint:'));
+  assert.match(stale(), /governance passed before aisdlc 0.2.0/);
+  fs.writeFileSync(goalFile, governed);
+
   // A new task resets governance and archives the review without overwriting older archives.
   const added = run(['task', 'new', 'G-001', 'Extra', '--verify', 'true']);
   assert.deepEqual(added.json.notes, [
