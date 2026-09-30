@@ -440,23 +440,40 @@ function listAdrs(root) {
   });
 }
 
+const ARCHIVED_STATES = ['completed', 'cancelled'];
+
+// registry.md indexes unfinished goals and every ADR; finished goals go to registry-archive.md.
+// Skills read registry.md whole, so it only grows with open work; the archive is searched, not read.
 function registrySync(root) {
   const base = aisdlcDir(root);
-  const rel = (f) => path.relative(base, f);
   const cell = (v) => (Array.isArray(v) ? v.join(', ') : formatScalar(v)).replace(/\|/g, '\\|') || '-';
-  const rows = [];
+  const open = [];
+  const archived = [];
   for (const g of listGoals(root)) {
     const p = goalProgress(listTasks(g));
     const status = p.total ? `${g.status} (${p.done}/${p.total})` : g.status;
     const links = g.data.adrs === 'none' ? 'adr: none' : cell(g.data.adrs);
-    rows.push(`| ${g.id} | goal | ${cell(g.title)} | ${status} | ${rel(g.file)} | ${links} | ${cell(g.data.updated)} |`);
+    (ARCHIVED_STATES.includes(g.status) ? archived : open).push(`| ${g.id} | goal | ${cell(g.title)} | ${status} | ${links} | ${cell(g.data.updated)} |`);
   }
   for (const a of listAdrs(root)) {
-    rows.push(`| ${a.id} | adr | ${cell(a.title)} | ${cell(a.status)} | ${rel(a.file)} | ${cell(a.goals)} | ${cell(a.date)} |`);
+    open.push(`| ${a.id} | adr | ${cell(a.title)} | ${cell(a.status)} | ${cell(a.goals)} | ${cell(a.date)} |`);
   }
-  const header = fs.readFileSync(path.join(TEMPLATES, 'registry.md'), 'utf8').trimEnd();
-  fs.writeFileSync(path.join(base, 'registry.md'), `${header}\n${rows.join('\n')}${rows.length ? '\n' : ''}`);
-  return rows.length;
+  const write = (name, rows) => {
+    const header = fs.readFileSync(path.join(TEMPLATES, name), 'utf8').trimEnd();
+    fs.writeFileSync(path.join(base, name), `${header}\n${rows.join('\n')}${rows.length ? '\n' : ''}`);
+  };
+  write('registry.md', open);
+  write('registry-archive.md', archived);
+  return { rows: open.length, archived: archived.length };
+}
+
+// `--status a,b` matches any of the listed states. `allowed` rejects typos, which would otherwise match nothing.
+function statusFilter(value, allowed) {
+  if (value === undefined) return () => true;
+  const wanted = value.split(',').map((x) => x.trim()).filter(Boolean);
+  const bad = allowed ? wanted.filter((x) => !allowed.includes(x)) : [];
+  if (!wanted.length || bad.length) fail(`Unknown status "${bad.join(', ') || value}". Valid: ${(allowed || []).join(', ') || 'any status name'}, comma-separated.`);
+  return (status) => wanted.includes(status);
 }
 
 // ---------- governance ----------
@@ -848,7 +865,8 @@ const commands = {
       return out({ id, dir: path.relative(root, dir), file: path.relative(root, path.join(dir, 'goal.md')) });
     }
     if (action === 'list') {
-      return out(listGoals(root).filter((g) => !opts.status || g.status === opts.status).map((g) => ({
+      const match = statusFilter(opts.status, GOAL_STATES);
+      return out(listGoals(root).filter((g) => match(g.status)).map((g) => ({
         id: g.id, title: g.title, status: g.status, dir: path.relative(root, g.dir),
         gates: gatesOf(g),
       })));
@@ -1080,7 +1098,13 @@ const commands = {
       registrySync(root);
       return out({ goal: goalId, adrs: 'none', reason: opts.reason, notes });
     }
-    fail('Usage: adr new|link|none');
+    if (action === 'list') {
+      const match = statusFilter(opts.status);
+      return out(listAdrs(root).filter((a) => match(a.status)).map((a) => ({
+        id: a.id, title: a.title, status: a.status, goals: Array.isArray(a.goals) ? a.goals : [], file: path.relative(root, a.file),
+      })));
+    }
+    fail('Usage: adr new|link|none|list');
   },
 
   hooks([action, point], opts) {
@@ -1137,7 +1161,8 @@ const commands = {
   registry([action]) {
     if (action !== 'sync') fail('Usage: registry sync');
     const root = findRoot();
-    out({ rows: registrySync(root), file: path.relative(root, path.join(aisdlcDir(root), 'registry.md')) });
+    const rel = (name) => path.relative(root, path.join(aisdlcDir(root), name));
+    out({ ...registrySync(root), file: rel('registry.md'), archive: rel('registry-archive.md') });
   },
 };
 

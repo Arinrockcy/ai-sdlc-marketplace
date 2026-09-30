@@ -195,8 +195,9 @@ test('cli: full gated flow from init to completed', () => {
   assert.equal(run(['task', 'set', 'G-001', 'T-01', 'pending']).code, 1, 'completed goals are frozen');
   assert.match(run(['state', 'move', 'G-001', 'in-progress']).stderr, /completed; it can no longer move/);
 
-  const registry = fs.readFileSync(path.join(dir, '.aisdlc/registry.md'), 'utf8');
-  assert.match(registry, /\| G-001 \| goal \| User login \| completed \(2\/2\) \| goals\/completed\/G-001-user-login\/goal.md \| adr: none \|/);
+  // Finished goals leave registry.md for the archive, so the file skills read only grows with open work.
+  assert.doesNotMatch(fs.readFileSync(path.join(dir, '.aisdlc/registry.md'), 'utf8'), /G-001/);
+  assert.match(fs.readFileSync(path.join(dir, '.aisdlc/registry-archive.md'), 'utf8'), /\| G-001 \| goal \| User login \| completed \(2\/2\) \| adr: none \|/);
 });
 
 test('cli: adr new links both directions', () => {
@@ -205,7 +206,9 @@ test('cli: adr new links both directions', () => {
   run(['goal', 'new', 'Billing']);
   assert.equal(run(['adr', 'new', 'Use', 'Stripe', '--goal', 'G-001']).json.id, 'ADR-001');
   assert.deepEqual(run(['goal', 'show', 'G-001']).json.adrs, ['ADR-001']);
-  assert.match(fs.readFileSync(path.join(dir, '.aisdlc/registry.md'), 'utf8'), /\| ADR-001 \| adr \| Use Stripe \| proposed \|.*\| G-001 \|/);
+  assert.match(fs.readFileSync(path.join(dir, '.aisdlc/registry.md'), 'utf8'), /\| ADR-001 \| adr \| Use Stripe \| proposed \| G-001 \|/);
+  assert.deepEqual(run(['adr', 'list']).json, [{ id: 'ADR-001', title: 'Use Stripe', status: 'proposed', goals: ['G-001'], file: '.aisdlc/adr/ADR-001-use-stripe.md' }]);
+  assert.deepEqual(run(['adr', 'list', '--status', 'accepted,superseded']).json, []);
 });
 
 test('cli: hooks resolve uses stack manifest, config and env, with variables', () => {
@@ -522,7 +525,7 @@ test('cli: goals can be cancelled with a reason, are frozen while cancelled, and
   assert.deepEqual([cancel.json.from, cancel.json.to, cancel.json.reason], ['in-progress', 'cancelled', 'superseded by G-002']);
   const show = run(['goal', 'show', 'G-001']).json;
   assert.equal(show.cancel_reason, 'superseded by G-002');
-  assert.match(fs.readFileSync(path.join(dir, '.aisdlc/registry.md'), 'utf8'), /\| G-001 \| goal \| Feature \| cancelled \(0\/1\) \| goals\/cancelled\//);
+  assert.match(fs.readFileSync(path.join(dir, '.aisdlc/registry-archive.md'), 'utf8'), /\| G-001 \| goal \| Feature \| cancelled \(0\/1\) \|/);
 
   // A cancelled goal takes no changes until it is reopened.
   for (const args of [
@@ -620,4 +623,23 @@ test('cli: every cancellation reason is kept in the goal, through reopens', () =
   assert.equal(show.cancellations.length, 3);
   const text = fs.readFileSync(path.join(dir, show.dir, 'goal.md'), 'utf8');
   assert.match(text, /## Clarifications[\s\S]*\n## Cancellations\n\n- .*budget cut\n- .*reopened as pending\n- .*replaced by vendor tool\n$/);
+});
+
+test('cli: goal list filters by several states and rejects unknown ones', () => {
+  const { run, dir } = project();
+  run(['init']);
+  for (const title of ['A', 'B', 'C']) run(['goal', 'new', title]);
+  run(['state', 'move', 'G-002', 'cancelled', '--reason', 'not needed']);
+  const ids = (status) => run(['goal', 'list', '--status', status]).json.map((g) => g.id);
+  assert.deepEqual(ids('pending,in-progress,blocked'), ['G-001', 'G-003']);
+  assert.deepEqual(ids('cancelled'), ['G-002']);
+  assert.match(run(['goal', 'list', '--status', 'pending,done']).stderr, /Unknown status "done"/);
+
+  // A reopened goal moves back from the archive into registry.md.
+  const registry = () => fs.readFileSync(path.join(dir, '.aisdlc/registry.md'), 'utf8');
+  assert.doesNotMatch(registry(), /G-002/);
+  run(['state', 'move', 'G-002', 'pending']);
+  assert.match(registry(), /\| G-002 \| goal \| B \| pending \|/);
+  assert.doesNotMatch(fs.readFileSync(path.join(dir, '.aisdlc/registry-archive.md'), 'utf8'), /G-002/);
+  assert.deepEqual(run(['registry', 'sync']).json, { rows: 3, archived: 0, file: '.aisdlc/registry.md', archive: '.aisdlc/registry-archive.md' });
 });
