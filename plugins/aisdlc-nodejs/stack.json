@@ -1,8 +1,12 @@
 {
   "name": "nodejs",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "detect": ["package.json"],
   "standards_skill": "aisdlc-nodejs:standards",
+  "runtime": {
+    "node": ">=24",
+    "module_type": "module"
+  },
   "quality_gate": {
     "linter": "eslint",
     "test_runner": "jest",

@@ -5,7 +5,7 @@ A stack-agnostic AI-SDLC workflow for Claude Code. Its skills are written in neu
 | Plugin | Purpose |
 |--------|---------|
 | `aisdlc` | Core workflow: init, create-goal, challenge, adr, govern, implement |
-| `aisdlc-nodejs` | Node.js stack: class-oriented coding standards and required ESLint/coverage hooks |
+| `aisdlc-nodejs` | Node.js stack: Node.js 24+, ES modules by default, class-oriented coding standards and required ESLint/coverage hooks |
 
 ## Install
 
@@ -15,7 +15,7 @@ A stack-agnostic AI-SDLC workflow for Claude Code. Its skills are written in neu
 /plugin install aisdlc-nodejs@aisdlc-marketplace   # optional, per stack
 ```
 
-Requires Node.js 18+. Graphify is optional; `/aisdlc:init` offers to set it up.
+Requires Node.js 24+. Graphify is optional; `/aisdlc:init` offers to set it up.
 
 ## Workflow (strict and gated)
 
@@ -81,11 +81,26 @@ See [`plugins/aisdlc/docs/stack-plugin-contract.md`](plugins/aisdlc/docs/stack-p
 
 Each plugin keeps a changelog: [`aisdlc`](plugins/aisdlc/CHANGELOG.md), [`aisdlc-nodejs`](plugins/aisdlc-nodejs/CHANGELOG.md). Breaking changes are listed there with their upgrade step.
 
+### 0.6.x → 0.7.0 (`aisdlc`)
+
+Upgrade Node.js to 24 or later wherever the workflow runs, including CI. The script refuses older versions. Project state needs no changes.
+
 ### 0.5.x → 0.6.0 (`aisdlc`)
 
 Update the plugin. Then, in each project with a review that hasn't passed yet (`governance-review.md` or `governance-final.md`), escape each literal `|` in a note as `\|`. `gate set … passed` now refuses a row with more than three cells, because the text after an unescaped `|` was silently dropped.
 
 Goal files need no edits. The new `## Standards deviations` section is optional, so older goals simply don't have it. The first `graph query` after the update rebuilds the graph once, because `.gitignore` no longer counts as code.
+
+### `aisdlc-nodejs` 0.2.1 → 0.3.0
+
+The Node.js stack now requires Node.js 24 or later and defaults to ES modules.
+
+1. Upgrade to Node.js 24+ locally and in CI.
+2. Re-run `/aisdlc-nodejs:register`. It sets `engines.node` to `>=24` once you approve, asks whether to use ES modules or keep CommonJS, and writes the choice to `runtime.module_type` in `.aisdlc/stacks/nodejs.json`. Until then, `/aisdlc:implement` stops at the standards step, because the manifest has no `runtime`.
+3. Keeping CommonJS is fine: pick it when asked. Moving an existing CommonJS codebase to ES modules is offered as its own goal.
+4. Commit the manifest, `package.json` and any version pin on their own.
+
+In a JavaScript project, TypeScript tooling that was added only to check `.d.ts` files is no longer required. Remove it if you like.
 
 ### `aisdlc-nodejs` 0.2.0 → 0.2.1
 

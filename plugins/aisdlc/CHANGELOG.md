@@ -2,6 +2,11 @@
 
 All notable changes to the `aisdlc` plugin. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/). Until 1.0.0, a minor version may include breaking changes; each one is listed under **Breaking** with its upgrade step.
 
+## [0.7.0] - 2026-09-30
+
+### Breaking
+- The script needs Node.js 24 or later. On an older Node it exits with `aisdlc needs Node.js 24 or later` before running any command.
+
 ## [0.6.1] - 2026-09-30
 
 ### Fixed

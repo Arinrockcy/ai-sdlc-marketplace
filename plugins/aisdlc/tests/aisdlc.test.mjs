@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { analyzeDag, goalProgress, resolveHook, parseDoc, formatDoc, testCounts } from '../scripts/aisdlc.mjs';
+import { analyzeDag, goalProgress, resolveHook, parseDoc, formatDoc, testCounts, nodeVersionError } from '../scripts/aisdlc.mjs';
 
 const SCRIPT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../scripts/aisdlc.mjs');
 
@@ -60,6 +60,12 @@ function governedGoal(run, dir, tasks) {
   writeReview(path.join(dir, run(['goal', 'show', 'G-001']).json.dir), 'G-001');
   assert.equal(run(['gate', 'set', 'G-001', 'govern', 'passed']).code, 0);
 }
+
+test('runtime: the script refuses Node.js older than 24', () => {
+  assert.equal(nodeVersionError('24.0.0'), null);
+  assert.equal(nodeVersionError('25.1.0'), null);
+  assert.equal(nodeVersionError('22.12.0'), 'aisdlc needs Node.js 24 or later; this is Node.js 22.12.0.');
+});
 
 test('frontmatter round-trips scalars and arrays', () => {
   const text = '---\nid: G-001\ntitle: Login: SSO\nadrs: [ADR-001, ADR-002]\nbranch:\n---\n# body\n';

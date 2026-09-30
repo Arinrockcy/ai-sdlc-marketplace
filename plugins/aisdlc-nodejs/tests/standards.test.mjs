@@ -31,5 +31,12 @@ function verifyQualityFloor() {
   });
 }
 
+function verifyRuntimeDefaults() {
+  const runtime = readJson('stack.json').runtime;
+
+  assert.deepEqual(runtime, { node: '>=24', module_type: 'module' });
+}
+
 test('nodejs stack runs lint and coverage as separate after-task gates', verifyAfterTaskGates);
 test('nodejs stack declares the complete 80 percent quality floor', verifyQualityFloor);
+test('nodejs stack requires Node.js 24+ and defaults to ES modules', verifyRuntimeDefaults);

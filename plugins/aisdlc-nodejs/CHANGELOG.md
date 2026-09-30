@@ -2,6 +2,16 @@
 
 All notable changes to the `aisdlc-nodejs` plugin. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/).
 
+## [0.3.0] - 2026-09-30
+
+### Breaking
+- Node.js 24 or later is required. `register` stops on an older `node`, and asks to set `engines.node` (and any `.nvmrc`, `.node-version` or Volta pin) to 24 or later.
+- ES modules (`"type": "module"`) are the default. `register` asks when a project has no `type` or uses CommonJS, and CommonJS stays only as the user's recorded override. The choice goes in the manifest's new `runtime.module_type`, and `standards` stops with a request to re-register when a manifest has no `runtime`.
+
+### Changed
+- Declaration files are for editor completion only. JavaScript projects keep a handwritten `.d.ts` for each public module, but get no TypeScript tooling, `checkJs` or type-check gate, and ESLint no longer lints declarations there.
+- `standards` covers Node 24 built-ins, file extensions in ESM import specifiers, `import.meta.dirname`, and mocking under Jest with ES modules. `register` runs Jest with `--experimental-vm-modules` for ES module projects.
+
 ## [0.2.1] - 2026-09-30
 
 ### Changed

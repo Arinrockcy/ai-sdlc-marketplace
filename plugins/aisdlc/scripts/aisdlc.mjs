@@ -10,6 +10,7 @@ import { execSync, execFileSync, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 
+const MIN_NODE_MAJOR = 24;
 const PLUGIN_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const TEMPLATES = path.join(PLUGIN_ROOT, 'templates');
 const DEFAULT_HOOKS = path.join(PLUGIN_ROOT, 'defaults', 'hooks.json');
@@ -1639,7 +1640,17 @@ function nextStep(root, g) {
 
 const gatesOf = (g) => ({ challenge: g.data.gate_challenge, adr: g.data.gate_adr, govern: g.data.gate_govern, final: g.data.gate_final || 'pending' });
 
+export function nodeVersionError(version) {
+  const major = Number(version.split('.')[0]);
+  return major >= MIN_NODE_MAJOR ? null : `aisdlc needs Node.js ${MIN_NODE_MAJOR} or later; this is Node.js ${version}.`;
+}
+
 function main() {
+  const versionError = nodeVersionError(process.versions.node);
+  if (versionError) {
+    process.stderr.write(`aisdlc: ${versionError}\n`);
+    process.exit(1);
+  }
   const [cmd, ...argv] = process.argv.slice(2);
   if (!cmd || !commands[cmd]) {
     process.stderr.write(`Usage: aisdlc.mjs <${Object.keys(commands).join('|')}> ...\n`);
