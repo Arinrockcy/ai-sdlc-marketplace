@@ -528,8 +528,10 @@ test('cli: goals can be cancelled with a reason, are frozen while cancelled, and
   for (const args of [
     ['task', 'set', 'G-001', 'T-01', 'in-progress'], ['task', 'set', 'G-001', 'T-01', 'pending'], ['task', 'new', 'G-001', 'B'],
     ['gate', 'set', 'G-001', 'challenge', 'done'], ['goal', 'set', 'G-001', 'branch', 'x'], ['adr', 'none', 'G-001', '--reason', 'x'],
-    ['adr', 'new', 'Pick a DB', '--goal', 'G-001'], ['state', 'move', 'G-001', 'in-progress'],
+    ['adr', 'new', 'Pick a DB', '--goal', 'G-001'],
   ]) assert.match(run(args).stderr, /cancelled; reopen it with `state move G-001 pending`/, args.join(' '));
+  assert.match(run(['state', 'move', 'G-001', 'in-progress']).stderr, /From cancelled it can move to: pending, blocked/);
+  assert.match(run(['state', 'move', 'G-001', 'blocked']).stderr, /None of G-001's tasks has started; reopen it with `state move G-001 pending`/);
   assert.equal(fs.readdirSync(path.join(dir, '.aisdlc/adr')).filter((f) => f.startsWith('ADR-')).length, 0, 'a refused adr new writes nothing');
   for (const step of ['challenge', 'adr', 'govern', 'implement']) {
     assert.match(run(['gate', 'require', 'G-001', step]).json.problems.join(), /goal is cancelled/, step);
@@ -571,4 +573,51 @@ test('cli: criteria-met needs every goal and done-task criterion ticked; skipped
   // T-02 skipped: its criteria are not expected to be met. Status is set by hand here; the gated path is tested elsewhere.
   edit(path.join(dir, g.tasks[1].file), (s) => s.replace('status: pending', 'status: skipped'));
   assert.equal(met().ok, true);
+});
+
+test('cli: goal moves follow the transition table, and a started goal never goes back to pending', () => {
+  const { run, dir } = project();
+  run(['init']);
+  governedGoal(run, dir, [['A'], ['B']]);
+  const move = (to, ...rest) => run(['state', 'move', 'G-001', to, ...rest]);
+  assert.match(move('blocked').stderr, /G-001 is pending; it can't move to blocked\. From pending it can move to: in-progress, cancelled/);
+  assert.match(move('pending').stderr, /can't move to pending/);
+
+  // Undoing an accidental start is fine while no task has started.
+  assert.equal(move('in-progress').code, 0);
+  assert.equal(move('pending').code, 0);
+  assert.equal(move('in-progress').code, 0);
+
+  run(['task', 'set', 'G-001', 'T-01', 'in-progress']);
+  assert.match(move('pending').stderr, /can't go back to pending: T-01 already started\. Add tasks for new scope/);
+  assert.equal(move('blocked').code, 0);
+  assert.match(move('pending').stderr, /From blocked it can move to: in-progress, cancelled/);
+  assert.match(run(['gate', 'require', 'G-001', 'challenge']).json.problems.join(), /goal is blocked; challenge only runs on pending goals/);
+
+  // A cancelled goal whose work started reopens as blocked, and resumes through the implement gate.
+  assert.equal(move('cancelled', '--reason', 'on hold').code, 0);
+  assert.match(move('pending').stderr, /T-01 already started\. Reopen it with `state move G-001 blocked`/);
+  assert.equal(move('blocked').code, 0);
+  assert.equal(run(['goal', 'show', 'G-001']).json.status, 'blocked');
+  assert.equal(move('in-progress').code, 0, 'the Cancellations log is not part of the reviewed plan');
+});
+
+test('cli: every cancellation reason is kept in the goal, through reopens', () => {
+  const { run, dir } = project();
+  run(['init']);
+  plannedGoal(run, dir, [['A']]);
+  const today = new Date().toISOString().slice(0, 10);
+  assert.match(run(['state', 'move', 'G-001', 'cancelled', '--reason', '   ']).stderr, /--reason is required/);
+  run(['state', 'move', 'G-001', 'cancelled', '--reason', 'budget cut']);
+  run(['state', 'move', 'G-001', 'pending']);
+  const reopened = run(['goal', 'show', 'G-001']).json;
+  assert.equal(reopened.cancel_reason, undefined, 'the current reason only shows while cancelled');
+  assert.deepEqual(reopened.cancellations, [`${today}: cancelled while pending: budget cut`, `${today}: reopened as pending`]);
+
+  run(['state', 'move', 'G-001', 'cancelled', '--reason', 'replaced by vendor tool']);
+  const show = run(['goal', 'show', 'G-001']).json;
+  assert.equal(show.cancel_reason, 'replaced by vendor tool');
+  assert.equal(show.cancellations.length, 3);
+  const text = fs.readFileSync(path.join(dir, show.dir, 'goal.md'), 'utf8');
+  assert.match(text, /## Clarifications[\s\S]*\n## Cancellations\n\n- .*budget cut\n- .*reopened as pending\n- .*replaced by vendor tool\n$/);
 });

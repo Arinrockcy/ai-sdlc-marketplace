@@ -14,7 +14,16 @@ const TEMPLATES = path.join(PLUGIN_ROOT, 'templates');
 const DEFAULT_HOOKS = path.join(PLUGIN_ROOT, 'defaults', 'hooks.json');
 
 const GOAL_STATES = ['pending', 'in-progress', 'blocked', 'completed', 'cancelled'];
-// Completed and cancelled goals take no more changes. A cancelled goal can be reopened with `state move <G-id> pending`.
+// Allowed `state move` targets per status. A goal is pending only while none of its tasks has started, so a
+// started goal never goes back to pending: it can't be re-challenged or merged into. Completed is final; a
+// cancelled goal reopens as pending, or as blocked when its work had started. Gates and task checks still apply.
+const GOAL_MOVES = {
+  pending: ['in-progress', 'cancelled'],
+  'in-progress': ['pending', 'blocked', 'completed', 'cancelled'],
+  blocked: ['in-progress', 'cancelled'],
+  completed: [],
+  cancelled: ['pending', 'blocked'],
+};
 const TASK_STATES = ['pending', 'in-progress', 'done', 'blocked', 'skipped'];
 const TASK_SATISFIED = new Set(['done', 'skipped']);
 const RISK_RANK = { high: 0, medium: 1, low: 2 };
@@ -539,6 +548,24 @@ function section(body, re) {
   return r ? lines.slice(r[0] + 1, r[1]).join('\n').replace(/<!--[\s\S]*?-->/g, '').trim() : null;
 }
 
+// Adds a line at the end of a `## ` section, creating the section at the end of the body if it is missing.
+function appendToSection(body, re, heading, line) {
+  const lines = bodyLines(body);
+  const r = sectionRange(lines, re);
+  if (r) {
+    let end = r[1];
+    while (end > r[0] + 1 && !lines[end - 1].trim()) end--;
+    lines.splice(end, 0, line);
+  } else {
+    while (lines.length && !lines.at(-1).trim()) lines.pop();
+    lines.push('', `## ${heading}`, '', line, '');
+  }
+  return lines.join('\n');
+}
+
+// The goal's cancel and reopen log. The script writes it; it is history, not plan.
+const CANCELLATIONS = /^cancellations\b/i;
+
 function withoutSection(body, re) {
   const lines = bodyLines(body);
   const r = sectionRange(lines, re);
@@ -602,13 +629,14 @@ function runChecks(root, goal, rules) {
 }
 
 // Hash of what the plan review judged: goal text, planned task fields and text, linked ADR statuses and plan rules.
-// Progress (status, verify results, ticked boxes, task Notes) is left out, so doing the work never invalidates it.
+// Progress (status, verify results, ticked boxes, task Notes) and the goal's Cancellations log are left out, so doing
+// the work, or pausing it, never invalidates it.
 function planFingerprint(root, goal) {
   const norm = (body) => bodyLines(body).map((l) => l.replace(/\[[xX]\]/g, '[ ]').trimEnd()).join('\n').trim();
   const g = readDoc(goal.file);
   const adrStatus = new Map(listAdrs(root).map((a) => [a.id, a.status]));
   const plan = {
-    goal: [g.data.title, g.data.adrs, g.data.adr_reason, norm(g.body)],
+    goal: [g.data.title, g.data.adrs, g.data.adr_reason, norm(withoutSection(g.body, CANCELLATIONS))],
     tasks: listTasks(goal).map((t) => [t.id, t.title, t.depends_on, t.risk, String(t.verify ?? ''), norm(withoutSection(readDoc(t.file).body, /^notes\b/i))]),
     adrs: (Array.isArray(g.data.adrs) ? g.data.adrs : []).map((id) => [id, adrStatus.get(id)]),
     rules: activeRules(root, 'plan').map((r) => [r.id, r.rule, r.severity, r.check]),
@@ -623,7 +651,7 @@ function requireStep(root, goal, step) {
   const problems = [];
   if (goal.status === 'cancelled') problems.push(`goal is cancelled; reopen it with \`state move ${goal.id} pending\` first`);
   if (step === 'challenge') {
-    if (!['pending', 'blocked', 'cancelled'].includes(goal.status)) problems.push(`goal is ${goal.status}; challenge only runs on pending or blocked goals`);
+    if (!['pending', 'cancelled'].includes(goal.status)) problems.push(`goal is ${goal.status}; challenge only runs on pending goals`);
   } else if (step === 'adr') {
     if (goal.status === 'completed') problems.push('goal is already completed');
     if (d.gate_challenge !== 'done') problems.push('run /aisdlc:challenge first (gate_challenge != done)');
@@ -834,6 +862,7 @@ const commands = {
         final_review_required: activeRules(root, 'final').length > 0,
         governance: { plan: reviewSummary(root, g, 'plan'), final: reviewSummary(root, g, 'final') },
         ...(g.status === 'cancelled' && { cancel_reason: g.data.cancel_reason || null }),
+        cancellations: listItems(section(readDoc(g.file).body, CANCELLATIONS)),
         adrs: g.data.adrs, auto_commit: g.data.auto_commit, branch: g.data.branch,
         suggested_branch: hookContext(root, loadConfig(root), { goal: g.id }).goal_branch,
         tasks: tasks.map((t) => ({ id: t.id, title: t.title, status: t.status, risk: t.risk, depends_on: t.depends_on, verify: t.verify, file: path.relative(root, t.file) })),
@@ -864,7 +893,16 @@ const commands = {
     const root = findRoot();
     const g = getGoal(root, id);
     if (g.status === 'completed') fail(`${id} is completed; it can no longer move.`);
-    if (g.status === 'cancelled' && status !== 'pending') fail(`${id} is cancelled; reopen it with \`state move ${id} pending\` first.`);
+    if (!GOAL_MOVES[g.status].includes(status)) {
+      fail(`${id} is ${g.status}; it can't move to ${status}. From ${g.status} it can move to: ${GOAL_MOVES[g.status].join(', ')}.`);
+    }
+    const started = listTasks(g).filter((t) => t.status !== 'pending').map((t) => t.id);
+    if (status === 'pending' && started.length) {
+      fail(`${id} can't go back to pending: ${started.join(', ')} already started. ${g.status === 'cancelled'
+        ? `Reopen it with \`state move ${id} blocked\` and resume it with /aisdlc:implement ${id}.`
+        : 'Add tasks for new scope (governance runs again), or cancel the goal and create a new one.'}`);
+    }
+    if (g.status === 'cancelled' && status === 'blocked' && !started.length) fail(`None of ${id}'s tasks has started; reopen it with \`state move ${id} pending\`.`);
     if (status === 'in-progress' || status === 'completed') {
       const problems = requireStep(root, g, 'implement');
       if (problems.length) fail(`Cannot move ${id} to ${status}:\n- ${problems.join('\n- ')}`);
@@ -879,9 +917,17 @@ const commands = {
       fs.mkdirSync(path.dirname(dest), { recursive: true });
       fs.renameSync(g.dir, dest);
     }
-    const patch = { status };
-    if (status === 'cancelled' || g.data.cancel_reason) patch.cancel_reason = status === 'cancelled' ? reason : '';
-    updateDoc(path.join(dest, 'goal.md'), patch);
+    const doc = readDoc(path.join(dest, 'goal.md'));
+    Object.assign(doc.data, { status, updated: today() });
+    // cancel_reason holds the current reason; the Cancellations log keeps every cancel and reopen for good.
+    if (status === 'cancelled') {
+      doc.data.cancel_reason = reason;
+      doc.body = appendToSection(doc.body, CANCELLATIONS, 'Cancellations', `- ${today()}: cancelled while ${g.status}: ${reason}`);
+    } else if (g.status === 'cancelled') {
+      doc.data.cancel_reason = '';
+      doc.body = appendToSection(doc.body, CANCELLATIONS, 'Cancellations', `- ${today()}: reopened as ${status}`);
+    }
+    writeDoc(path.join(dest, 'goal.md'), doc);
     registrySync(root);
     out({ id, from: g.status, to: status, dir: path.relative(root, dest), ...(reason && { reason }) });
   },

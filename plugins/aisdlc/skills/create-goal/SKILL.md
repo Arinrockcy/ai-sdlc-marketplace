@@ -30,8 +30,10 @@ Otherwise tell the user which goals are unfinished: ID, title, status and gates.
   - otherwise `/aisdlc:implement <G-id>`
 
   They re-run `/aisdlc:create-goal` afterwards. Run `$AISDLC hooks run post_create_goal` and stop.
-- **Cancel `<G-id>`.** For a goal the user no longer wants. Ask for the reason, then run `$AISDLC state move <G-id> cancelled --reason "<why>"`. The goal keeps its ID and files, and `$AISDLC state move <G-id> pending` reopens it later. Then start this section again, because other goals may still be unfinished.
-- **Reopen `<G-id>`.** Offer this only for a `cancelled` goal the description overlaps. Run `$AISDLC state move <G-id> pending`, then merge into it as below.
+- **Cancel `<G-id>`.** For a goal the user no longer wants. Ask the user why, and pass their answer in their own words: `$AISDLC state move <G-id> cancelled --reason "<why>"`. Never write a reason for them. The script keeps every reason in the goal's `## Cancellations` log, and the goal keeps its ID and files and can be reopened later. Then start this section again, because other goals may still be unfinished.
+- **Reopen `<G-id>`.** Offer this only for a `cancelled` goal the description overlaps. Show why it was cancelled (`cancellations` in `goal show`), so the user decides with that in mind. How it reopens depends on whether its work had started (any task not `pending` in `goal show`):
+  - **Not started:** run `$AISDLC state move <G-id> pending`, then merge into it as below.
+  - **Started:** a started goal can't take on new scope. Run `$AISDLC state move <G-id> blocked`, tell the user to resume it with `/aisdlc:implement <G-id>` and to re-run `/aisdlc:create-goal` for whatever it doesn't cover. Run `$AISDLC hooks run post_create_goal` and stop.
 - **Create a separate goal.** Continue with section 2. The new goal waits in `pending` alongside the others.
 
 Never pick for the user, even when the overlap looks obvious.

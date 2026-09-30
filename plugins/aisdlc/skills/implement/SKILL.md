@@ -25,8 +25,9 @@ Once `pre_implement` has run, every way this run ends (a finished task in single
 ## 1. Gate and setup
 1. Run `$AISDLC gate require <G-id> implement`. If it exits non-zero, show the `problems` and stop. Never bypass the gate.
 2. Run `$AISDLC hooks run pre_implement`, then `$AISDLC goal show <G-id>`.
-3. **Resuming a blocked goal** (status `blocked`): list each blocked task with its `reason`. Ask the user which blockers are resolved. For each resolved one, run `$AISDLC task set <G-id> <T-id> pending`, then run `$AISDLC state move <G-id> in-progress`.
-   If none are resolved, ask whether to leave the goal blocked or cancel it. To cancel, ask for the reason and run `$AISDLC state move <G-id> cancelled --reason "<why>"`. Either way, run `post_implement` and stop.
+3. **Resuming a blocked goal** (status `blocked`): if no task is blocked, the goal was reopened after a cancel. Ask the user whether to resume it. If they agree, run `$AISDLC state move <G-id> in-progress`. If the gate refuses because the plan changed, show the message, run `post_implement` and stop; the user runs `/aisdlc:govern <G-id>` first.
+   Otherwise list each blocked task with its `reason`. Ask the user which blockers are resolved. For each resolved one, run `$AISDLC task set <G-id> <T-id> pending`, then run `$AISDLC state move <G-id> in-progress`.
+   If none are resolved, ask whether to leave the goal blocked or cancel it. To cancel, ask the user why and pass their answer in their own words: `$AISDLC state move <G-id> cancelled --reason "<why>"`. Never write a reason for them. Either way, run `post_implement` and stop.
 4. **First run** (status `pending`):
    1. **Auto-commit.** If `auto_commit` is empty, ask the user whether to commit automatically after each passing task. Save the answer with `$AISDLC goal set <G-id> auto_commit true|false`.
    2. **Before-goal hook.** Run `$AISDLC hooks resolve before_goal --goal <G-id>` to see what it will run. By default it fetches, checks out and pulls the base branch. If it switches branches, check two things first, and if either applies, tell the user and ask whether to continue or stop:

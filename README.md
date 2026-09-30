@@ -37,7 +37,8 @@ Each step refuses to run until the previous gate passes, and the script enforces
 - Tasks run in dependency order.
 - A task is done only after `task verify` passes.
 - A goal with `final`-stage rules completes only after the final review passes. New projects start with one: GOV-06, every acceptance criterion met.
-- A goal you no longer want is cancelled with a reason (`aisdlc.mjs state move G-001 cancelled --reason "…"`), and reopened with `state move G-001 pending`. Completed goals can't change.
+- A goal you no longer want is cancelled with a reason (`aisdlc.mjs state move G-001 cancelled --reason "…"`). Every reason stays in the goal's `## Cancellations` log, even after the goal is reopened. It reopens with `state move G-001 pending`, or `state move G-001 blocked` if its work had started. Completed goals can't change.
+- A goal is `pending` only until its first task starts. After that, new scope goes in as new tasks (governance runs again), or in a new goal.
 
 Governance is tied to what it reviewed:
 - Rules can name automatic checks (`goal-defined`, `tasks-verifiable`, `dag-valid`, `adr-recorded`, `questions-resolved`, `criteria-met`) that a review can't overrule.
@@ -88,6 +89,7 @@ Update the plugin, then in each project that already has `.aisdlc/`:
    - `node <plugin>/scripts/aisdlc.mjs governance add "The finished code meets every acceptance criterion of the goal and of each done task." --severity must --stage final --check criteria-met`. Goals in progress then need the final review (`/aisdlc:govern <G-id> --final`, which `/aisdlc:implement` runs) before they complete.
 3. **Run `/aisdlc:init` again.** It creates the `goals/cancelled/` folder. `state move … cancelled` also creates it when needed.
 4. **Check any tooling around `.aisdlc/`.** Completed goals now refuse every change, and `state move` fails when `--reason` is given for a state other than `cancelled`.
+5. **Check for started goals sitting in `pending`.** `state move` now only allows these moves: pending → in-progress or cancelled; in-progress → blocked, completed, cancelled, or pending (only before any task starts); blocked → in-progress or cancelled; cancelled → pending or blocked. A goal that 0.2.0 moved back to `pending` after a task started keeps working, but `challenge` and the create-goal merge will re-plan work already done. Move it on with `/aisdlc:implement <G-id>`, which moves it to in-progress. `challenge` also refuses blocked goals now.
 
 Goal files from 0.2.0 need no edits. A missing `cancel_reason` field counts as empty.
 
