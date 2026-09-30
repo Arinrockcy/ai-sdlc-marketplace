@@ -9,6 +9,7 @@ gate_final: pending
 govern_fingerprint:
 adrs: []
 adr_reason:
+cancel_reason:
 auto_commit:
 branch:
 created: {{date}}
@@ -30,6 +31,8 @@ updated: {{date}}
 **Out:**
 
 ## Risks & Unknowns
+
+<!-- Write each unanswered question as `- **Open:** <question>`. /aisdlc:govern fails GOV-05 while any remain. -->
 
 ## Clarifications
 

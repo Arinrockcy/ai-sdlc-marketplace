@@ -1,6 +1,6 @@
 ---
 name: create-goal
-description: Create a new AI-SDLC goal. First checks for unfinished goals and asks whether to merge into a pending one, finish one first, or create a separate goal. Then starts with clarifying questions that fill the gaps in the user's description, and split it into small, verifiable tasks with an explicit dependency graph (DAG), parallel waves and risk-first ordering. Use when the user runs /aisdlc:create-goal or asks to plan a feature or goal in an aisdlc project.
+description: Create a new AI-SDLC goal. First checks for unfinished goals and asks whether to merge into a pending one, finish or cancel one first, or create a separate goal. Then starts with clarifying questions that fill the gaps in the user's description, and split it into small, verifiable tasks with an explicit dependency graph (DAG), parallel waves and risk-first ordering. Use when the user runs /aisdlc:create-goal or asks to plan a feature or goal in an aisdlc project.
 argument-hint: "<goal description>"
 ---
 
@@ -18,7 +18,7 @@ Input: `$ARGUMENTS` is the goal description. If it is empty, ask the user for on
 - Run `$AISDLC config get graph.provider`. If it is `graphify`, query the graph (for example `graphify-out/GRAPH_REPORT.md` or the `/graphify` query tooling) to find the modules involved, instead of grepping broadly. If it is `none`, read only the files you need.
 
 ## 1. Unfinished goals (before anything else)
-Run `$AISDLC goal list`. If every goal is `completed`, or there are none, go to section 2.
+Run `$AISDLC goal list`. Unfinished goals are the `pending`, `in-progress` and `blocked` ones. If there are none, go to section 2. If the new description overlaps a `cancelled` goal, tell the user and offer **Reopen `<G-id>`** below.
 
 Otherwise tell the user which goals are unfinished: ID, title, status and gates. Say whether the new description overlaps any of them. Then ask what to do, one question, with these choices:
 
@@ -30,6 +30,8 @@ Otherwise tell the user which goals are unfinished: ID, title, status and gates.
   - otherwise `/aisdlc:implement <G-id>`
 
   They re-run `/aisdlc:create-goal` afterwards. Run `$AISDLC hooks run post_create_goal` and stop.
+- **Cancel `<G-id>`.** For a goal the user no longer wants. Ask for the reason, then run `$AISDLC state move <G-id> cancelled --reason "<why>"`. The goal keeps its ID and files, and `$AISDLC state move <G-id> pending` reopens it later. Then start this section again, because other goals may still be unfinished.
+- **Reopen `<G-id>`.** Offer this only for a `cancelled` goal the description overlaps. Run `$AISDLC state move <G-id> pending`, then merge into it as below.
 - **Create a separate goal.** Continue with section 2. The new goal waits in `pending` alongside the others.
 
 Never pick for the user, even when the overlap looks obvious.
@@ -58,7 +60,7 @@ Before you write anything, find the gaps in the description and ask the user abo
 ## 3. Goal
 - Run `$AISDLC goal new <short title>`. Open the `file` it returns.
 - Record each intake answer under `## Clarifications` as `- **Q:** … **A:** …`, so `/aisdlc:challenge` doesn't ask it again.
-- Fill in Problem, Outcome / Acceptance Criteria (measurable), Scope In/Out, and Risks & Unknowns, using only the description, the answers and what the code shows. Anything the user deferred or couldn't answer goes under Risks & Unknowns as an open question. Do **not** guess answers; `/aisdlc:challenge` resolves them.
+- Fill in Problem, Outcome / Acceptance Criteria (measurable), Scope In/Out, and Risks & Unknowns, using only the description, the answers and what the code shows. Anything the user deferred or couldn't answer goes under Risks & Unknowns as `- **Open:** <question>`. Do **not** guess answers; `/aisdlc:challenge` resolves them, and governance rule GOV-05 fails while any `**Open:**` item remains.
 
 ## 4. Split into tasks
 Apply these rules in order. If a split depends on something the user hasn't said (for example, whether existing data needs migrating), ask; don't assume.

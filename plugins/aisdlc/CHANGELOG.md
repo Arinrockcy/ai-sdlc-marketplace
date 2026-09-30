@@ -2,6 +2,24 @@
 
 All notable changes to the `aisdlc` plugin. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/). Until 1.0.0, a minor version may include breaking changes; each one is listed under **Breaking** with its upgrade step.
 
+## [0.3.0] - 2026-09-30
+
+Finished work is now reviewed by default, reviews must show their evidence, and goals can be cancelled. See [Upgrading to 0.3.0](../../README.md#upgrading) before updating a project that already has goals.
+
+### Breaking
+- A governance review needs a note on every row, `pass` included, citing the evidence. `gate set govern|final passed` refuses a review with an empty note.
+- A completed goal can no longer change: `state move`, `goal set`, `gate set`, `task new`, `adr link|none` and `adr new --goal` refuse it. Before, `state move` could move it back to another state.
+- `state move` fails when `--reason` is given for any state other than `cancelled`, instead of ignoring it.
+
+### Added
+- `cancelled` goal state. `state move <G-id> cancelled --reason "<why>"` records `cancel_reason` and moves the goal to `goals/cancelled/`. A cancelled goal takes no changes until `state move <G-id> pending` reopens it. `/aisdlc:create-goal` offers to cancel an unfinished goal, or reopen an overlapping cancelled one, and `/aisdlc:implement` offers to cancel a blocked goal.
+- `questions-resolved` check: fails while the goal's Risks & Unknowns lists an `- **Open:** …` item. New projects attach it to GOV-05. `/aisdlc:create-goal` and `/aisdlc:challenge` record unanswered questions in that form and remove them once the user answers.
+- `criteria-met` check: fails while an acceptance criterion of the goal, or of a task that isn't skipped, is unticked. `/aisdlc:govern --final` ticks goal criteria only when the code shows they are met.
+- New projects get GOV-06, a `must` `final` rule with the `criteria-met` check, so every goal gets a final review before it completes.
+- `/aisdlc:init` shows the governance rules, says when no `final` rule is active, and offers to run `/aisdlc:govern`. `/aisdlc:govern` offers the two new checks to projects that lack them.
+- `/aisdlc:govern` runs its reviews in a sub-agent or fresh session when the agent supports one, so the context that wrote the plan doesn't review it.
+- Before `before_goal` switches branches, `/aisdlc:implement` warns when another goal is in progress, or when the goal's planning files aren't on the branch it checks out, and asks whether to continue.
+
 ## [0.2.0] - 2026-09-30
 
 Governance now checks what it reviewed and stays tied to it. See [Upgrading to 0.2.0](../../README.md#upgrading) before updating a project that already has goals.

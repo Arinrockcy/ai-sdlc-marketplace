@@ -16,12 +16,15 @@ Each rule in `.aisdlc/governance.md` has:
 - an ID (`GOV-NN`)
 - a **severity**: `must` blocks, `should` is reported but doesn't block, `retired` is off
 - a **stage**: `plan` rules are reviewed before implementation, `final` rules against the finished work
-- an optional **check**: an automatic check the script runs (`goal-defined`, `tasks-verifiable`, `dag-valid` or `adr-recorded`)
+- an optional **check**: an automatic check the script runs (`goal-defined`, `tasks-verifiable`, `dag-valid`, `adr-recorded`, `questions-resolved` or `criteria-met`)
+
+**Review with fresh eyes.** In Modes B and C, if your agent can hand work to a sub-agent or a fresh session, run the review there. Give it the goal ID and the steps of that mode, not your own reasoning about the plan. A review by the context that wrote the plan tends to confirm it.
 
 The script owns the rules table. Change it only through the `governance add` and `governance set` commands (Mode A), never by editing the table by hand.
 
 ## Mode A: no argument (edit the rules)
-1. Run `$AISDLC hooks run pre_govern`, then `$AISDLC governance list`. `init` seeds the baseline rules GOV-01 to GOV-05, all `must` and `plan`. If the list fails, the file has an invalid rule (a duplicate ID, or an unknown severity, stage or check). Show the error and ask the user how to fix it.
+1. Run `$AISDLC hooks run pre_govern`, then `$AISDLC governance list`. `init` seeds the baseline rules GOV-01 to GOV-05 (`must`, `plan`) and GOV-06 (`must`, `final`, check `criteria-met`). If the list fails, the file has an invalid rule (a duplicate ID, or an unknown severity, stage or check). Show the error and ask the user how to fix it.
+   Projects initialized before aisdlc 0.3.0 lack two baseline checks. If no active rule uses `questions-resolved`, offer to set it on the rule about open questions (GOV-05 in the baseline). If no active rule uses `criteria-met`, tell the user that nothing checks the finished code against its acceptance criteria and offer that rule (`final`, check `criteria-met`). Change nothing they don't accept.
 2. Ask the user, one question at a time, what to add or change. Topics: coding standards, security and compliance, testing, review or approval needs, performance budgets, and what "done" means.
 3. Offer the optional rules in `${CLAUDE_PLUGIN_ROOT}/templates/governance-catalog.md` that aren't already covered. Present them as choices, and let the user pick, reword and set severity and stage for each one. Never add a rule the user didn't choose.
 4. If a stack is active (`$AISDLC detect-stack` returns `standards_skill`), suggest a rule that points at that skill (for example "Code follows `aisdlc-nodejs:standards`", stage `final`) instead of copying its content.
@@ -45,14 +48,14 @@ The script owns the rules table. Change it only through the `governance add` and
    - `fail`, with a concrete reason and the fix
    - `n/a`, with a reason
 
-   A rule whose automatic check failed must be `fail`. Put the check's problems in Notes. A passing check only proves structure (for example, that criteria exist). Still judge the content yourself.
+   Every result needs a note. For `pass`, cite the evidence: the file and section, task or ADR that shows the rule holds. "Looks fine" is not evidence. A rule whose automatic check failed must be `fail`. Put the check's problems in Notes. A passing check only proves structure (for example, that criteria exist). Still judge the content yourself.
 5. Write `governance-review.md` in the goal folder from `${CLAUDE_PLUGIN_ROOT}/templates/governance-review.md`, with `stage: plan`. The rule table has one row per active plan rule:
    - the rule ID in the Rule column
    - `pass`, `fail` or `n/a` in the Result column
-   - the reason in Notes (required for `fail` and `n/a`)
+   - the evidence (for `pass`) or the reason (for `fail` and `n/a`) in Notes. The script refuses a row without one.
 
    Add a Required Fixes list. Set `result: pass` only if no `must` rule failed. A failed `should` rule is listed but doesn't block.
-6. Set the gate. The script re-checks the review: it refuses `passed` if an active rule is missing, a `must` rule failed, a note is missing, or a rule is marked `pass`/`n/a` while its automatic check fails.
+6. Set the gate. The script re-checks the review: it refuses `passed` if an active rule is missing, a `must` rule failed, any row has no note, or a rule is marked `pass`/`n/a` while its automatic check fails.
    - **Pass:** run `$AISDLC gate set <G-id> govern passed`. The script records a fingerprint of the plan. Editing the goal, a task's planned fields or text, a linked ADR's status or a plan rule later makes the review stale, and adding a task resets the gate. Either way the goal has to be re-governed before the next task starts. Ticking boxes, task Notes and task status don't count as edits. The next step is `/aisdlc:implement <G-id>`.
    - **Fail:** run `$AISDLC gate set <G-id> govern failed`. Show the Required Fixes and point to the command that addresses each one: `/aisdlc:challenge` for unclear requirements, `/aisdlc:adr` for missing decisions, or an edit to the named task. The user then re-runs `/aisdlc:govern <G-id>`.
 
@@ -66,6 +69,7 @@ Runs once every task is done or skipped, and only when governance.md has active 
    - `$AISDLC governance list`, and review only active rules whose stage is `final`
    - `$AISDLC governance checks <G-id> --stage final` if any final rule has a check
 4. Check each active final rule against the actual code. Cite files and lines as evidence. If a rule names a skill (for example a stack's standards skill), load that skill and check against it.
+   For a rule with the `criteria-met` check, go through each acceptance criterion in `goal.md` and in every done task. Tick a criterion (`- [x]`) only when the code shows it is met, and cite where. Untick any task criterion that turns out not to be met. The check fails while any criterion of the goal or a done task is unticked, so the rule must then be `fail`.
 5. Write `governance-final.md` in the goal folder from the same template, with `stage: final`, following the same table and Required Fixes rules as Mode B.
 6. Set the gate:
    - **Pass:** run `$AISDLC gate set <G-id> final passed`. The goal can now complete.

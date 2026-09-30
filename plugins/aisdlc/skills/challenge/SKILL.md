@@ -17,7 +17,7 @@ Input: `$ARGUMENTS` is the goal ID. If it is missing, run `$AISDLC goal list --s
 2. Run `$AISDLC hooks run pre_challenge`.
 3. Run `$AISDLC goal show <G-id>`. Read `goal.md` and the task files. The Clarifications section already holds the answers from `/aisdlc:create-goal`'s intake questions; don't ask those again.
 4. Build an internal list of ambiguities. Sources:
-   - the goal's Risks & Unknowns section
+   - the goal's Risks & Unknowns section, especially its `- **Open:** …` items
    - statements in the goal or tasks that rest on an assumption, not on the user's words, a Clarification or the code
    - vague acceptance criteria (not measurable)
    - unclear scope boundaries
@@ -27,8 +27,9 @@ Input: `$ARGUMENTS` is the goal ID. If it is missing, run `$AISDLC goal list --s
    - decisions that sound architectural (note these for `/aisdlc:adr`)
 5. Ask the user **one question at a time**. Use a structured question tool with 2 to 4 concrete options when one is available. Put the most important question first. After each answer:
    - Append it under `## Clarifications` in `goal.md` as `- **Q:** … **A:** …`.
+   - If it answers an `- **Open:** …` item under Risks & Unknowns, remove that item. Only the user's answer resolves it.
    - Update the affected goal sections and task files right away. Add, split or remove tasks as needed, using `$AISDLC task new <G-id> "<title>" --risk … --depends … --verify "…"` for new tasks.
    - Don't ask what the codebase already answers. Look it up instead.
-6. Stop when there are no open questions left, or when the user says to stop. If questions remain unresolved, record them under Risks & Unknowns and tell the user that `/aisdlc:govern` will fail rule GOV-05.
+6. Stop when there are no open questions left, or when the user says to stop. Record each unresolved question under Risks & Unknowns as `- **Open:** <question>`, and tell the user that `/aisdlc:govern` will fail rule GOV-05 until they are answered (its `questions-resolved` check finds them).
 7. Run `$AISDLC dag write <G-id>` to revalidate the DAG. Then run `$AISDLC gate set <G-id> challenge done`. If the output includes `notes` (governance reset, stale review), relay them to the user.
 8. Run `$AISDLC hooks run post_challenge`. Tell the user which architectural decisions came up and that the next step is `/aisdlc:adr <G-id>`.

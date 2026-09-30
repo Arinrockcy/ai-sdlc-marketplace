@@ -25,10 +25,15 @@ Once `pre_implement` has run, every way this run ends (a finished task in single
 ## 1. Gate and setup
 1. Run `$AISDLC gate require <G-id> implement`. If it exits non-zero, show the `problems` and stop. Never bypass the gate.
 2. Run `$AISDLC hooks run pre_implement`, then `$AISDLC goal show <G-id>`.
-3. **Resuming a blocked goal** (status `blocked`): list each blocked task with its `reason`. Ask the user which blockers are resolved. For each resolved one, run `$AISDLC task set <G-id> <T-id> pending`. If none are resolved, stop. Otherwise run `$AISDLC state move <G-id> in-progress`.
+3. **Resuming a blocked goal** (status `blocked`): list each blocked task with its `reason`. Ask the user which blockers are resolved. For each resolved one, run `$AISDLC task set <G-id> <T-id> pending`, then run `$AISDLC state move <G-id> in-progress`.
+   If none are resolved, ask whether to leave the goal blocked or cancel it. To cancel, ask for the reason and run `$AISDLC state move <G-id> cancelled --reason "<why>"`. Either way, run `post_implement` and stop.
 4. **First run** (status `pending`):
    1. **Auto-commit.** If `auto_commit` is empty, ask the user whether to commit automatically after each passing task. Save the answer with `$AISDLC goal set <G-id> auto_commit true|false`.
-   2. **Before-goal hook.** Run `$AISDLC hooks run before_goal --goal <G-id>`. By default this fetches, checks out and pulls the base branch. If it fails, show the output and ask the user whether to retry, continue anyway or stop.
+   2. **Before-goal hook.** Run `$AISDLC hooks resolve before_goal --goal <G-id>` to see what it will run. By default it fetches, checks out and pulls the base branch. If it switches branches, check two things first, and if either applies, tell the user and ask whether to continue or stop:
+      - **Another goal in progress.** Run `$AISDLC goal list --status in-progress`. If another goal is listed, its work may be on the current branch, and the checkout moves the working tree away from it. Don't refuse: the user may work in separate worktrees.
+      - **Planning files left behind.** The goal's folder (`dir` from `goal show`) must exist on the branch the hook checks out. Uncommitted files carry over a checkout. Files committed only on the current branch don't. Check with `git status --porcelain -- <dir>` and `git ls-tree --name-only <base_branch> -- <dir>` (use the `git.base_branch` value).
+
+      Then run `$AISDLC hooks run before_goal --goal <G-id>`. If it fails, show the output and ask the user whether to retry, continue anyway or stop.
       Then run `$AISDLC goal show <G-id>` again. If the goal is no longer found, its planning files were committed on a different branch than the one the hook switched to. Tell the user to bring `.aisdlc/` onto this branch (or disable the hook), and stop.
    3. **Branch.** If `branch` is empty, ask the user to pick one:
       - create the goal branch `suggested_branch` from `goal show` (`git checkout -b <suggested_branch>`)

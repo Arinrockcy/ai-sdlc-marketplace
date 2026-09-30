@@ -21,13 +21,13 @@ Requires Node.js 18+. Graphify is optional; `/aisdlc:init` offers to set it up.
 
 ```
 /aisdlc:init
-/aisdlc:create-goal <description>   → checks unfinished goals (merge / finish first / separate), intake questions, then goal + task DAG (waves, risk-first)
+/aisdlc:create-goal <description>   → checks unfinished goals (merge / finish first / cancel / separate), intake questions, then goal + task DAG (waves, risk-first)
 /aisdlc:challenge G-001             → one-question-at-a-time clarification
 /aisdlc:adr G-001                   → ADRs, or "none needed" with a reason
 /aisdlc:govern                      → edit project rules (no argument), with an optional rule catalog
 /aisdlc:govern G-001                → plan review: pass or fail against the plan-stage rules
 /aisdlc:implement G-001 [--all]     → task by task in DAG order, with hooks
-/aisdlc:govern G-001 --final        → final review of the finished work (implement runs it when final-stage rules exist)
+/aisdlc:govern G-001 --final        → final review of the finished work (implement runs it; init seeds GOV-06, a final rule)
 ```
 
 No step works from assumptions. When something is unclear or under-documented and the code doesn't answer it, the skill asks you, and answers are recorded under the goal's Clarifications.
@@ -36,10 +36,12 @@ Each step refuses to run until the previous gate passes, and the script enforces
 - A goal can't start before governance passes.
 - Tasks run in dependency order.
 - A task is done only after `task verify` passes.
-- A goal with `final`-stage rules completes only after the final review passes.
+- A goal with `final`-stage rules completes only after the final review passes. New projects start with one: GOV-06, every acceptance criterion met.
+- A goal you no longer want is cancelled with a reason (`aisdlc.mjs state move G-001 cancelled --reason "…"`), and reopened with `state move G-001 pending`. Completed goals can't change.
 
 Governance is tied to what it reviewed:
-- Rules can name automatic checks (`goal-defined`, `tasks-verifiable`, `dag-valid`, `adr-recorded`) that a review can't overrule.
+- Rules can name automatic checks (`goal-defined`, `tasks-verifiable`, `dag-valid`, `adr-recorded`, `questions-resolved`, `criteria-met`) that a review can't overrule.
+- Every row of a review needs a note: the evidence for a `pass`, the reason for a `fail` or `n/a`.
 - The plan is fingerprinted when governance passes. Editing the goal, tasks, linked ADRs or plan rules afterwards blocks the next task until it is re-governed.
 - Re-running `challenge` or `adr`, linking another ADR, or adding a task resets the governance gate. The old review is archived as `governance-review.stale-N.md`.
 - There is no waiver.
@@ -50,7 +52,7 @@ Governance is tied to what it reviewed:
 .aisdlc/
   config.json  registry.md  governance.md
   adr/  stacks/  cache/
-  goals/{pending,in-progress,blocked,completed}/G-001-slug/
+  goals/{pending,in-progress,blocked,completed,cancelled}/G-001-slug/
     goal.md  tasks.md  tasks/T-01-slug.md  governance-review.md  governance-final.md
 ```
 
@@ -75,6 +77,19 @@ See [`plugins/aisdlc/docs/stack-plugin-contract.md`](plugins/aisdlc/docs/stack-p
 ## Upgrading
 
 Each plugin keeps a changelog: [`aisdlc`](plugins/aisdlc/CHANGELOG.md), [`aisdlc-nodejs`](plugins/aisdlc-nodejs/CHANGELOG.md). Breaking changes are listed there with their upgrade step.
+
+### 0.2.0 → 0.3.0 (`aisdlc`)
+
+Update the plugin, then in each project that already has `.aisdlc/`:
+
+1. **Write a note on every review row.** A governance review in progress needs a note on each `pass` row too, citing the evidence, before `gate set … passed` accepts it. Gates that already passed are not re-checked.
+2. **Turn on the new checks (recommended).** Run `/aisdlc:govern`: it offers both. By hand:
+   - `node <plugin>/scripts/aisdlc.mjs governance set GOV-05 check questions-resolved`. Unanswered questions under Risks & Unknowns then need the form `- **Open:** <question>`. This changes a plan rule, so goals past governance but not completed need `/aisdlc:govern <G-id>` again before their next task.
+   - `node <plugin>/scripts/aisdlc.mjs governance add "The finished code meets every acceptance criterion of the goal and of each done task." --severity must --stage final --check criteria-met`. Goals in progress then need the final review (`/aisdlc:govern <G-id> --final`, which `/aisdlc:implement` runs) before they complete.
+3. **Run `/aisdlc:init` again.** It creates the `goals/cancelled/` folder. `state move … cancelled` also creates it when needed.
+4. **Check any tooling around `.aisdlc/`.** Completed goals now refuse every change, and `state move` fails when `--reason` is given for a state other than `cancelled`.
+
+Goal files from 0.2.0 need no edits. A missing `cancel_reason` field counts as empty.
 
 ### 0.1.0 → 0.2.0 (`aisdlc`)
 

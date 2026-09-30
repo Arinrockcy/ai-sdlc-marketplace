@@ -13,7 +13,8 @@ const PLUGIN_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '
 const TEMPLATES = path.join(PLUGIN_ROOT, 'templates');
 const DEFAULT_HOOKS = path.join(PLUGIN_ROOT, 'defaults', 'hooks.json');
 
-const GOAL_STATES = ['pending', 'in-progress', 'blocked', 'completed'];
+const GOAL_STATES = ['pending', 'in-progress', 'blocked', 'completed', 'cancelled'];
+// Completed and cancelled goals take no more changes. A cancelled goal can be reopened with `state move <G-id> pending`.
 const TASK_STATES = ['pending', 'in-progress', 'done', 'blocked', 'skipped'];
 const TASK_SATISFIED = new Set(['done', 'skipped']);
 const RISK_RANK = { high: 0, medium: 1, low: 2 };
@@ -550,6 +551,11 @@ const listItems = (text) => (text || '').split('\n')
   .map((l) => l.match(/^\s*[-*]\s+(?:\[[ xX]\]\s*)?(.*)$/)?.[1].trim())
   .filter(Boolean);
 
+// Acceptance criteria still written as `- [ ] …`.
+const unticked = (body) => (section(body, /acceptance criteria/i) || '').split('\n')
+  .map((l) => l.match(/^\s*[-*]\s+\[ \]\s*(.+)$/)?.[1].trim())
+  .filter(Boolean);
+
 function adrProblems(root, d) {
   const linked = Array.isArray(d.adrs) && d.adrs.length > 0;
   if (!linked) return d.adrs === 'none' && d.adr_reason ? [] : ['link an ADR (adr new/link) or record `adr none --reason`'];
@@ -576,6 +582,15 @@ const CHECKS = {
   }) : ['goal has no tasks']),
   'dag-valid': ({ tasks }) => analyzeDag(tasks).errors,
   'adr-recorded': ({ root, goal }) => adrProblems(root, readDoc(goal.file).data),
+  // Unresolved questions are recorded under Risks & Unknowns as `- **Open:** <question>`.
+  'questions-resolved': ({ goal }) => listItems(section(readDoc(goal.file).body, /^risks\b/i))
+    .filter((item) => /^open:/i.test(item.replace(/\*/g, '')))
+    .map((item) => `open question: ${item.replace(/\*/g, '').replace(/^open:\s*/i, '')}`),
+  // Every acceptance criterion of the goal and of each done task is ticked. Skipped tasks don't count.
+  'criteria-met': ({ goal, tasks }) => [
+    ...unticked(readDoc(goal.file).body).map((c) => `goal criterion not met: ${c}`),
+    ...tasks.filter((t) => t.status !== 'skipped').flatMap((t) => unticked(readDoc(t.file).body).map((c) => `${t.id} criterion not met: ${c}`)),
+  ],
 };
 
 function runChecks(root, goal, rules) {
@@ -606,11 +621,14 @@ function planFingerprint(root, goal) {
 function requireStep(root, goal, step) {
   const d = goal.data;
   const problems = [];
+  if (goal.status === 'cancelled') problems.push(`goal is cancelled; reopen it with \`state move ${goal.id} pending\` first`);
   if (step === 'challenge') {
-    if (!['pending', 'blocked'].includes(goal.status)) problems.push(`goal is ${goal.status}; challenge only runs on pending or blocked goals`);
+    if (!['pending', 'blocked', 'cancelled'].includes(goal.status)) problems.push(`goal is ${goal.status}; challenge only runs on pending or blocked goals`);
   } else if (step === 'adr') {
+    if (goal.status === 'completed') problems.push('goal is already completed');
     if (d.gate_challenge !== 'done') problems.push('run /aisdlc:challenge first (gate_challenge != done)');
   } else if (step === 'govern') {
+    if (goal.status === 'completed') problems.push('goal is already completed');
     if (d.gate_challenge !== 'done') problems.push('run /aisdlc:challenge first (gate_challenge != done)');
     if (d.gate_adr !== 'done') problems.push('run /aisdlc:adr first (gate_adr != done)');
   } else if (step === 'implement' || step === 'final') {
@@ -660,7 +678,8 @@ function reviewProblems(root, goal, stage) {
     else if (!['pass', 'fail', 'n/a'].includes(r.result)) problems.push(`${rule.id} has result "${r.result}" (use pass, fail or n/a)`);
     else if (check && !check.ok && r.result !== 'fail') problems.push(`${rule.id} is ${r.result} but its automatic check "${check.check}" failed: ${check.problems.join('; ')}`);
     else if (r.result === 'fail' && rule.severity === 'must') problems.push(`${rule.id} is a must rule and failed`);
-    else if (r.result !== 'pass' && !r.notes) problems.push(`${rule.id} is ${r.result} without a note`);
+    // A pass needs its evidence as much as a fail needs its reason.
+    else if (!r.notes) problems.push(`${rule.id} is ${r.result} without a note (cite the evidence)`);
   }
   return problems;
 }
@@ -678,6 +697,12 @@ function archiveReview(goal, stage) {
 }
 
 const GATE_ORDER = ['adr', 'govern', 'final'];
+
+// Refuses changes to a completed or cancelled goal.
+function assertOpen(goal) {
+  if (goal.status === 'completed') fail(`${goal.id} is completed; it can no longer change.`);
+  if (goal.status === 'cancelled') fail(`${goal.id} is cancelled; reopen it with \`state move ${goal.id} pending\` first.`);
+}
 
 // Resets `from` and every later gate to pending, and archives the reviews that no longer count.
 function invalidate(goal, from) {
@@ -703,6 +728,7 @@ function setGate(root, goal, gate, value) {
   const allowed = { challenge: ['pending', 'done'], adr: ['pending', 'done'], govern: ['pending', 'passed', 'failed'], final: ['pending', 'passed', 'failed'] };
   if (!allowed[gate]) fail(`Unknown gate "${gate}". Valid: ${Object.keys(allowed).join(', ')}`);
   if (!allowed[gate].includes(value)) fail(`Invalid value for gate ${gate}: ${value}. Valid: ${allowed[gate].join(', ')}`);
+  assertOpen(goal);
   if (gate === 'adr' && value === 'done') {
     const problems = adrProblems(root, goal.data);
     if (problems.length) fail(`Cannot mark adr done: ${problems.join(', ')}.`);
@@ -807,6 +833,7 @@ const commands = {
         gates: gatesOf(g),
         final_review_required: activeRules(root, 'final').length > 0,
         governance: { plan: reviewSummary(root, g, 'plan'), final: reviewSummary(root, g, 'final') },
+        ...(g.status === 'cancelled' && { cancel_reason: g.data.cancel_reason || null }),
         adrs: g.data.adrs, auto_commit: g.data.auto_commit, branch: g.data.branch,
         suggested_branch: hookContext(root, loadConfig(root), { goal: g.id }).goal_branch,
         tasks: tasks.map((t) => ({ id: t.id, title: t.title, status: t.status, risk: t.risk, depends_on: t.depends_on, verify: t.verify, file: path.relative(root, t.file) })),
@@ -819,18 +846,25 @@ const commands = {
       if (['id', 'status', 'adrs', 'adr_reason', 'govern_fingerprint'].includes(key) || key.startsWith('gate_')) fail('Use `state move`, `gate set` or `adr link|none` for status, gates and ADR links.');
       // The branch is substituted into hook commands, so keep it to git-ref-safe characters.
       if (key === 'branch' && !/^[A-Za-z0-9._][A-Za-z0-9._/-]*$/.test(value)) fail(`Invalid branch name "${value}".`);
+      if (key === 'cancel_reason') fail('Use `state move <G-id> cancelled --reason "<why>"` to cancel a goal.');
       const g = getGoal(root, id);
+      assertOpen(g);
       updateDoc(g.file, { [key]: parseScalar(value, key) });
       return out({ id, [key]: parseScalar(value, key) });
     }
     fail('Usage: goal new|list|show|set');
   },
 
-  state([action, id, status]) {
-    if (action !== 'move' || !id || !status) fail('Usage: state move <G-id> <pending|in-progress|blocked|completed>');
+  state([action, id, status], opts) {
+    if (action !== 'move' || !id || !status) fail('Usage: state move <G-id> <pending|in-progress|blocked|completed|cancelled> [--reason "<why>"]');
     if (!GOAL_STATES.includes(status)) fail(`Invalid goal status "${status}". Valid: ${GOAL_STATES.join(', ')}`);
+    const reason = typeof opts.reason === 'string' ? opts.reason.trim() : '';
+    if (status === 'cancelled' && !reason) fail('--reason is required when cancelling a goal');
+    if (status !== 'cancelled' && typeof opts.reason === 'string') fail('--reason is only used when cancelling a goal');
     const root = findRoot();
     const g = getGoal(root, id);
+    if (g.status === 'completed') fail(`${id} is completed; it can no longer move.`);
+    if (g.status === 'cancelled' && status !== 'pending') fail(`${id} is cancelled; reopen it with \`state move ${id} pending\` first.`);
     if (status === 'in-progress' || status === 'completed') {
       const problems = requireStep(root, g, 'implement');
       if (problems.length) fail(`Cannot move ${id} to ${status}:\n- ${problems.join('\n- ')}`);
@@ -840,10 +874,16 @@ const commands = {
       if (activeRules(root, 'final').length && g.data.gate_final !== 'passed') fail(`${id} needs a passing final governance review; run /aisdlc:govern ${id} --final.`);
     }
     const dest = path.join(aisdlcDir(root), 'goals', status, path.basename(g.dir));
-    if (dest !== g.dir) fs.renameSync(g.dir, dest);
-    updateDoc(path.join(dest, 'goal.md'), { status });
+    if (dest !== g.dir) {
+      // Projects initialized before a state existed have no folder for it.
+      fs.mkdirSync(path.dirname(dest), { recursive: true });
+      fs.renameSync(g.dir, dest);
+    }
+    const patch = { status };
+    if (status === 'cancelled' || g.data.cancel_reason) patch.cancel_reason = status === 'cancelled' ? reason : '';
+    updateDoc(path.join(dest, 'goal.md'), patch);
     registrySync(root);
-    out({ id, from: g.status, to: status, dir: path.relative(root, dest) });
+    out({ id, from: g.status, to: status, dir: path.relative(root, dest), ...(reason && { reason }) });
   },
 
   task([action, goalId, ...rest], opts) {
@@ -852,6 +892,7 @@ const commands = {
     if (action === 'new') {
       const title = rest.join(' ').trim();
       if (!title) fail('Usage: task new <G-id> <title> [--depends T-01,T-02] [--risk high|medium|low] [--verify "<cmd>"]');
+      assertOpen(g);
       const risk = opts.risk || 'medium';
       if (!(risk in RISK_RANK)) fail(`Invalid risk "${risk}"`);
       const tasks = listTasks(g);
@@ -872,7 +913,7 @@ const commands = {
       if ((status === 'blocked' || status === 'skipped') && typeof opts.reason !== 'string') fail(`--reason is required when marking a task ${status}`);
       const tasks = listTasks(g);
       const t = getTask(g, taskId);
-      if (g.status === 'completed') fail(`${g.id} is completed; its tasks can no longer change.`);
+      assertOpen(g);
       // Resetting to pending is how a blocked goal is resumed; every other change needs a started goal.
       if (status !== 'pending' && g.status !== 'in-progress') fail(`${g.id} is ${g.status}; run \`state move ${g.id} in-progress\` first.`);
       if (status === 'in-progress' || status === 'done') {
@@ -899,6 +940,7 @@ const commands = {
       // Runs the task's verify command, then the after_task hook, and records the result `done` requires.
       const [taskId] = rest;
       const t = getTask(g, taskId);
+      assertOpen(g);
       if (t.status !== 'in-progress') fail(`${taskId} is ${t.status}; only an in-progress task can be verified.`);
       const verify = t.verify === '' || t.verify == null ? '' : String(t.verify).trim();
       const manual = verify.match(/^manual:\s*(.*)$/i);
@@ -961,6 +1003,7 @@ const commands = {
     if (action === 'new') {
       const title = rest.join(' ').trim();
       if (!title) fail('Usage: adr new <title> [--goal G-001]');
+      if (typeof opts.goal === 'string') assertOpen(getGoal(root, opts.goal));
       const id = nextId('ADR', listAdrs(root).map((a) => a.id), 3);
       const goals = typeof opts.goal === 'string' ? [opts.goal] : [];
       const file = path.join(aisdlcDir(root), 'adr', `${id}-${slugify(title)}.md`);
@@ -979,6 +1022,7 @@ const commands = {
       const [goalId] = rest;
       if (typeof opts.reason !== 'string' || !opts.reason.trim()) fail('Usage: adr none <G-id> --reason "<why no decision is needed>"');
       const g = getGoal(root, goalId);
+      assertOpen(g);
       // Drop the back-links from ADRs this goal used to reference.
       const prev = Array.isArray(g.data.adrs) ? g.data.adrs : [];
       for (const a of listAdrs(root)) {
@@ -1069,6 +1113,7 @@ function linkAdr(root, adrId, goalId) {
   const adr = listAdrs(root).find((a) => a.id === adrId);
   if (!adr) fail(`ADR ${adrId} not found.`);
   const g = getGoal(root, goalId);
+  assertOpen(g);
   const goals = Array.isArray(adr.goals) ? adr.goals : [];
   if (!goals.includes(goalId)) updateDoc(adr.file, { goals: [...goals, goalId] });
   const adrs = Array.isArray(g.data.adrs) ? g.data.adrs : [];

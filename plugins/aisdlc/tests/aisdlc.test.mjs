@@ -24,9 +24,9 @@ const t = (id, depends_on = [], extra = {}) => ({ id, depends_on, status: 'pendi
 
 const BASELINE_RULES = ['GOV-01', 'GOV-02', 'GOV-03', 'GOV-04', 'GOV-05'];
 
-// Writes a governance review; `results` maps rule ID -> [result, notes], defaulting to pass.
+// Writes a governance review; `results` maps rule ID -> [result, notes], defaulting to pass with a note.
 function writeReview(dir, goalId, results = {}, result = 'pass', { rules = BASELINE_RULES, file = 'governance-review.md' } = {}) {
-  const rows = rules.map((id) => `| ${id} | ${(results[id] || ['pass'])[0]} | ${(results[id] || [])[1] || ''} |`);
+  const rows = rules.map((id) => { const [res, notes] = results[id] || ['pass', 'checked']; return `| ${id} | ${res} | ${notes ?? ''} |`; });
   const text = `---\ngoal: ${goalId}\nresult: ${result}\n---\n\n| Rule | Result | Notes |\n|------|--------|-------|\n${rows.join('\n')}\n`;
   fs.writeFileSync(path.join(dir, file), text);
 }
@@ -35,6 +35,9 @@ const edit = (file, fn) => fs.writeFileSync(file, fn(fs.readFileSync(file, 'utf8
 
 // Fills the Problem and first acceptance criterion, which the goal-defined and tasks-verifiable checks look for.
 const fill = (file) => edit(file, (s) => s.replace('## Problem\n', '## Problem\n\nSomething is missing.\n').replace('- [ ] \n', '- [ ] It works\n'));
+
+// Ticks every acceptance criterion in a goal or task file, as the criteria-met check expects.
+const tick = (file) => edit(file, (s) => s.replace(/- \[ \] (?=\S)/g, '- [x] '));
 
 // Creates a goal whose goal.md and tasks pass the automatic checks. Tasks without --verify get `--verify true`.
 function plannedGoal(run, dir, tasks, title = 'Feature') {
@@ -128,7 +131,7 @@ test('cli: full gated flow from init to completed', () => {
   const init = run(['init']);
   assert.equal(init.code, 0, init.stderr);
   assert.deepEqual(init.json.detected_stacks, ['nodejs']);
-  for (const s of ['pending', 'in-progress', 'blocked', 'completed']) assert.ok(fs.existsSync(path.join(dir, '.aisdlc/goals', s)));
+  for (const s of ['pending', 'in-progress', 'blocked', 'completed', 'cancelled']) assert.ok(fs.existsSync(path.join(dir, '.aisdlc/goals', s)));
   assert.equal(run(['init']).json.created.length, 0, 'init is idempotent');
 
   const goal = run(['goal', 'new', 'User', 'login']).json;
@@ -178,8 +181,19 @@ test('cli: full gated flow from init to completed', () => {
   run(['task', 'verify', 'G-001', 'T-02']);
   const last = run(['task', 'set', 'G-001', 'T-02', 'done']);
   assert.equal(last.json.progress.complete, true);
+
+  // init seeds GOV-06, a final rule whose criteria-met check needs every criterion ticked.
+  assert.match(run(['state', 'move', 'G-001', 'completed']).stderr, /needs a passing final governance review/);
+  const final = { rules: ['GOV-06'], file: 'governance-final.md' };
+  const liveDir = path.join(dir, run(['goal', 'show', 'G-001']).json.dir);
+  writeReview(liveDir, 'G-001', {}, 'pass', final);
+  assert.match(run(['gate', 'set', 'G-001', 'final', 'passed']).stderr, /GOV-06 is pass but its automatic check "criteria-met" failed: goal criterion not met: It works; T-01 criterion not met/);
+  tick(path.join(liveDir, 'goal.md'));
+  for (const t of run(['goal', 'show', 'G-001']).json.tasks) tick(path.join(dir, t.file));
+  assert.equal(run(['gate', 'set', 'G-001', 'final', 'passed']).code, 0);
   assert.equal(run(['state', 'move', 'G-001', 'completed']).code, 0);
   assert.equal(run(['task', 'set', 'G-001', 'T-01', 'pending']).code, 1, 'completed goals are frozen');
+  assert.match(run(['state', 'move', 'G-001', 'in-progress']).stderr, /completed; it can no longer move/);
 
   const registry = fs.readFileSync(path.join(dir, '.aisdlc/registry.md'), 'utf8');
   assert.match(registry, /\| G-001 \| goal \| User login \| completed \(2\/2\) \| goals\/completed\/G-001-user-login\/goal.md \| adr: none \|/);
@@ -267,16 +281,18 @@ test('cli: govern passes only with a review that covers every active rule and fa
   assert.match(pass().stderr, /GOV-02 is a must rule and failed/);
   writeReview(goalDir, 'G-001', { 'GOV-05': ['n/a'] });
   assert.match(pass().stderr, /GOV-05 is n\/a without a note/);
+  writeReview(goalDir, 'G-001', { 'GOV-03': ['pass', ''] });
+  assert.match(pass().stderr, /GOV-03 is pass without a note \(cite the evidence\)/);
   writeReview(goalDir, 'G-002');
   assert.match(pass().stderr, /review is for G-002/);
 
   // New rules must be reviewed; retired and failed `should` rules do not block.
   run(['governance', 'add', 'Has docs.', '--severity', 'should', '--stage', 'plan']);
   run(['governance', 'add', 'Old rule.', '--severity', 'should', '--stage', 'plan']);
-  run(['governance', 'set', 'GOV-07', 'severity', 'retired']);
+  run(['governance', 'set', 'GOV-08', 'severity', 'retired']);
   writeReview(goalDir, 'G-001');
-  assert.match(pass().stderr, /GOV-06 is missing/);
-  fs.appendFileSync(path.join(goalDir, 'governance-review.md'), '| GOV-06 | fail | no README section |\n');
+  assert.match(pass().stderr, /GOV-07 is missing/);
+  fs.appendFileSync(path.join(goalDir, 'governance-review.md'), '| GOV-07 | fail | no README section |\n');
   assert.equal(pass().code, 0);
 });
 
@@ -337,7 +353,7 @@ test('cli: automatic checks stop a review from passing rules the files do not me
   run(['gate', 'set', 'G-001', 'adr', 'done']);
 
   const checks = run(['governance', 'checks', 'G-001']).json;
-  assert.deepEqual(checks.map((c) => [c.rule, c.ok]), [['GOV-01', false], ['GOV-02', false], ['GOV-03', true], ['GOV-04', true]]);
+  assert.deepEqual(checks.map((c) => [c.rule, c.ok]), [['GOV-01', false], ['GOV-02', false], ['GOV-03', true], ['GOV-04', true], ['GOV-05', true]]);
   assert.deepEqual(checks[1].problems, ['T-01 has no verify command or manual check', 'T-01 has no acceptance criteria']);
 
   const goalDir = path.join(dir, run(['goal', 'show', 'G-001']).json.dir);
@@ -428,8 +444,10 @@ test('cli: task verify needs evidence when nothing would run', () => {
 test('cli: final-stage rules gate completion', () => {
   const { run, dir } = project();
   run(['init']);
+  // The seeded GOV-06 (criteria-met) has its own test; this one is about rules a project adds.
+  run(['governance', 'set', 'GOV-06', 'severity', 'retired']);
   assert.deepEqual(run(['governance', 'add', 'New', 'behavior', 'has', 'tests.', '--severity', 'must', '--stage', 'final']).json,
-    { id: 'GOV-06', rule: 'New behavior has tests.', severity: 'must', stage: 'final', check: '' });
+    { id: 'GOV-07', rule: 'New behavior has tests.', severity: 'must', stage: 'final', check: '' });
   run(['governance', 'add', 'Docs updated.', '--severity', 'should', '--stage', 'final']);
   governedGoal(run, dir, [['A']]);
   assert.equal(run(['goal', 'show', 'G-001']).json.final_review_required, true);
@@ -443,12 +461,12 @@ test('cli: final-stage rules gate completion', () => {
   assert.match(run(['state', 'move', 'G-001', 'completed']).stderr, /needs a passing final governance review/);
   assert.equal(run(['gate', 'require', 'G-001', 'final']).code, 0);
 
-  const final = { rules: ['GOV-06', 'GOV-07'], file: 'governance-final.md' };
-  writeReview(goalDir, 'G-001', { 'GOV-06': ['fail', 'no tests for the parser'] }, 'fail', final);
-  assert.match(run(['gate', 'set', 'G-001', 'final', 'passed']).stderr, /GOV-06 is a must rule and failed/);
-  writeReview(goalDir, 'G-001', { 'GOV-07': ['fail', 'README not updated'] }, 'pass', final);
+  const final = { rules: ['GOV-07', 'GOV-08'], file: 'governance-final.md' };
+  writeReview(goalDir, 'G-001', { 'GOV-07': ['fail', 'no tests for the parser'] }, 'fail', final);
+  assert.match(run(['gate', 'set', 'G-001', 'final', 'passed']).stderr, /GOV-07 is a must rule and failed/);
+  writeReview(goalDir, 'G-001', { 'GOV-08': ['fail', 'README not updated'] }, 'pass', final);
   assert.equal(run(['gate', 'set', 'G-001', 'final', 'passed']).code, 0);
-  assert.deepEqual(run(['goal', 'show', 'G-001']).json.governance.final.failed, [{ rule: 'GOV-07', notes: 'README not updated' }]);
+  assert.deepEqual(run(['goal', 'show', 'G-001']).json.governance.final.failed, [{ rule: 'GOV-08', notes: 'README not updated' }]);
 
   // Touching a task after the final review sends it back.
   run(['task', 'set', 'G-001', 'T-01', 'pending']);
@@ -479,7 +497,7 @@ test('cli: governance rules are validated, never renumbered, and old tables are 
   run(['governance', 'add', 'Use a | b pipes', '--severity', 'should', '--stage', 'plan']);
   run(['governance', 'set', 'GOV-01', 'severity', 'retired']);
   const rules = run(['governance', 'list']).json;
-  assert.equal(rules.find((r) => r.id === 'GOV-06').rule, 'Use a | b pipes');
+  assert.equal(rules.find((r) => r.id === 'GOV-07').rule, 'Use a | b pipes');
   assert.equal(rules.find((r) => r.id === 'GOV-01').severity, 'retired');
   assert.match(fs.readFileSync(gov, 'utf8'), /## Definition of Done/, 'text around the table is kept');
 
@@ -488,4 +506,69 @@ test('cli: governance rules are validated, never renumbered, and old tables are 
   assert.deepEqual(run(['governance', 'list']).json, [{ id: 'GOV-01', rule: 'Old.', severity: 'must', stage: 'plan', check: '' }]);
   run(['governance', 'add', 'New.', '--severity', 'should', '--stage', 'final']);
   assert.match(fs.readFileSync(gov, 'utf8'), /\| GOV-01 \| Old\. \| must \| plan \| - \|\n\| GOV-02 \| New\. \| should \| final \| - \|/);
+});
+
+test('cli: goals can be cancelled with a reason, are frozen while cancelled, and reopen as pending', () => {
+  const { run, dir } = project();
+  run(['init']);
+  governedGoal(run, dir, [['A']]);
+  run(['state', 'move', 'G-001', 'in-progress']);
+
+  fs.rmSync(path.join(dir, '.aisdlc/goals/cancelled'), { recursive: true }); // as in a project from before 0.3.0
+  assert.match(run(['state', 'move', 'G-001', 'cancelled']).stderr, /--reason is required/);
+  assert.match(run(['state', 'move', 'G-001', 'blocked', '--reason', 'x']).stderr, /only used when cancelling/);
+  const cancel = run(['state', 'move', 'G-001', 'cancelled', '--reason', 'superseded by G-002']);
+  assert.equal(cancel.code, 0, cancel.stderr);
+  assert.deepEqual([cancel.json.from, cancel.json.to, cancel.json.reason], ['in-progress', 'cancelled', 'superseded by G-002']);
+  const show = run(['goal', 'show', 'G-001']).json;
+  assert.equal(show.cancel_reason, 'superseded by G-002');
+  assert.match(fs.readFileSync(path.join(dir, '.aisdlc/registry.md'), 'utf8'), /\| G-001 \| goal \| Feature \| cancelled \(0\/1\) \| goals\/cancelled\//);
+
+  // A cancelled goal takes no changes until it is reopened.
+  for (const args of [
+    ['task', 'set', 'G-001', 'T-01', 'in-progress'], ['task', 'set', 'G-001', 'T-01', 'pending'], ['task', 'new', 'G-001', 'B'],
+    ['gate', 'set', 'G-001', 'challenge', 'done'], ['goal', 'set', 'G-001', 'branch', 'x'], ['adr', 'none', 'G-001', '--reason', 'x'],
+    ['adr', 'new', 'Pick a DB', '--goal', 'G-001'], ['state', 'move', 'G-001', 'in-progress'],
+  ]) assert.match(run(args).stderr, /cancelled; reopen it with `state move G-001 pending`/, args.join(' '));
+  assert.equal(fs.readdirSync(path.join(dir, '.aisdlc/adr')).filter((f) => f.startsWith('ADR-')).length, 0, 'a refused adr new writes nothing');
+  for (const step of ['challenge', 'adr', 'govern', 'implement']) {
+    assert.match(run(['gate', 'require', 'G-001', step]).json.problems.join(), /goal is cancelled/, step);
+  }
+  assert.match(run(['goal', 'set', 'G-001', 'cancel_reason', 'x']).stderr, /state move <G-id> cancelled/);
+
+  const reopen = run(['state', 'move', 'G-001', 'pending']);
+  assert.equal(reopen.code, 0, reopen.stderr);
+  assert.equal(run(['goal', 'show', 'G-001']).json.status, 'pending');
+  assert.match(fs.readFileSync(path.join(dir, '.aisdlc/goals/pending/G-001-feature/goal.md'), 'utf8'), /\ncancel_reason:\n/);
+  assert.equal(run(['gate', 'require', 'G-001', 'challenge']).code, 0);
+  assert.equal(run(['goal', 'new', 'Next']).json.id, 'G-002', 'cancelled goals keep their IDs');
+});
+
+test('cli: questions-resolved fails while Risks & Unknowns lists open questions', () => {
+  const { run, dir } = project();
+  run(['init']);
+  const goal = plannedGoal(run, dir, [['A']]);
+  const file = path.join(dir, goal.file);
+  const gov05 = () => run(['governance', 'checks', 'G-001']).json.find((c) => c.rule === 'GOV-05');
+  assert.equal(gov05().check, 'questions-resolved');
+  assert.equal(gov05().ok, true);
+
+  edit(file, (s) => s.replace('## Risks & Unknowns\n', '## Risks & Unknowns\n\n- **Open:** Which regions ship first?\n- Open: Retry limit?\n- Vendor API may be slow.\n'));
+  assert.deepEqual(gov05().problems, ['open question: Which regions ship first?', 'open question: Retry limit?']);
+  edit(file, (s) => s.replace(/- \*\*Open:\*\* .*\n- Open: .*\n/, ''));
+  assert.equal(gov05().ok, true, 'a plain risk is not an open question');
+});
+
+test('cli: criteria-met needs every goal and done-task criterion ticked; skipped tasks do not count', () => {
+  const { run, dir } = project();
+  run(['init']);
+  const goal = plannedGoal(run, dir, [['A'], ['B']]);
+  const g = run(['goal', 'show', 'G-001']).json;
+  const met = () => run(['governance', 'checks', 'G-001', '--stage', 'final']).json.find((c) => c.rule === 'GOV-06');
+  assert.deepEqual(met().problems, ['goal criterion not met: It works', 'T-01 criterion not met: It works', 'T-02 criterion not met: It works']);
+  tick(path.join(dir, goal.file));
+  tick(path.join(dir, g.tasks[0].file));
+  // T-02 skipped: its criteria are not expected to be met. Status is set by hand here; the gated path is tested elsewhere.
+  edit(path.join(dir, g.tasks[1].file), (s) => s.replace('status: pending', 'status: skipped'));
+  assert.equal(met().ok, true);
 });

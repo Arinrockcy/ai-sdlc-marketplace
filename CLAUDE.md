@@ -51,7 +51,7 @@ Skills call the script (written `$AISDLC` in the skill files) and should never h
   - Severity is `must|should|retired`. A bad value fails loudly.
   - Stage is `plan|final`.
   - Check names an entry in `CHECKS`.
-- `govern passed` requires `governance-review.md` with `result: pass`, a row for every active plan rule, no failed `must` rule, a note on every `fail`/`n/a`, and no `pass`/`n/a` on a rule whose automatic check fails. It stores `govern_fingerprint` (`planFingerprint`: goal text, planned task fields and text minus Notes and checkbox state, linked ADR statuses, plan rules).
+- `govern passed` requires `governance-review.md` with `result: pass`, a row for every active plan rule, no failed `must` rule, a note on every row (evidence for `pass`, reason for `fail`/`n/a`), and no `pass`/`n/a` on a rule whose automatic check fails. It stores `govern_fingerprint` (`planFingerprint`: goal text, planned task fields and text minus Notes and checkbox state, linked ADR statuses, plan rules).
 - `gate_final` works the same for `final` rules via `governance-final.md`. It is only required when active final rules exist.
 - `invalidate` resets a gate and every later one (adr → govern → final) and archives reviews as `<name>.stale-N.md`. It runs on:
   - setting challenge or adr
@@ -59,7 +59,7 @@ Skills call the script (written `$AISDLC` in the skill files) and should never h
   - `task new` (resets govern)
   - any `task set` (resets final)
   - `gate set govern|final pending`
-- `state move in-progress|completed` requires the implement gate, which includes a matching plan fingerprint. A goal can only move to `completed` when every task is done or skipped and, if final rules exist, `gate_final` is passed.
+- `state move in-progress|completed` requires the implement gate, which includes a matching plan fingerprint. `state move cancelled` requires `--reason` (stored as `cancel_reason`). A completed goal never changes again. A cancelled goal refuses every change until `state move <G-id> pending` reopens it (`assertOpen`). A goal can only move to `completed` when every task is done or skipped and, if final rules exist, `gate_final` is passed.
 - Task changes need the goal to be in-progress (except resetting to `pending`, used to resume a blocked goal). A task starts, or becomes done, only while the implement gate holds (governance passed and the plan unchanged). It also needs its dependencies done or skipped. It becomes `done` only from `in-progress` with `verified: pass`. `task verify` records that after running the task's `verify` command and the `after_task` hook. It takes `--evidence` instead for a `manual:` check, or when neither exists and nothing would run.
 - Frontmatter values must be single-line. Only `adrs`, `depends_on` and `goals` parse as arrays.
 
@@ -79,11 +79,15 @@ These were settled with the repo owner:
 - The `before_goal` default only pulls the base branch (default `develop`).
 - On a verify failure, `/aisdlc:implement` asks the user to retry, skip or block. It does not auto-retry.
 - No skill assumes. Anything unclear or under-documented that the code doesn't answer is asked, never guessed or defaulted silently.
-- `/aisdlc:create-goal` first checks for unfinished goals. It asks whether to merge into a pending goal, finish an unfinished one first, or create a separate goal, and never picks for the user. Merge is offered only for `pending` goals, because in-progress and blocked goals can't be re-challenged. A merge resets the challenge and adr gates.
+- `/aisdlc:create-goal` first checks for unfinished goals (pending, in-progress, blocked). It asks whether to merge into a pending goal, finish or cancel an unfinished one first, or create a separate goal, and never picks for the user. Merge is offered only for `pending` goals, because in-progress and blocked goals can't be re-challenged. A merge resets the challenge and adr gates.
 - `/aisdlc:create-goal` then asks intake questions about the gaps in the description, before writing the goal. Answers go under Clarifications so challenge doesn't repeat them.
 - `/aisdlc:challenge` is clarification Q&A, one question at a time. It is not a critique.
 - There is no governance waiver.
 - Governance has two stages. `plan` rules gate implementation. `final` rules gate completion, and `/aisdlc:implement` runs the final review itself.
+- `init` seeds GOV-06 (`must`, `final`, check `criteria-met`), so finished code is reviewed against its acceptance criteria by default. Init also offers `/aisdlc:govern` for the project's own rules.
+- Every review row needs a note, and a `pass` note cites evidence. Reviews run in a sub-agent or fresh session when the agent supports one.
+- Unanswered questions are recorded as `- **Open:** …` under Risks & Unknowns, and the `questions-resolved` check on GOV-05 fails while any remain.
+- Goals can be cancelled with a reason and reopened. Several goals may be in progress at once: `/aisdlc:implement` warns before `before_goal` switches branches under another goal and asks, but never refuses.
 - A task added after governance passed (including one discovered mid-implement) resets governance. Implement stops until the goal is re-governed.
 - `/aisdlc:govern` offers `templates/governance-catalog.md` rules as choices and never adds one silently. `governance add` requires an explicit severity and stage.
 - `/aisdlc:implement` runs one task per invocation unless `--all` or `implement.mode: "auto"` is set.

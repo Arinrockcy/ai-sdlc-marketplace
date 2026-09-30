@@ -1,6 +1,6 @@
 ---
 name: init
-description: Initialize the AI-SDLC workflow in the current project. Creates .aisdlc/ (goals state folders, registry.md, governance.md, config.json, adr/, stacks/, cache/), detects the tech stack, registers a stack plugin, and optionally sets up Graphify. Use when the user runs /aisdlc:init or wants to start using the aisdlc workflow in a repo.
+description: Initialize the AI-SDLC workflow in the current project. Creates .aisdlc/ (goals state folders, registry.md, governance.md, config.json, adr/, stacks/, cache/), detects the tech stack, registers a stack plugin, optionally sets up Graphify, and offers to set up governance rules. Use when the user runs /aisdlc:init or wants to start using the aisdlc workflow in a repo.
 argument-hint: "[--base-branch <branch>]"
 ---
 
@@ -34,7 +34,14 @@ Init is idempotent. It only creates what is missing and never overwrites existin
 
 5. **Git hygiene.** `.aisdlc/` is meant to be committed; `.aisdlc/cache/` ignores itself. If Graphify was chosen, suggest adding `graphify-out/` to `.gitignore`. Do this only if the user agrees.
 
-6. Run `$AISDLC hooks run post_init`. Summarize: the resolved config (`$AISDLC config get`), the active hooks (`$AISDLC hooks list`, showing only points that have commands), and the next step, `/aisdlc:create-goal <description>`.
+6. **Governance.** Run `$AISDLC governance list` and show the user the rules. A new project starts with:
+   - GOV-01 to GOV-05, `plan` rules that `/aisdlc:govern <G-id>` checks before implementation
+   - GOV-06, a `final` rule: the finished code meets every acceptance criterion of the goal and of each done task. `/aisdlc:implement` runs this final review before a goal completes.
+
+   Without any active `final` rule, nothing reviews the finished code: a goal completes as soon as every task's verify passes. If the list has no active `final` rule (for example, a project initialized before aisdlc 0.3.0), tell the user that.
+   Then ask whether to set up the project's own rules now (tests, secrets, stack standards and the other catalog rules). If they agree, run `/aisdlc:govern` with no argument. Otherwise tell them they can run it any time before their first goal is governed.
+
+7. Run `$AISDLC hooks run post_init`. Summarize: the resolved config (`$AISDLC config get`), the active hooks (`$AISDLC hooks list`, showing only points that have commands), the governance rules, and the next step, `/aisdlc:create-goal <description>`.
 
 ## Hook overrides (for the user's reference)
 Precedence for each hook point: env `AISDLC_HOOK_<POINT>` > `.aisdlc/config.json` `hooks` > `.aisdlc/stacks/<stack>.json` > core defaults.
