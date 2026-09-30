@@ -6,6 +6,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { execSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 
 const PLUGIN_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -16,6 +17,11 @@ const GOAL_STATES = ['pending', 'in-progress', 'blocked', 'completed'];
 const TASK_STATES = ['pending', 'in-progress', 'done', 'blocked', 'skipped'];
 const TASK_SATISFIED = new Set(['done', 'skipped']);
 const RISK_RANK = { high: 0, medium: 1, low: 2 };
+const ADR_SETTLED = new Set(['accepted', 'superseded']);
+const RULE_SEVERITIES = ['must', 'should', 'retired'];
+// A rule's stage says which review checks it: `plan` gates implementation, `final` gates completion.
+const RULE_STAGES = ['plan', 'final'];
+const REVIEW_FILE = { plan: 'governance-review.md', final: 'governance-final.md' };
 const STEPS = ['init', 'create_goal', 'challenge', 'adr', 'govern', 'implement'];
 const HOOK_POINTS = [
   'before_goal', 'after_goal', 'before_task', 'after_task', 'on_block',
@@ -151,7 +157,7 @@ function setPath(obj, dotted, value) {
 }
 
 // Options that always take a value, even one that starts with "--" (e.g. --verify "--version").
-const VALUE_OPTS = new Set(['depends', 'risk', 'verify', 'reason', 'evidence', 'goal', 'task', 'status', 'stack', 'graph', 'base-branch', 'dir']);
+const VALUE_OPTS = new Set(['depends', 'risk', 'verify', 'reason', 'evidence', 'goal', 'task', 'status', 'stack', 'graph', 'base-branch', 'dir', 'severity', 'stage', 'check']);
 
 function parseArgs(argv) {
   const pos = [];
@@ -445,9 +451,161 @@ function registrySync(root) {
   return rows.length;
 }
 
+// ---------- governance ----------
+
+// Markdown table rows as arrays of trimmed cells, skipping |---| separator rows. `\|` is a literal pipe inside a cell.
+function tableRows(body) {
+  return body.split('\n')
+    .filter((l) => l.trim().startsWith('|') && !/^\|[\s|:-]+\|?$/.test(l.trim()))
+    .map((l) => l.trim().replace(/^\||(?<!\\)\|$/g, '').split(/(?<!\\)\|/).map((c) => c.trim().replace(/\\\|/g, '|')));
+}
+
+const RULE_ID = /^[A-Z][A-Z0-9]*-\d+$/;
+const GOVERNANCE_COLUMNS = ['ID', 'Rule', 'Severity', 'Stage', 'Check'];
+
+function ruleErrors(r) {
+  const errors = [];
+  if (!r.rule) errors.push(`${r.id} has no rule text`);
+  if (/[\r\n]/.test(r.rule)) errors.push(`${r.id} rule text must be a single line`);
+  if (!RULE_SEVERITIES.includes(r.severity)) errors.push(`${r.id} has severity "${r.severity}" (use ${RULE_SEVERITIES.join(', ')})`);
+  if (!RULE_STAGES.includes(r.stage)) errors.push(`${r.id} has stage "${r.stage}" (use ${RULE_STAGES.join(', ')})`);
+  if (r.check && !(r.check in CHECKS)) errors.push(`${r.id} has unknown check "${r.check}" (use ${Object.keys(CHECKS).join(', ')} or -)`);
+  return errors;
+}
+
+// Every rule in governance.md, retired ones included. Fails on duplicate IDs or invalid values,
+// so a typo never turns a must rule into one that silently does not block.
+function readGovernance(root) {
+  const file = path.join(aisdlcDir(root), 'governance.md');
+  if (!fs.existsSync(file)) return { file, text: null, rules: [] };
+  const text = fs.readFileSync(file, 'utf8').replace(/\r\n?/g, '\n');
+  const rows = tableRows(text);
+  const header = rows.find((r) => r.some((c) => c.toLowerCase() === 'severity'))?.map((c) => c.toLowerCase()) || [];
+  // Older files have no Stage or Check column: their rules are plan-stage with no automatic check.
+  const col = (name, fallback = -1) => (header.includes(name) ? header.indexOf(name) : fallback);
+  const cols = { rule: col('rule', 1), severity: col('severity', 2), stage: col('stage'), check: col('check') };
+  const cell = (r, i) => (i >= 0 ? r[i] || '' : '');
+  const rules = [];
+  const errors = [];
+  for (const r of rows.filter((x) => RULE_ID.test(x[0]))) {
+    const rule = {
+      id: r[0],
+      rule: cell(r, cols.rule),
+      severity: cell(r, cols.severity).toLowerCase(),
+      stage: cell(r, cols.stage).toLowerCase() || 'plan',
+      check: cell(r, cols.check).replace(/^-$/, ''),
+    };
+    if (rules.some((x) => x.id === rule.id)) errors.push(`${rule.id} appears more than once`);
+    errors.push(...ruleErrors(rule));
+    rules.push(rule);
+  }
+  if (errors.length) fail(`governance.md has problems:\n- ${errors.join('\n- ')}`);
+  return { file, text, rules };
+}
+
+const activeRules = (root, stage) => readGovernance(root).rules.filter((r) => r.severity !== 'retired' && (!stage || r.stage === stage));
+
+// Rewrites the rules table in place, keeping the text around it.
+function writeGovernance(gov, rules) {
+  const esc = (v) => String(v).replace(/\|/g, '\\|');
+  const table = [
+    `| ${GOVERNANCE_COLUMNS.join(' | ')} |`,
+    `|${GOVERNANCE_COLUMNS.map(() => '----').join('|')}|`,
+    ...rules.map((r) => `| ${r.id} | ${esc(r.rule)} | ${r.severity} | ${r.stage} | ${r.check || '-'} |`),
+  ];
+  const lines = gov.text.split('\n');
+  const start = lines.findIndex((l) => l.trim().startsWith('|') && /\|\s*severity\s*\|/i.test(l));
+  if (start < 0) fail('governance.md has no rules table (a header row with a Severity column).');
+  let end = start;
+  while (end < lines.length && lines[end].trim().startsWith('|')) end++;
+  lines.splice(start, end - start, ...table);
+  fs.writeFileSync(gov.file, lines.join('\n'));
+}
+
+// ---------- automatic checks ----------
+
+const bodyLines = (body) => body.replace(/\r\n?/g, '\n').split('\n');
+
+// [start, end) of the `## ` section whose heading matches `re`, or null.
+function sectionRange(lines, re) {
+  const start = lines.findIndex((l) => /^##\s/.test(l) && re.test(l.replace(/^##\s+/, '')));
+  if (start < 0) return null;
+  const n = lines.slice(start + 1).findIndex((l) => /^#{1,2}\s/.test(l));
+  return [start, n < 0 ? lines.length : start + 1 + n];
+}
+
+function section(body, re) {
+  const lines = bodyLines(body);
+  const r = sectionRange(lines, re);
+  return r ? lines.slice(r[0] + 1, r[1]).join('\n').replace(/<!--[\s\S]*?-->/g, '').trim() : null;
+}
+
+function withoutSection(body, re) {
+  const lines = bodyLines(body);
+  const r = sectionRange(lines, re);
+  if (r) lines.splice(r[0], r[1] - r[0]);
+  return lines.join('\n');
+}
+
+// Non-empty bullet items, with or without a checkbox.
+const listItems = (text) => (text || '').split('\n')
+  .map((l) => l.match(/^\s*[-*]\s+(?:\[[ xX]\]\s*)?(.*)$/)?.[1].trim())
+  .filter(Boolean);
+
+function adrProblems(root, d) {
+  const linked = Array.isArray(d.adrs) && d.adrs.length > 0;
+  if (!linked) return d.adrs === 'none' && d.adr_reason ? [] : ['link an ADR (adr new/link) or record `adr none --reason`'];
+  const status = new Map(listAdrs(root).map((a) => [a.id, a.status]));
+  return d.adrs.filter((id) => !ADR_SETTLED.has(status.get(id))).map((id) => `${id} (${status.get(id) || 'missing'}) not accepted yet`);
+}
+
+// Checks a rule can name in its Check column. Each returns problems; an empty list means the rule holds.
+// They only test what is mechanical (presence, structure); whether content is good stays with the review.
+const CHECKS = {
+  'goal-defined': ({ goal }) => {
+    const { body } = readDoc(goal.file);
+    return [
+      ...(section(body, /^problem\b/i) ? [] : ['goal has no Problem statement']),
+      ...(listItems(section(body, /acceptance criteria/i)).length ? [] : ['goal has no acceptance criteria']),
+    ];
+  },
+  'tasks-verifiable': ({ tasks }) => (tasks.length ? tasks.flatMap((t) => {
+    const verify = String(t.verify ?? '').trim();
+    return [
+      ...(verify && !/^manual:\s*$/i.test(verify) ? [] : [`${t.id} has no verify command or manual check`]),
+      ...(listItems(section(readDoc(t.file).body, /acceptance criteria/i)).length ? [] : [`${t.id} has no acceptance criteria`]),
+    ];
+  }) : ['goal has no tasks']),
+  'dag-valid': ({ tasks }) => analyzeDag(tasks).errors,
+  'adr-recorded': ({ root, goal }) => adrProblems(root, readDoc(goal.file).data),
+};
+
+function runChecks(root, goal, rules) {
+  const ctx = { root, goal, tasks: listTasks(goal) };
+  return rules.filter((r) => r.check).map((r) => {
+    const problems = CHECKS[r.check](ctx);
+    return { rule: r.id, check: r.check, ok: problems.length === 0, problems };
+  });
+}
+
+// Hash of what the plan review judged: goal text, planned task fields and text, linked ADR statuses and plan rules.
+// Progress (status, verify results, ticked boxes, task Notes) is left out, so doing the work never invalidates it.
+function planFingerprint(root, goal) {
+  const norm = (body) => bodyLines(body).map((l) => l.replace(/\[[xX]\]/g, '[ ]').trimEnd()).join('\n').trim();
+  const g = readDoc(goal.file);
+  const adrStatus = new Map(listAdrs(root).map((a) => [a.id, a.status]));
+  const plan = {
+    goal: [g.data.title, g.data.adrs, g.data.adr_reason, norm(g.body)],
+    tasks: listTasks(goal).map((t) => [t.id, t.title, t.depends_on, t.risk, String(t.verify ?? ''), norm(withoutSection(readDoc(t.file).body, /^notes\b/i))]),
+    adrs: (Array.isArray(g.data.adrs) ? g.data.adrs : []).map((id) => [id, adrStatus.get(id)]),
+    rules: activeRules(root, 'plan').map((r) => [r.id, r.rule, r.severity, r.check]),
+  };
+  return createHash('sha256').update(JSON.stringify(plan)).digest('hex').slice(0, 16);
+}
+
 // ---------- gates ----------
 
-function requireStep(goal, step) {
+function requireStep(root, goal, step) {
   const d = goal.data;
   const problems = [];
   if (step === 'challenge') {
@@ -457,95 +615,123 @@ function requireStep(goal, step) {
   } else if (step === 'govern') {
     if (d.gate_challenge !== 'done') problems.push('run /aisdlc:challenge first (gate_challenge != done)');
     if (d.gate_adr !== 'done') problems.push('run /aisdlc:adr first (gate_adr != done)');
-  } else if (step === 'implement') {
+  } else if (step === 'implement' || step === 'final') {
     if (goal.status === 'completed') problems.push('goal is already completed');
     if (d.gate_govern !== 'passed') problems.push(`run /aisdlc:govern ${goal.id} first (gate_govern = ${d.gate_govern || 'pending'})`);
+    else if (d.govern_fingerprint !== planFingerprint(root, goal)) {
+      problems.push(`the plan (goal, tasks, linked ADRs or plan rules) changed after governance passed; re-run /aisdlc:govern ${goal.id}`);
+    }
     const p = goalProgress(listTasks(goal));
     if (!p.dag_ok) problems.push(`task DAG invalid: ${p.dag_errors.join('; ')}`);
     if (p.total === 0) problems.push('goal has no tasks');
-  } else fail(`Unknown step "${step}". Valid: challenge, adr, govern, implement`);
+    if (step === 'final') {
+      if (!p.complete) problems.push('not every task is done or skipped yet');
+      if (!activeRules(root, 'final').length) problems.push('governance.md has no active final-stage rules, so there is nothing to review');
+    }
+  } else fail(`Unknown step "${step}". Valid: challenge, adr, govern, implement, final`);
   return problems;
 }
 
-// Markdown table rows as arrays of trimmed cells, skipping |---| separator rows.
-function tableRows(body) {
-  return body.split('\n')
-    .filter((l) => l.trim().startsWith('|') && !/^\|[\s|:-]+\|?$/.test(l.trim()))
-    .map((l) => l.trim().replace(/^\||\|$/g, '').split('|').map((c) => c.trim()));
-}
-
-const RULE_ID = /^[A-Z][A-Z0-9]*-\d+$/;
-
-// Active rules from governance.md: [{ id, severity }], excluding rules whose severity is `retired`.
-function governanceRules(root) {
-  const file = path.join(aisdlcDir(root), 'governance.md');
-  if (!fs.existsSync(file)) return [];
-  const rows = tableRows(fs.readFileSync(file, 'utf8').replace(/\r\n?/g, '\n'));
-  const header = rows.find((r) => r.some((c) => c.toLowerCase() === 'severity'));
-  const col = header ? header.findIndex((c) => c.toLowerCase() === 'severity') : -1;
-  return rows
-    .filter((r) => RULE_ID.test(r[0]))
-    .map((r) => ({ id: r[0], severity: (col >= 0 ? r[col] : r.at(-1) || '').toLowerCase() }))
-    .filter((r) => r.severity !== 'retired');
-}
-
-// Problems that stop a governance review from counting as a pass.
-function reviewProblems(root, goal, review) {
-  const doc = readDoc(review);
-  const problems = [];
-  if (doc.data.result !== 'pass') problems.push('`result` is not `pass`');
-  if (doc.data.goal && doc.data.goal !== goal.id) problems.push(`review is for ${doc.data.goal}, not ${goal.id}`);
+function readReview(file) {
+  const doc = readDoc(file);
   const results = new Map();
   for (const r of tableRows(doc.body)) {
     const id = r[0].match(/[A-Z][A-Z0-9]*-\d+/)?.[0];
     if (id) results.set(id, { result: (r[1] || '').toLowerCase().replace(/[^a-z/]/g, ''), notes: r[2] || '' });
   }
-  for (const rule of governanceRules(root)) {
-    const r = results.get(rule.id);
+  return { data: doc.data, results };
+}
+
+// Problems that stop a governance review from counting as a pass.
+function reviewProblems(root, goal, stage) {
+  const name = REVIEW_FILE[stage];
+  const file = path.join(goal.dir, name);
+  if (!fs.existsSync(file)) return [`${name} is required`];
+  const review = readReview(file);
+  const problems = [];
+  if (review.data.result !== 'pass') problems.push(`${name}: \`result\` is not \`pass\``);
+  if (review.data.goal && review.data.goal !== goal.id) problems.push(`${name}: review is for ${review.data.goal}, not ${goal.id}`);
+  if (review.data.stage && review.data.stage !== stage) problems.push(`${name}: review is for stage ${review.data.stage}, not ${stage}`);
+  const rules = activeRules(root, stage);
+  const checks = new Map(runChecks(root, goal, rules).map((c) => [c.rule, c]));
+  for (const rule of rules) {
+    const r = review.results.get(rule.id);
+    const check = checks.get(rule.id);
     if (!r) problems.push(`${rule.id} is missing from the review table`);
     else if (!['pass', 'fail', 'n/a'].includes(r.result)) problems.push(`${rule.id} has result "${r.result}" (use pass, fail or n/a)`);
+    else if (check && !check.ok && r.result !== 'fail') problems.push(`${rule.id} is ${r.result} but its automatic check "${check.check}" failed: ${check.problems.join('; ')}`);
     else if (r.result === 'fail' && rule.severity === 'must') problems.push(`${rule.id} is a must rule and failed`);
     else if (r.result !== 'pass' && !r.notes) problems.push(`${rule.id} is ${r.result} without a note`);
   }
   return problems;
 }
 
+// Moves a review aside as <name>.stale-N.md, never overwriting an earlier one. Returns the new name, or null.
+function archiveReview(goal, stage) {
+  const file = path.join(goal.dir, REVIEW_FILE[stage]);
+  if (!fs.existsSync(file)) return null;
+  const base = REVIEW_FILE[stage].replace(/\.md$/, '');
+  let n = 1;
+  while (fs.existsSync(path.join(goal.dir, `${base}.stale-${n}.md`))) n++;
+  const name = `${base}.stale-${n}.md`;
+  fs.renameSync(file, path.join(goal.dir, name));
+  return name;
+}
+
+const GATE_ORDER = ['adr', 'govern', 'final'];
+
+// Resets `from` and every later gate to pending, and archives the reviews that no longer count.
+function invalidate(goal, from) {
+  const d = readDoc(goal.file).data;
+  const rerun = { adr: `/aisdlc:adr ${goal.id}`, govern: `/aisdlc:govern ${goal.id}`, final: `/aisdlc:govern ${goal.id} --final` };
+  const patch = {};
+  const notes = [];
+  for (const gate of GATE_ORDER.slice(GATE_ORDER.indexOf(from))) {
+    if (d[`gate_${gate}`] && d[`gate_${gate}`] !== 'pending') {
+      patch[`gate_${gate}`] = 'pending';
+      notes.push(`gate_${gate} reset to pending; re-run ${rerun[gate]}`);
+    }
+    if (gate === 'govern' && d.govern_fingerprint) patch.govern_fingerprint = '';
+    const stage = { govern: 'plan', final: 'final' }[gate];
+    const archived = stage && archiveReview(goal, stage);
+    if (archived) notes.push(`${REVIEW_FILE[stage]} is now stale (moved to ${archived})`);
+  }
+  if (Object.keys(patch).length) updateDoc(goal.file, patch);
+  return notes;
+}
+
 function setGate(root, goal, gate, value) {
-  const allowed = { challenge: ['pending', 'done'], adr: ['pending', 'done'], govern: ['pending', 'passed', 'failed'] };
+  const allowed = { challenge: ['pending', 'done'], adr: ['pending', 'done'], govern: ['pending', 'passed', 'failed'], final: ['pending', 'passed', 'failed'] };
   if (!allowed[gate]) fail(`Unknown gate "${gate}". Valid: ${Object.keys(allowed).join(', ')}`);
   if (!allowed[gate].includes(value)) fail(`Invalid value for gate ${gate}: ${value}. Valid: ${allowed[gate].join(', ')}`);
-  const d = goal.data;
   if (gate === 'adr' && value === 'done') {
-    const linked = Array.isArray(d.adrs) && d.adrs.length > 0;
-    const none = d.adrs === 'none' && d.adr_reason;
-    if (!linked && !none) fail('Cannot mark adr done: link an ADR (adr new/link) or record `adr none --reason`.');
-    if (linked) {
-      const status = new Map(listAdrs(root).map((a) => [a.id, a.status]));
-      const open = d.adrs.filter((id) => !['accepted', 'superseded'].includes(status.get(id)));
-      if (open.length) fail(`Cannot mark adr done: ${open.map((id) => `${id} (${status.get(id) || 'missing'})`).join(', ')} not accepted yet.`);
-    }
+    const problems = adrProblems(root, goal.data);
+    if (problems.length) fail(`Cannot mark adr done: ${problems.join(', ')}.`);
   }
-  const review = path.join(goal.dir, 'governance-review.md');
-  if (gate === 'govern' && value === 'passed') {
-    if (!fs.existsSync(review)) fail('Cannot mark govern passed: governance-review.md is required.');
-    const problems = reviewProblems(root, goal, review);
-    if (problems.length) fail(`Cannot mark govern passed: governance-review.md has problems:\n- ${problems.join('\n- ')}`);
+  const stage = { govern: 'plan', final: 'final' }[gate];
+  if (stage && value === 'passed') {
+    const problems = [...(gate === 'final' ? requireStep(root, goal, 'final') : []), ...reviewProblems(root, goal, stage)];
+    if (problems.length) fail(`Cannot mark ${gate} passed:\n- ${problems.join('\n- ')}`);
   }
+  // A new answer at one gate invalidates everything after it. Setting a review gate to pending starts a
+  // fresh review, so the current one is archived.
+  let notes = [];
+  if (gate === 'challenge' || gate === 'adr') notes = invalidate(goal, 'govern');
+  else if (value === 'pending') notes = invalidate(goal, gate);
+  else if (gate === 'govern') notes = invalidate(goal, 'final');
   const patch = { [`gate_${gate}`]: value };
-  const notes = [];
-  // Changing clarifications or decisions invalidates an earlier governance pass, and its review.
-  if (gate === 'challenge' || gate === 'adr') {
-    if (d.gate_govern && d.gate_govern !== 'pending') {
-      patch.gate_govern = 'pending';
-      notes.push('gate_govern reset to pending; re-run /aisdlc:govern');
-    }
-    if (fs.existsSync(review)) {
-      fs.renameSync(review, path.join(goal.dir, 'governance-review.stale.md'));
-      notes.push('governance-review.md is now stale (moved to governance-review.stale.md)');
-    }
-  }
+  if (gate === 'govern') patch.govern_fingerprint = value === 'passed' ? planFingerprint(root, goal) : '';
   updateDoc(goal.file, patch);
   return notes;
+}
+
+function reviewSummary(root, goal, stage) {
+  const file = path.join(goal.dir, REVIEW_FILE[stage]);
+  if (!fs.existsSync(file)) return null;
+  const r = readReview(file);
+  // Failed rules in a passing review are the `should` rules that did not block; keep them visible.
+  const failed = [...r.results].filter(([, v]) => v.result === 'fail').map(([rule, v]) => ({ rule, notes: v.notes }));
+  return { file: path.relative(root, file), result: r.data.result || null, failed };
 }
 
 // ---------- commands ----------
@@ -611,7 +797,7 @@ const commands = {
     if (action === 'list') {
       return out(listGoals(root).filter((g) => !opts.status || g.status === opts.status).map((g) => ({
         id: g.id, title: g.title, status: g.status, dir: path.relative(root, g.dir),
-        gates: { challenge: g.data.gate_challenge, adr: g.data.gate_adr, govern: g.data.gate_govern },
+        gates: gatesOf(g),
       })));
     }
     if (action === 'show') {
@@ -619,7 +805,9 @@ const commands = {
       const tasks = listTasks(g);
       return out({
         id: g.id, title: g.title, status: g.status, dir: path.relative(root, g.dir),
-        gates: { challenge: g.data.gate_challenge, adr: g.data.gate_adr, govern: g.data.gate_govern },
+        gates: gatesOf(g),
+        final_review_required: activeRules(root, 'final').length > 0,
+        governance: { plan: reviewSummary(root, g, 'plan'), final: reviewSummary(root, g, 'final') },
         adrs: g.data.adrs, auto_commit: g.data.auto_commit, branch: g.data.branch,
         suggested_branch: hookContext(root, loadConfig(root), { goal: g.id }).goal_branch,
         tasks: tasks.map((t) => ({ id: t.id, title: t.title, status: t.status, risk: t.risk, depends_on: t.depends_on, verify: t.verify, file: path.relative(root, t.file) })),
@@ -629,7 +817,7 @@ const commands = {
     if (action === 'set') {
       const [id, key, value] = rest;
       if (!id || !key || value === undefined) fail('Usage: goal set <G-id> <key> <value>');
-      if (['id', 'status', 'adrs', 'adr_reason'].includes(key) || key.startsWith('gate_')) fail('Use `state move`, `gate set` or `adr link|none` for status, gates and ADR links.');
+      if (['id', 'status', 'adrs', 'adr_reason', 'govern_fingerprint'].includes(key) || key.startsWith('gate_')) fail('Use `state move`, `gate set` or `adr link|none` for status, gates and ADR links.');
       // The branch is substituted into hook commands, so keep it to git-ref-safe characters.
       if (key === 'branch' && !/^[A-Za-z0-9._][A-Za-z0-9._/-]*$/.test(value)) fail(`Invalid branch name "${value}".`);
       const g = getGoal(root, id);
@@ -645,10 +833,13 @@ const commands = {
     const root = findRoot();
     const g = getGoal(root, id);
     if (status === 'in-progress' || status === 'completed') {
-      const problems = requireStep(g, 'implement');
+      const problems = requireStep(root, g, 'implement');
       if (problems.length) fail(`Cannot move ${id} to ${status}:\n- ${problems.join('\n- ')}`);
     }
-    if (status === 'completed' && !goalProgress(listTasks(g)).complete) fail(`${id} still has unfinished tasks; cannot complete.`);
+    if (status === 'completed') {
+      if (!goalProgress(listTasks(g)).complete) fail(`${id} still has unfinished tasks; cannot complete.`);
+      if (activeRules(root, 'final').length && g.data.gate_final !== 'passed') fail(`${id} needs a passing final governance review; run /aisdlc:govern ${id} --final.`);
+    }
     const dest = path.join(aisdlcDir(root), 'goals', status, path.basename(g.dir));
     if (dest !== g.dir) fs.renameSync(g.dir, dest);
     updateDoc(path.join(dest, 'goal.md'), { status });
@@ -672,7 +863,9 @@ const commands = {
       const file = path.join(g.dir, 'tasks', `${id}-${slugify(title)}.md`);
       fs.writeFileSync(file, render('task.md', { id, goal: g.id, title, depends_on: depends, risk }));
       if (typeof opts.verify === 'string') updateDoc(file, { verify: opts.verify });
-      return out({ id, file: path.relative(root, file) });
+      // A task added after governance was never reviewed, so governance has to run again.
+      const notes = invalidate(g, 'govern');
+      return out({ id, file: path.relative(root, file), notes });
     }
     if (action === 'set') {
       const [taskId, status] = rest;
@@ -684,6 +877,8 @@ const commands = {
       // Resetting to pending is how a blocked goal is resumed; every other change needs a started goal.
       if (status !== 'pending' && g.status !== 'in-progress') fail(`${g.id} is ${g.status}; run \`state move ${g.id} in-progress\` first.`);
       if (status === 'in-progress' || status === 'done') {
+        const problems = requireStep(root, g, 'implement');
+        if (problems.length) fail(`Cannot set ${taskId} ${status}:\n- ${problems.join('\n- ')}`);
         const byId = new Map(tasks.map((x) => [x.id, x]));
         const unmet = t.depends_on.filter((d) => !TASK_SATISFIED.has(byId.get(d)?.status));
         if (unmet.length) fail(`${taskId} depends on unfinished tasks: ${unmet.join(', ')}`);
@@ -695,9 +890,11 @@ const commands = {
       const patch = { status, reason: typeof opts.reason === 'string' ? opts.reason : '' };
       if (status !== 'done') Object.assign(patch, { verified: '', verify_evidence: '' });
       updateDoc(t.file, patch);
+      // The final review judged the finished tasks; any change to them means it has to run again.
+      const notes = invalidate(g, 'final');
       writeTasksMd(g);
       registrySync(root);
-      return out({ goal: g.id, task: taskId, status, progress: goalProgress(listTasks(g)) });
+      return out({ goal: g.id, task: taskId, status, progress: goalProgress(listTasks(g)), notes });
     }
     if (action === 'verify') {
       // Runs the task's verify command, then the after_task hook, and records the result `done` requires.
@@ -706,16 +903,21 @@ const commands = {
       if (t.status !== 'in-progress') fail(`${taskId} is ${t.status}; only an in-progress task can be verified.`);
       const verify = t.verify === '' || t.verify == null ? '' : String(t.verify).trim();
       const manual = verify.match(/^manual:\s*(.*)$/i);
-      if (manual && !(typeof opts.evidence === 'string' && opts.evidence.trim())) {
-        fail(`${taskId} has a manual check ("${manual[1]}"); pass --evidence "<what you checked and saw>".`);
+      const hook = resolveHookFor(root, 'after_task', { goal: g.id, task: taskId });
+      const evidence = typeof opts.evidence === 'string' && opts.evidence.trim() ? opts.evidence : '';
+      // With no verify command and no after_task hook nothing would run, so a pass needs evidence like a manual check.
+      const byHand = manual || (!verify && !hook.commands.length);
+      if (byHand && !evidence) {
+        fail(manual
+          ? `${taskId} has a manual check ("${manual[1]}"); pass --evidence "<what you checked and saw>".`
+          : `${taskId} has no verify command and no after_task hook, so nothing would run; check it by hand and pass --evidence "<what you checked and saw>".`);
       }
       const steps = [];
       if (verify && !manual) steps.push([`${taskId} verify`, [verify]]);
-      const hook = resolveHookFor(root, 'after_task', { goal: g.id, task: taskId });
       if (hook.commands.length) steps.push([`hook after_task (${hook.source})`, hook.commands]);
       let code = 0;
       for (const [label, cmds] of steps) if ((code = runCommands(root, label, cmds))) break;
-      updateDoc(t.file, { verified: code ? 'fail' : 'pass', verify_evidence: manual ? opts.evidence : '' });
+      updateDoc(t.file, { verified: code ? 'fail' : 'pass', verify_evidence: byHand ? evidence : '' });
       process.stdout.write(`[aisdlc] verify ${taskId}: ${code ? 'fail' : 'pass'}\n`);
       if (code) process.exitCode = code;
       return;
@@ -742,7 +944,7 @@ const commands = {
     const root = findRoot();
     const g = getGoal(root, goalId);
     if (action === 'require') {
-      const problems = requireStep(g, a);
+      const problems = requireStep(root, g, a);
       out({ goal: g.id, step: a, ok: problems.length === 0, problems });
       if (problems.length) process.exitCode = 1;
       return;
@@ -764,15 +966,15 @@ const commands = {
       const goals = typeof opts.goal === 'string' ? [opts.goal] : [];
       const file = path.join(aisdlcDir(root), 'adr', `${id}-${slugify(title)}.md`);
       fs.writeFileSync(file, render('adr.md', { id, title, goals, date: today() }));
-      if (goals.length) linkAdr(root, id, goals[0]);
+      const notes = goals.length ? linkAdr(root, id, goals[0]) : [];
       registrySync(root);
-      return out({ id, file: path.relative(root, file) });
+      return out({ id, file: path.relative(root, file), notes });
     }
     if (action === 'link') {
       const [adrId, goalId] = rest;
-      linkAdr(root, adrId, goalId);
+      const notes = linkAdr(root, adrId, goalId);
       registrySync(root);
-      return out({ adr: adrId, goal: goalId });
+      return out({ adr: adrId, goal: goalId, notes });
     }
     if (action === 'none') {
       const [goalId] = rest;
@@ -783,9 +985,11 @@ const commands = {
       for (const a of listAdrs(root)) {
         if (prev.includes(a.id) && Array.isArray(a.goals)) updateDoc(a.file, { goals: a.goals.filter((x) => x !== goalId) });
       }
+      const changed = g.data.adrs !== 'none' || g.data.adr_reason !== opts.reason;
       updateDoc(g.file, { adrs: 'none', adr_reason: opts.reason });
+      const notes = changed ? invalidate(g, 'adr') : [];
       registrySync(root);
-      return out({ goal: goalId, adrs: 'none', reason: opts.reason });
+      return out({ goal: goalId, adrs: 'none', reason: opts.reason, notes });
     }
     fail('Usage: adr new|link|none');
   },
@@ -806,6 +1010,39 @@ const commands = {
       return;
     }
     fail('Usage: hooks list | hooks resolve|run <point>');
+  },
+
+  governance([action, ...rest], opts) {
+    const root = findRoot();
+    const gov = readGovernance(root);
+    if (action === 'list') return out(gov.rules);
+    if (action === 'checks') {
+      const stage = opts.stage || 'plan';
+      if (!RULE_STAGES.includes(stage)) fail(`Invalid stage "${stage}". Valid: ${RULE_STAGES.join(', ')}`);
+      return out(runChecks(root, getGoal(root, rest[0]), activeRules(root, stage)));
+    }
+    if (action !== 'add' && action !== 'set') fail('Usage: governance list | checks <G-id> [--stage plan|final] | add <rule> --severity must|should --stage plan|final [--check <name>] | set <rule-id> rule|severity|stage|check <value>');
+    if (gov.text === null) fail('No .aisdlc/governance.md; run init first.');
+    let rule;
+    if (action === 'add') {
+      const text = rest.join(' ').trim();
+      if (!text || typeof opts.severity !== 'string' || typeof opts.stage !== 'string') {
+        fail('Usage: governance add <rule> --severity must|should --stage plan|final [--check <name>]');
+      }
+      rule = { id: nextId('GOV', gov.rules.map((r) => r.id), 2), rule: text, severity: opts.severity.toLowerCase(), stage: opts.stage.toLowerCase(), check: typeof opts.check === 'string' ? opts.check.replace(/^-$/, '') : '' };
+      gov.rules.push(rule);
+    } else {
+      const [id, field, ...value] = rest;
+      if (!['rule', 'severity', 'stage', 'check'].includes(field) || !value.length) fail('Usage: governance set <rule-id> rule|severity|stage|check <value>');
+      // IDs never change and rules are never deleted: reviews reference them. Retire with `severity retired`.
+      rule = gov.rules.find((r) => r.id === id) || fail(`Rule ${id} not found.`);
+      const v = value.join(' ').trim();
+      rule[field] = field === 'rule' ? v : field === 'check' ? v.replace(/^-$/, '') : v.toLowerCase();
+    }
+    const errors = ruleErrors(rule);
+    if (errors.length) fail(errors.join('\n'));
+    writeGovernance(gov, gov.rules);
+    return out(rule);
   },
 
   registry([action]) {
@@ -836,8 +1073,13 @@ function linkAdr(root, adrId, goalId) {
   const goals = Array.isArray(adr.goals) ? adr.goals : [];
   if (!goals.includes(goalId)) updateDoc(adr.file, { goals: [...goals, goalId] });
   const adrs = Array.isArray(g.data.adrs) ? g.data.adrs : [];
-  if (!adrs.includes(adrId)) updateDoc(g.file, { adrs: [...adrs, adrId], adr_reason: '' });
+  if (adrs.includes(adrId)) return [];
+  updateDoc(g.file, { adrs: [...adrs, adrId], adr_reason: '' });
+  // The ADR gate judged the old set of decisions; a new link has to be settled again.
+  return invalidate(g, 'adr');
 }
+
+const gatesOf = (g) => ({ challenge: g.data.gate_challenge, adr: g.data.gate_adr, govern: g.data.gate_govern, final: g.data.gate_final || 'pending' });
 
 function main() {
   const [cmd, ...argv] = process.argv.slice(2);

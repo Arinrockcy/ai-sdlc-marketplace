@@ -12,7 +12,13 @@ argument-hint: "<G-id> [--all]"
 
 Input: `$ARGUMENTS` is `<G-id>`, optionally followed by `--all`.
 
-The script enforces the order: a goal only starts once governance passed, a task only starts once its dependencies are done or skipped, and a task can only be marked done after `task verify` passed. If a command refuses, show its message; don't work around it.
+The script enforces the order:
+- A goal only starts once governance passed. Each task start re-checks that the plan hasn't changed since then.
+- A task only starts once its dependencies are done or skipped.
+- A task can only be marked done after `task verify` passed.
+- If governance.md has `final` rules, a goal only completes after the final review passed.
+
+If a command refuses, show its message; don't work around it.
 
 Once `pre_implement` has run, every way this run ends (a finished task in single mode, a blocked goal, a stop the user asked for, or a completed goal) finishes with `$AISDLC hooks run post_implement`.
 
@@ -39,10 +45,11 @@ Repeat these steps for each task:
 
 1. **Pick.** Run `$AISDLC dag next <G-id>` and take the first ID in `ready`. The list is already sorted by wave, then risk.
 2. **Start.** Run `$AISDLC task set <G-id> <T-id> in-progress`, then `$AISDLC hooks run before_task --goal <G-id> --task <T-id>`.
+   If `task set` refuses because governance is pending or the plan changed after governance passed, show the message, run `post_implement` and stop. The user runs `/aisdlc:govern <G-id>`, then `/aisdlc:implement <G-id>` again.
 3. **Implement** against the task's acceptance criteria and its linked ADRs.
    - Read only what the task needs. If `graph.provider` is `graphify`, consult the graph before searching broadly.
    - If the task, its acceptance criteria and its ADRs don't settle a choice you have to make (behavior, a public name, error handling, data shape), and the repo's conventions don't either, stop and ask the user. Record the answer in the task file's Notes.
-   - Stay inside the task's scope. If you discover extra work, don't do it. Add it as a new task with `$AISDLC task new … --depends …`, then run `dag write`, and tell the user.
+   - Stay inside the task's scope. If you discover extra work, don't do it. Write it down and add it after this task is done (step 6). Adding a task resets governance, and a task can't be marked done while governance is pending.
 4. **Verify.**
    - Run `$AISDLC task verify <G-id> <T-id>`. It runs the task's `verify` command and then the `after_task` hook (for example, the stack's test command), and records the result.
    - If `verify` is a manual check (`manual: …`), carry out the check first, then pass what you observed: `$AISDLC task verify <G-id> <T-id> --evidence "<what you checked and saw>"`.
@@ -55,6 +62,12 @@ Repeat these steps for each task:
    - Tick the acceptance criteria in the task file.
    - Run `$AISDLC task set <G-id> <T-id> done`.
    - If `auto_commit` is true, commit now, so the commit includes the task's state. Stage only the files this task changed plus the `.aisdlc/` files the script updated (the task file, the goal's `tasks.md` and `registry.md`). Use the message `<G-id>/<T-id>: <task title>`.
+   - **Extra work.** If you wrote down extra work in step 3, show it to the user and ask whether to add it as tasks. For each one they approve:
+     1. Run `$AISDLC task new <G-id> "<title>" --risk … --depends … --verify "…"` and fill in the task file.
+     2. Run `$AISDLC dag write <G-id>`.
+     3. Relay the `notes` from `task new`: governance was reset, because a new task hasn't been reviewed.
+
+     Then run `post_implement` and stop. The user runs `/aisdlc:govern <G-id>`, then `/aisdlc:implement <G-id>`.
 7. **Check progress.** Read the `progress` object that `task set` returns:
    - `complete: true`: go to section 3.
    - `stuck: true` (only blocked or waiting tasks remain): run `$AISDLC state move <G-id> blocked`, report the blockers, run `post_implement` and stop.
@@ -62,6 +75,11 @@ Repeat these steps for each task:
 
 ## 3. Complete the goal
 All tasks are done or skipped at this point.
-1. Run `$AISDLC hooks run after_goal --goal <G-id>`. If it fails, show the output and ask the user whether to retry or finish anyway.
-2. Run `$AISDLC state move <G-id> completed`. The goal completes automatically once every task passes. The registry updates itself.
-3. Run `$AISDLC hooks run post_implement`. Summarize the tasks completed, any skipped tasks with their reasons, and the commits made.
+1. **Final review.** Run `$AISDLC goal show <G-id>`. If `final_review_required` is true and `gates.final` isn't `passed`, run the govern skill's final review (`/aisdlc:govern <G-id> --final`, Mode C) now. If it fails, show the Required Fixes, handle them as Mode C describes, run `post_implement` and stop.
+2. Run `$AISDLC hooks run after_goal --goal <G-id>`. If it fails, show the output and ask the user whether to retry or finish anyway.
+3. Run `$AISDLC state move <G-id> completed`. The goal completes automatically once every task passes and, if there are final rules, the final review passes. The registry updates itself.
+4. Run `$AISDLC hooks run post_implement`. Summarize:
+   - the tasks completed
+   - any skipped tasks, with their reasons
+   - the commits made
+   - every `should` rule that failed without blocking, from `governance.plan.failed` and `governance.final.failed` in `goal show`, so the user sees them before moving on

@@ -1,10 +1,11 @@
 ---
 goal: {{goal}}
+stage: {{stage}}
 result: {{result}}
 date: {{date}}
 ---
 
-# Governance Review: {{goal}}
+# Governance Review ({{stage}}): {{goal}}
 
 | Rule | Result | Notes |
 |------|--------|-------|

@@ -24,14 +24,25 @@ Requires Node.js 18+. Graphify is optional; `/aisdlc:init` offers to set it up.
 /aisdlc:create-goal <description>   → intake questions first, then goal + task DAG (waves, risk-first)
 /aisdlc:challenge G-001             → one-question-at-a-time clarification
 /aisdlc:adr G-001                   → ADRs, or "none needed" with a reason
-/aisdlc:govern                      → edit project rules (no argument)
-/aisdlc:govern G-001                → gate: pass or fail against the rules
+/aisdlc:govern                      → edit project rules (no argument), with an optional rule catalog
+/aisdlc:govern G-001                → plan review: pass or fail against the plan-stage rules
 /aisdlc:implement G-001 [--all]     → task by task in DAG order, with hooks
+/aisdlc:govern G-001 --final        → final review of the finished work (implement runs it when final-stage rules exist)
 ```
 
 No step works from assumptions. When something is unclear or under-documented and the code doesn't answer it, the skill asks you, and answers are recorded under the goal's Clarifications.
 
-Each step refuses to run until the previous gate passes, and the script enforces it: a goal cannot start before governance passes, tasks run in dependency order, and a task is done only after `task verify` passes. Re-running `challenge` or `adr` resets the governance gate and marks the old review stale.
+Each step refuses to run until the previous gate passes, and the script enforces it:
+- A goal can't start before governance passes.
+- Tasks run in dependency order.
+- A task is done only after `task verify` passes.
+- A goal with `final`-stage rules completes only after the final review passes.
+
+Governance is tied to what it reviewed:
+- Rules can name automatic checks (`goal-defined`, `tasks-verifiable`, `dag-valid`, `adr-recorded`) that a review can't overrule.
+- The plan is fingerprinted when governance passes. Editing the goal, tasks, linked ADRs or plan rules afterwards blocks the next task until it is re-governed.
+- Re-running `challenge` or `adr`, linking another ADR, or adding a task resets the governance gate. The old review is archived as `governance-review.stale-N.md`.
+- There is no waiver.
 
 ## Project layout created by init
 
@@ -40,7 +51,7 @@ Each step refuses to run until the previous gate passes, and the script enforces
   config.json  registry.md  governance.md
   adr/  stacks/  cache/
   goals/{pending,in-progress,blocked,completed}/G-001-slug/
-    goal.md  tasks.md  tasks/T-01-slug.md  governance-review.md
+    goal.md  tasks.md  tasks/T-01-slug.md  governance-review.md  governance-final.md
 ```
 
 ## Hooks

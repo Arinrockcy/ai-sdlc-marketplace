@@ -5,6 +5,8 @@ status: pending
 gate_challenge: pending
 gate_adr: pending
 gate_govern: pending
+gate_final: pending
+govern_fingerprint:
 adrs: []
 adr_reason:
 auto_commit:

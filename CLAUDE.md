@@ -39,10 +39,20 @@ Skills call the script (written `$AISDLC` in the skill files) and should never h
 
 **Strict gating** (`requireStep`/`setGate`): challenge → adr → govern → implement.
 - `adr done` requires a linked ADR that is `accepted` (or `superseded`), or `adrs: none` plus `adr_reason`.
-- `govern passed` requires `governance-review.md` with `result: pass`, a row for every non-retired rule in `governance.md`, no failed `must` rule, and a note on every `fail`/`n/a`.
-- Setting challenge or adr again resets govern to pending and moves the review to `governance-review.stale.md`.
-- `state move in-progress|completed` requires the implement gate. A goal can only move to `completed` when every task is done or skipped.
-- Task changes need the goal to be in-progress (except resetting to `pending`, used to resume a blocked goal). A task starts only when its dependencies are done or skipped. It becomes `done` only from `in-progress` with `verified: pass`, which `task verify` records after running the task's `verify` command (or taking `--evidence` for a `manual:` check) and the `after_task` hook.
+- Rules in `governance.md` are rows of `ID | Rule | Severity | Stage | Check`, changed only through `governance add|set`:
+  - Severity is `must|should|retired`. A bad value fails loudly.
+  - Stage is `plan|final`.
+  - Check names an entry in `CHECKS`.
+- `govern passed` requires `governance-review.md` with `result: pass`, a row for every active plan rule, no failed `must` rule, a note on every `fail`/`n/a`, and no `pass`/`n/a` on a rule whose automatic check fails. It stores `govern_fingerprint` (`planFingerprint`: goal text, planned task fields and text minus Notes and checkbox state, linked ADR statuses, plan rules).
+- `gate_final` works the same for `final` rules via `governance-final.md`. It is only required when active final rules exist.
+- `invalidate` resets a gate and every later one (adr → govern → final) and archives reviews as `<name>.stale-N.md`. It runs on:
+  - setting challenge or adr
+  - `adr link` or `adr none` changing the links
+  - `task new` (resets govern)
+  - any `task set` (resets final)
+  - `gate set govern|final pending`
+- `state move in-progress|completed` requires the implement gate, which includes a matching plan fingerprint. A goal can only move to `completed` when every task is done or skipped and, if final rules exist, `gate_final` is passed.
+- Task changes need the goal to be in-progress (except resetting to `pending`, used to resume a blocked goal). A task starts, or becomes done, only while the implement gate holds (governance passed and the plan unchanged). It also needs its dependencies done or skipped. It becomes `done` only from `in-progress` with `verified: pass`. `task verify` records that after running the task's `verify` command and the `after_task` hook. It takes `--evidence` instead for a `manual:` check, or when neither exists and nothing would run.
 - Frontmatter values must be single-line. Only `adrs`, `depends_on` and `goals` parse as arrays.
 
 **Hooks.** Each point resolves in the order env `AISDLC_HOOK_<POINT>` > `.aisdlc/config.json` `hooks` > `.aisdlc/stacks/<stack>.json` > `plugins/aisdlc/defaults/hooks.json`. `{"use":"stack"|"default"}` delegates to another layer, and `null` disables the hook. The list of hook points is `HOOK_POINTS` in the script. When adding a workflow step, add it to `STEPS` so it gets `pre_`/`post_` points.
@@ -64,6 +74,9 @@ These were settled with the repo owner:
 - `/aisdlc:create-goal` starts with intake questions about the gaps in the description, before writing the goal. Answers go under Clarifications so challenge doesn't repeat them.
 - `/aisdlc:challenge` is clarification Q&A, one question at a time. It is not a critique.
 - There is no governance waiver.
+- Governance has two stages. `plan` rules gate implementation. `final` rules gate completion, and `/aisdlc:implement` runs the final review itself.
+- A task added after governance passed (including one discovered mid-implement) resets governance. Implement stops until the goal is re-governed.
+- `/aisdlc:govern` offers `templates/governance-catalog.md` rules as choices and never adds one silently. `governance add` requires an explicit severity and stage.
 - `/aisdlc:implement` runs one task per invocation unless `--all` or `implement.mode: "auto"` is set.
 - A goal auto-completes once all tasks pass.
 - Graphify is optional. Init offers it, and the fallback is `registry.md` only.
