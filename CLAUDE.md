@@ -37,13 +37,14 @@ Each plugin has its own version and `CHANGELOG.md` (Keep a Changelog format).
 - hook resolution and execution
 - registry regeneration
 
-Skills call the script (written `$AISDLC` in the skill files) and should never hand-edit state the script owns. Every `$AISDLC …` span in a skill must be a complete, runnable invocation. Write placeholders as `<G-id>`, `<T-id>`, `<ADR-id>`, `<GOV-id>` or `<name>`, alternatives as `a|b`, optional parts as `[...]`, and `…` only as an option's value. `tests/skills.test.mjs` runs each one and fails if the script no longer understands it. The script rejects unknown options, so every option must be in `OPTIONS`. The state the script owns: `status`, `gate_*`, `govern_fingerprint` and `cancel_reason` fields, the `## Cancellations` log in `goal.md`, the rules table in `governance.md`, `registry.md`, `tasks.md`, and goal folder moves. When adding workflow behavior, put invariants in the script with tests, and keep instructions in the skill.
+Skills call the script (written `$AISDLC` in the skill files) and should never hand-edit state the script owns. Every `$AISDLC …` span in a skill must be a complete, runnable invocation. Write placeholders as `<G-id>`, `<T-id>`, `<ADR-id>`, `<GOV-id>` or `<name>`, alternatives as `a|b`, optional parts as `[...]`, and `…` only as an option's value. `tests/skills.test.mjs` runs each one and fails if the script no longer understands it. The script rejects unknown options, so every option must be in `OPTIONS`. The state the script owns: `status`, `gate_*`, `govern_fingerprint` and `cancel_reason` fields, the `## Cancellations` log in `goal.md`, the rules table in `governance.md`, `registry.md`, `registry-archive.md`, `tasks.md`, and goal folder moves. When adding workflow behavior, put invariants in the script with tests, and keep instructions in the skill.
 
 **State model.** Everything lives in the target project's `.aisdlc/`, stored as markdown with flat frontmatter. The parser only supports `key: value` scalars and inline `[a, b]` arrays; there is no nested YAML.
 - A goal's status is the folder it sits in: `goals/<status>/G-NNN-slug/`.
 - Gates are the `gate_challenge`, `gate_adr` and `gate_govern` fields in `goal.md`.
 - Tasks are `tasks/T-NN-*.md` files with `depends_on` and `risk`.
-- `registry.md` and `tasks.md` are generated views. Rebuild them rather than editing them.
+- `registry.md`, `registry-archive.md` and `tasks.md` are generated views. Rebuild them rather than editing them. `registry.md` holds unfinished goals and every ADR. Finished goals go to the archive, so the file skills read whole only grows with open work.
+- Skills must not read an index that grows without bound (the archive, `GRAPH_REPORT.md`, unfiltered `goal list`) in full. Filter it with the script, search it, or query it.
 
 **Strict gating** (`requireStep`/`setGate`): challenge → adr → govern → implement.
 - `adr done` requires a linked ADR that is `accepted` (or `superseded`), or `adrs: none` plus `adr_reason`.
@@ -92,4 +93,4 @@ These were settled with the repo owner:
 - `/aisdlc:govern` offers `templates/governance-catalog.md` rules as choices and never adds one silently. `governance add` requires an explicit severity and stage.
 - `/aisdlc:implement` runs one task per invocation unless `--all` or `implement.mode: "auto"` is set.
 - A goal auto-completes once all tasks pass.
-- Graphify is optional. Init offers it, and the fallback is `registry.md` only.
+- Graphify is optional. Init offers it. Without it, skills search the code directly. `registry.md` indexes goals and ADRs, never code.

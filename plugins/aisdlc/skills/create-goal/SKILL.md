@@ -14,11 +14,12 @@ Input: `$ARGUMENTS` is the goal description. If it is empty, ask the user for on
 
 ## 0. Context (keep it cheap)
 - Run `$AISDLC hooks run pre_create_goal`.
-- Read `.aisdlc/registry.md` to see existing goals and ADRs. Avoid duplicates and reuse existing ADRs.
-- Run `$AISDLC config get graph`. If `provider` is `graphify`, query the graph (for example `<path>/GRAPH_REPORT.md`, where `<path>` is the `path` value, or the `/graphify` query tooling) to find the modules involved, instead of grepping broadly. If the report is missing, or older than the latest commit (`git log -1 --format=%cI`), tell the user and ask whether to rebuild it with `/graphify .` first or go on without it. If `provider` is `none`, read only the files you need.
+- Read `.aisdlc/registry.md`. It lists the unfinished goals and every ADR. Reuse existing ADRs and avoid duplicating an unfinished goal.
+- Search `.aisdlc/registry-archive.md` for a few keywords from the description (for example with `grep -i`) to find completed or cancelled goals that overlap it. Don't read the archive whole: it keeps every finished goal, so it only grows.
+- Run `$AISDLC config get graph`. If `provider` is `graphify`, query the graph with the `/graphify` query tooling to find the modules involved, instead of grepping broadly. Read only the parts of `<path>/GRAPH_REPORT.md` you need, where `<path>` is the `path` value, never the whole report or graph file: both grow with the codebase. If the report is missing, or older than the latest commit (`git log -1 --format=%cI`), tell the user and ask whether to rebuild it with `/graphify .` first or go on without it. If `provider` is `none`, read only the files you need.
 
 ## 1. Unfinished goals (before anything else)
-Run `$AISDLC goal list`. Unfinished goals are the `pending`, `in-progress` and `blocked` ones. If there are none, go to section 2. If the new description overlaps a `cancelled` goal, tell the user and offer **Reopen `<G-id>`** below.
+Run `$AISDLC goal list --status pending,in-progress,blocked` to get the unfinished goals. If there are none, go to section 2. If the archive search found a `cancelled` goal that overlaps the new description, tell the user and offer **Reopen `<G-id>`** below.
 
 Otherwise tell the user which goals are unfinished: ID, title, status and gates. Say whether the new description overlaps any of them. Then ask what to do, one question, with these choices:
 

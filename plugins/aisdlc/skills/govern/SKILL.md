@@ -68,7 +68,7 @@ Runs once every task is done or skipped, and only when governance.md has active 
    - the goal's changes. Use the diff between the goal's `branch` and `git.base_branch` (`$AISDLC config get git.base_branch`, default `develop`). If the goal was built on a branch shared with other work, or no branch was recorded, ask the user which commits or range belong to this goal. Don't guess.
    - `$AISDLC governance list`, and review only active rules whose stage is `final`
    - `$AISDLC governance checks <G-id> --stage final` if any final rule has a check
-4. Check each active final rule against the actual code. Cite files and lines as evidence. If a rule names a skill (for example a stack's standards skill), load that skill and check against it.
+4. Check each active final rule against the actual code. Cite files and lines as evidence. To find the code a rule concerns, start from the diff. If `graph.provider` is `graphify`, query the graph for code outside the diff rather than searching broadly, but cite the files themselves, not the graph, which may lag the code. If a rule names a skill (for example a stack's standards skill), load that skill and check against it.
    For a rule with the `criteria-met` check, go through each acceptance criterion in `goal.md` and in every done task. Tick a criterion (`- [x]`) only when the code shows it is met, and cite where. Untick any task criterion that turns out not to be met. The check fails while any criterion of the goal or a done task is unticked, so the rule must then be `fail`.
 5. Write `governance-final.md` in the goal folder from the same template, with `stage: final`, following the same table and Required Fixes rules as Mode B.
 6. Set the gate:

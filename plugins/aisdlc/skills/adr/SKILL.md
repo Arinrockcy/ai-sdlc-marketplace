@@ -17,7 +17,7 @@ ADRs are project-wide and live in `.aisdlc/adr/ADR-NNN-slug.md` (Nygard format).
 ## Steps
 1. Run `$AISDLC gate require <G-id> adr`. If it exits non-zero, show the `problems` and stop.
 2. Run `$AISDLC hooks run pre_adr`.
-3. Read `goal.md`, including its Clarifications section, and the ADR rows in `.aisdlc/registry.md`.
+3. Read `goal.md`, including its Clarifications section. Read the ADR rows in `.aisdlc/registry.md` and open only the ADRs whose titles bear on this goal. If `graph.provider` is `graphify` (`$AISDLC config get graph`), query the graph for the modules a decision would touch, to see the patterns already in place, instead of searching broadly.
 4. Identify candidate decisions. A decision is architectural when it is hard to reverse, affects several modules or teams, adds a dependency or technology, or changes data models, APIs or security.
 5. For each candidate, decide one of these:
    - **An existing ADR already covers it.** Run `$AISDLC adr link <ADR-id> <G-id>`.

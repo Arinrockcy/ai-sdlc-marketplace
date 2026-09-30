@@ -2,6 +2,25 @@
 
 All notable changes to the `aisdlc` plugin. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/). Until 1.0.0, a minor version may include breaking changes; each one is listed under **Breaking** with its upgrade step.
 
+## [0.4.0] - 2026-09-30
+
+Skills read less as a project grows. Before, `/aisdlc:create-goal` read the whole registry and listed every goal, about 64k tokens at 500 goals, most of it finished work. See [Upgrading to 0.4.0](../../README.md#upgrading) if anything outside the workflow reads `registry.md`.
+
+### Breaking
+- `registry.md` lists only unfinished goals (`pending`, `in-progress`, `blocked`) and every ADR. Completed and cancelled goals move to the new `registry-archive.md`, which skills search instead of reading whole.
+- The registry's Path column is gone. `goal show <G-id>` gives a goal's folder, and ADR files are `adr/<ADR-id>-*.md`. `registry sync` returns `rows`, `archived`, `file` and `archive` instead of a single row count.
+
+### Added
+- `goal list --status` takes several comma-separated states (`--status pending,in-progress,blocked`) and fails on an unknown state, which used to match nothing.
+- `adr list [--status …]` lists ADRs as JSON with their ID, title, status, goals and file, for tooling. Skills read the ADR rows in `registry.md`, which are about half the size.
+- `registry.md` says where the rest lives: the archive, each goal's folder and tasks, and `governance.md`.
+
+### Changed
+- `/aisdlc:create-goal` lists only unfinished goals and searches the archive for overlapping finished goals. It queries the graph instead of reading `GRAPH_REPORT.md` whole.
+- `/aisdlc:adr` opens only the ADRs whose registry rows bear on the goal. With Graphify, it queries the graph for the modules a decision touches.
+- `/aisdlc:challenge` checks the accepted ADRs in `registry.md` and, with Graphify, the graph before asking something an earlier decision or the code already answers.
+- `/aisdlc:govern --final` starts from the goal's diff and queries the graph for code outside it, but cites the files themselves.
+
 ## [0.3.1] - 2026-09-30
 
 ### Changed

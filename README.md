@@ -51,7 +51,7 @@ Governance is tied to what it reviewed:
 
 ```
 .aisdlc/
-  config.json  registry.md  governance.md
+  config.json  registry.md  registry-archive.md  governance.md
   adr/  stacks/  cache/
   goals/{pending,in-progress,blocked,completed,cancelled}/G-001-slug/
     goal.md  tasks.md  tasks/T-01-slug.md  governance-review.md  governance-final.md
@@ -78,6 +78,15 @@ See [`plugins/aisdlc/docs/stack-plugin-contract.md`](plugins/aisdlc/docs/stack-p
 ## Upgrading
 
 Each plugin keeps a changelog: [`aisdlc`](plugins/aisdlc/CHANGELOG.md), [`aisdlc-nodejs`](plugins/aisdlc-nodejs/CHANGELOG.md). Breaking changes are listed there with their upgrade step.
+
+### 0.3.x → 0.4.0 (`aisdlc`)
+
+Update the plugin, then in each project that already has `.aisdlc/`:
+
+1. **Regenerate the registry.** Run `node <plugin>/scripts/aisdlc.mjs registry sync`, or let the next workflow step do it. It moves completed and cancelled goals into `registry-archive.md` and drops the Path column. Commit both files.
+2. **Check any tooling around `.aisdlc/`.** Anything that reads finished goals or the Path column from `registry.md`, or the numeric output of `registry sync`, needs updating. Use `goal list` and `adr list` for structured data.
+
+Goal and ADR files need no edits.
 
 ### 0.2.0 → 0.3.0 (`aisdlc`)
 
