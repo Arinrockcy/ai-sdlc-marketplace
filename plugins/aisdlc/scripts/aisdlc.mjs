@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // aisdlc.mjs — deterministic helper for the aisdlc workflow skills.
 // Zero dependencies. All state lives in <project>/.aisdlc as markdown frontmatter + JSON.
-// Output is JSON on stdout (except `hooks run` and `task verify`, which stream command output); errors exit 1 with a message on stderr.
+// Output is JSON on stdout (except `hooks run`, `task verify` and `goal push`, which stream command output); errors exit 1 with a message on stderr.
 
 import fs from 'node:fs';
 import os from 'node:os';
@@ -11,7 +11,8 @@ import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 
 const MIN_NODE_MAJOR = 24;
-const PLUGIN_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const SCRIPT_FILE = fileURLToPath(import.meta.url);
+const PLUGIN_ROOT = path.resolve(path.dirname(SCRIPT_FILE), '..');
 const TEMPLATES = path.join(PLUGIN_ROOT, 'templates');
 const DEFAULT_HOOKS = path.join(PLUGIN_ROOT, 'defaults', 'hooks.json');
 
@@ -435,6 +436,8 @@ function hookContext(root, cfg, opts) {
     base_branch: cfg.git?.base_branch || 'develop',
     branch_prefix: cfg.git?.branch_prefix ?? 'feature/',
     goal_id: '', goal_slug: '', goal_branch: '', task_id: opts.task || '',
+    // Lets a hook call this script, e.g. the default after_goal's coverage check. Same Node as the caller.
+    aisdlc: `"${process.execPath}" "${SCRIPT_FILE}"`,
   };
   if (opts.goal) {
     const g = getGoal(root, opts.goal);
@@ -637,6 +640,124 @@ function graphUpdate(root, force = false) {
   if (warnings.length) fs.writeFileSync(warningsFile, `${warnings.join('\n')}\n`);
   else fs.rmSync(warningsFile, { force: true });
   return { updated: true, reason: fresh.stale ? fresh.reason : 'rebuild requested', ms: Date.now() - started, ...reported };
+}
+
+// ---------- goal changes ----------
+
+// What a goal changed: `committed` on its branch since the base, plus `uncommitted` and `untracked` files in the
+// working tree. Workflow state and the code graph are not the goal's changes. Null outside a git repository.
+function goalChanges(root, g) {
+  if (git(root, ['rev-parse', '--git-dir']) === null) return null;
+  const base = loadConfig(root).git?.base_branch || 'develop';
+  const branch = g.data.branch || null;
+  const current = git(root, ['rev-parse', '--abbrev-ref', 'HEAD'])?.trim() || null;
+  const exists = (ref) => git(root, ['rev-parse', '--verify', '--quiet', `${ref}^{commit}`]) !== null;
+  const files = (text) => (text || '').split('\n').filter((f) => f && !GRAPH_IGNORED.some((d) => f.startsWith(d)));
+  const baseRef = [base, `origin/${base}`].find(exists);
+  const warnings = [];
+  let range = null;
+  let committed = [];
+  if (!branch) warnings.push(`${g.id} has no branch recorded, so its commits can't be told apart from other work. Ask the user which commits belong to it.`);
+  else if (!exists(branch)) warnings.push(`The goal's branch ${branch} doesn't exist.`);
+  else if (!baseRef) warnings.push(`The base branch ${base} exists neither locally nor as origin/${base}.`);
+  else if (branch === base) warnings.push(`The goal was built on the base branch ${base}, so its commits can't be told apart from other work. Ask the user which commits belong to it.`);
+  else {
+    range = `${baseRef}...${branch}`;
+    committed = files(git(root, ['diff', '--name-only', range]));
+  }
+  if (branch && current !== branch) warnings.push(`The current branch is ${current}, not ${branch}, so uncommitted and untracked files come from ${current}'s working tree.`);
+  return {
+    base_branch: base, branch, current_branch: current, range, committed,
+    uncommitted: files(git(root, ['diff', '--name-only', 'HEAD'])),
+    untracked: files(git(root, ['ls-files', '-o', '--exclude-standard'])),
+    warnings,
+  };
+}
+
+// ---------- coverage ----------
+
+// A metric with nothing to cover counts as fully covered.
+const percent = (hit, total) => (total ? Math.round((hit / total) * 10000) / 100 : 100);
+
+// Report format -> parser returning { metric: percent } for the metrics the report measures.
+const COVERAGE_FORMATS = {
+  // Istanbul's json-summary, written by Jest, Vitest, c8 and nyc (coverage/coverage-summary.json).
+  'json-summary': (text) => {
+    const { total } = JSON.parse(text);
+    if (!total) throw new Error('it has no "total" entry');
+    return Object.fromEntries(['lines', 'statements', 'functions', 'branches'].filter((m) => total[m])
+      .map((m) => [m, typeof total[m].pct === 'number' ? total[m].pct : percent(total[m].covered, total[m].total)]));
+  },
+  // An LCOV tracefile, written by node:test, c8, pytest-cov and most other runners. It has no statement figures.
+  lcov: (text) => {
+    const sum = {};
+    for (const m of text.matchAll(/^(LF|LH|BRF|BRH|FNF|FNH):(\d+)\s*$/gm)) sum[m[1]] = (sum[m[1]] || 0) + Number(m[2]);
+    if (!('LF' in sum)) throw new Error('it has no LF: line counts');
+    const metrics = { lines: percent(sum.LH || 0, sum.LF) };
+    if ('BRF' in sum) metrics.branches = percent(sum.BRH || 0, sum.BRF);
+    if ('FNF' in sum) metrics.functions = percent(sum.FNH || 0, sum.FNF);
+    return metrics;
+  },
+};
+
+// Checks the report the stack manifest declares as quality_gate.coverage_report: it exists and parses, it is newer
+// than every file the goal changed (so it covers the finished code), and it meets quality_gate.coverage_thresholds.
+function coverageCheck(root, g) {
+  const stack = activeStack(root);
+  const manifest = loadStackManifest(root, stack);
+  const problems = [];
+  const notes = [];
+  let report = {};
+  const result = () => ({ goal: g.id, stack, ...report, ok: problems.length === 0, problems, notes });
+  if (!manifest) {
+    notes.push(stack ? `No .aisdlc/stacks/${stack}.json is installed, so no coverage report is declared.` : 'No stack is active, so no coverage report is declared.');
+    return result();
+  }
+  const file = `.aisdlc/stacks/${stack}.json`;
+  const decl = manifest.quality_gate?.coverage_report;
+  const thresholds = manifest.quality_gate?.coverage_thresholds || {};
+  if (!decl?.path || !decl?.format) {
+    problems.push(`${file} declares no quality_gate.coverage_report ({"path": "…", "format": "…"}). Re-register the stack, so it names the report its coverage command writes.`);
+    return result();
+  }
+  const parse = COVERAGE_FORMATS[decl.format];
+  if (!parse) {
+    problems.push(`${file} names an unknown coverage report format "${decl.format}". Valid: ${Object.keys(COVERAGE_FORMATS).join(', ')}.`);
+    return result();
+  }
+  report = { report: decl.path, format: decl.format, metrics: null, thresholds };
+  const full = path.resolve(root, decl.path);
+  if (!fs.existsSync(full)) {
+    problems.push(`${decl.path} doesn't exist. The stack's coverage command writes it: run \`hooks run after_task --goal ${g.id}\`, and check that the command writes this file.`);
+    return result();
+  }
+  try { report.metrics = parse(fs.readFileSync(full, 'utf8')); } catch (e) {
+    problems.push(`${decl.path} isn't a valid ${decl.format} report: ${e.message}.`);
+    return result();
+  }
+  for (const [metric, min] of Object.entries(thresholds)) {
+    const pct = report.metrics[metric];
+    if (typeof min !== 'number') problems.push(`${file} has a non-numeric ${metric} threshold: ${JSON.stringify(min)}.`);
+    else if (pct === undefined) problems.push(`${decl.path} has no ${metric} figure, but ${file} sets a ${metric} threshold of ${min}%.`);
+    else if (pct < min) problems.push(`${metric} coverage is ${pct}%, below the ${min}% threshold.`);
+  }
+  const changes = goalChanges(root, g);
+  if (!changes) {
+    notes.push(`This isn't a git repository, so ${decl.path} wasn't checked against the goal's changes.`);
+    return result();
+  }
+  const rel = path.relative(root, full).split(path.sep).join('/');
+  const dir = path.posix.dirname(rel);
+  const since = fs.statSync(full).mtimeMs;
+  const newer = [...new Set([...changes.committed, ...changes.uncommitted, ...changes.untracked])]
+    .filter((f) => f !== rel && (dir === '.' || !f.startsWith(`${dir}/`)))
+    .filter((f) => { try { return fs.statSync(path.join(root, f)).mtimeMs > since; } catch { return false; } });
+  if (newer.length) {
+    const shown = newer.slice(0, 3).join(', ') + (newer.length > 3 ? ` and ${newer.length - 3} more` : '');
+    problems.push(`${decl.path} is older than ${shown}, which the goal changed, so it may not cover the finished code. Run \`hooks run after_task --goal ${g.id}\` to write it again.`);
+  }
+  notes.push(...changes.warnings);
+  return result();
 }
 
 // ---------- governance ----------
@@ -1098,32 +1219,23 @@ const commands = {
     }
     if (action === 'diff') {
       const g = getGoal(root, rest[0]);
-      if (git(root, ['rev-parse', '--git-dir']) === null) fail('goal diff needs a git repository. Ask the user which files belong to the goal.');
+      const changes = goalChanges(root, g);
+      if (!changes) fail('goal diff needs a git repository. Ask the user which files belong to the goal.');
+      return out({ goal: g.id, ...changes });
+    }
+    if (action === 'push') {
+      // The after_goal default. A goal's work reaches the base branch through review, never through this push.
+      const g = getGoal(root, rest[0]);
+      if (git(root, ['rev-parse', '--git-dir']) === null) fail('goal push needs a git repository.');
       const base = loadConfig(root).git?.base_branch || 'develop';
-      const branch = g.data.branch || null;
-      const current = git(root, ['rev-parse', '--abbrev-ref', 'HEAD'])?.trim() || null;
-      const exists = (ref) => git(root, ['rev-parse', '--verify', '--quiet', `${ref}^{commit}`]) !== null;
-      // Workflow state and the code graph are not the goal's changes.
-      const files = (text) => (text || '').split('\n').filter((f) => f && !GRAPH_IGNORED.some((d) => f.startsWith(d)));
-      const baseRef = [base, `origin/${base}`].find(exists);
-      const warnings = [];
-      let range = null;
-      let committed = [];
-      if (!branch) warnings.push(`${g.id} has no branch recorded, so its commits can't be told apart from other work. Ask the user which commits belong to it.`);
-      else if (!exists(branch)) warnings.push(`The goal's branch ${branch} doesn't exist.`);
-      else if (!baseRef) warnings.push(`The base branch ${base} exists neither locally nor as origin/${base}.`);
-      else if (branch === base) warnings.push(`The goal was built on the base branch ${base}, so its commits can't be told apart from other work. Ask the user which commits belong to it.`);
-      else {
-        range = `${baseRef}...${branch}`;
-        committed = files(git(root, ['diff', '--name-only', range]));
-      }
-      if (branch && current !== branch) warnings.push(`The current branch is ${current}, not ${branch}, so uncommitted and untracked files come from ${current}'s working tree.`);
-      return out({
-        goal: g.id, base_branch: base, branch, current_branch: current, range, committed,
-        uncommitted: files(git(root, ['diff', '--name-only', 'HEAD'])),
-        untracked: files(git(root, ['ls-files', '-o', '--exclude-standard'])),
-        warnings,
-      });
+      const branch = g.data.branch;
+      if (!branch) fail(`${g.id} has no branch recorded, so there is nothing to push. Record it with \`goal set ${g.id} branch <name>\`.`);
+      if (branch === base) fail(`${g.id} was built on the base branch ${base}, and aisdlc never pushes the base branch. Push it yourself if that is what you want.`);
+      if (git(root, ['rev-parse', '--verify', '--quiet', `refs/heads/${branch}`]) === null) fail(`The goal's branch ${branch} doesn't exist.`);
+      process.stdout.write(`[aisdlc] goal push: git push -u origin ${branch}\n`);
+      const r = spawnSync('git', ['push', '-u', 'origin', branch], { cwd: root, stdio: 'inherit' });
+      process.exitCode = r.error ? 1 : r.status ?? 1;
+      return;
     }
     if (action === 'show') {
       const g = getGoal(root, rest[0]);
@@ -1160,7 +1272,7 @@ const commands = {
       updateDoc(g.file, { [key]: parseScalar(value, key) });
       return out({ id, [key]: parseScalar(value, key) });
     }
-    fail('Usage: goal new|list|show|diff|preflight|set');
+    fail('Usage: goal new|list|show|diff|preflight|push|set');
   },
 
   state([action, id, status], opts) {
@@ -1446,6 +1558,14 @@ const commands = {
     fail('Usage: hooks list | hooks resolve|run <point>');
   },
 
+  coverage([action, goalId]) {
+    if (action !== 'check' || !goalId) fail('Usage: coverage check <G-id>');
+    const root = findRoot();
+    const r = coverageCheck(root, getGoal(root, goalId));
+    out(r);
+    if (!r.ok) process.exitCode = 1;
+  },
+
   governance([action, ...rest], opts) {
     const root = findRoot();
     const gov = readGovernance(root);
@@ -1668,4 +1788,4 @@ function main() {
   }
 }
 
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) main();
+if (process.argv[1] && path.resolve(process.argv[1]) === SCRIPT_FILE) main();

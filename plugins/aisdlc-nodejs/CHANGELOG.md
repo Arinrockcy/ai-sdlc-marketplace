@@ -2,6 +2,15 @@
 
 All notable changes to the `aisdlc-nodejs` plugin. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/).
 
+## [0.4.0] - 2026-09-30
+
+### Breaking
+- The manifest declares the coverage report in `quality_gate.coverage_report` (`coverage/coverage-summary.json`, `json-summary`). aisdlc 0.8.0's `after_goal` hook fails for a manifest without it, and `standards` stops with a request to re-register.
+
+### Changed
+- `register` makes `test:coverage` write a coverage report file on every run: Jest's `json-summary` reporter by default, or LCOV for node:test. It checks that the file appears after the baseline run, records its path and format in the manifest, and offers to add the coverage directory to `.gitignore`.
+- `standards` requires the coverage report to stay in place, and adds it to the done checklist.
+
 ## [0.3.0] - 2026-09-30
 
 ### Breaking

@@ -37,8 +37,9 @@ Each plugin has its own version and `CHANGELOG.md` (Keep a Changelog format).
 - gates
 - hook resolution and execution
 - registry regeneration and search
-- review scaffolds (`governance review`), pre-switch checks (`goal preflight`) and a goal's changes (`goal diff`)
+- review scaffolds (`governance review`), pre-switch checks (`goal preflight`), a goal's changes (`goal diff`) and pushing its branch (`goal push`)
 - the code graph: Graphify setup, freshness and queries
+- the coverage check (`coverage check`) against the report the stack manifest declares
 
 Skills call the script (written `$AISDLC` in the skill files) and should never hand-edit state the script owns. Every `$AISDLC …` span in a skill must be a complete, runnable invocation. Write placeholders as `<G-id>`, `<T-id>`, `<ADR-id>`, `<GOV-id>`, `<keywords>` or `<name>`, alternatives as `a|b`, optional parts as `[...]`, and `…` only as an option's value. `tests/skills.test.mjs` runs each one and fails if the script no longer understands it. The script rejects unknown options, so every option must be in `OPTIONS`. The state the script owns: `status`, `gate_*`, `govern_fingerprint` and `cancel_reason` fields, the `## Cancellations` and `## Removed tasks` logs in `goal.md`, the rules table in `governance.md`, `registry.md`, `registry-archive.md`, `tasks.md`, and goal folder moves. When adding workflow behavior, put invariants in the script with tests, and keep instructions in the skill.
 
@@ -70,7 +71,7 @@ Skills call the script (written `$AISDLC` in the skill files) and should never h
 **Hooks.** Each point resolves in the order env `AISDLC_HOOK_<POINT>` > `.aisdlc/config.json` `hooks` > `.aisdlc/stacks/<stack>.json` > `plugins/aisdlc/defaults/hooks.json`. `{"use":"stack"|"default"}` delegates to another layer, and `null` disables the hook. The list of hook points is `HOOK_POINTS` in the script. When adding a workflow step, add it to `STEPS` so it gets `pre_`/`post_` points.
 
 **Stack plugins** follow `plugins/aisdlc/docs/stack-plugin-contract.md`:
-- a `stack.json` manifest
+- a `stack.json` manifest, including `quality_gate.coverage_report`, the report its test command writes on every run
 - a `register` skill that copies the manifest into the project's `.aisdlc/stacks/`
 - a `standards` skill that `/aisdlc:implement` loads
 
@@ -81,6 +82,7 @@ The core script never reads other plugins' directories, only project-local files
 These were settled with the repo owner:
 - Branch creation and per-task auto-commit are always **asked**, never forced.
 - The `before_goal` default only pulls the base branch (default `develop`).
+- The `after_goal` default runs `coverage check`, then `goal push`, which pushes the goal branch to `origin`. `goal push` never pushes the base branch. It runs before the goal completes, so a failed check can stop completion. The user may retry, finish anyway or stop.
 - On a verify failure, `/aisdlc:implement` asks the user to retry, skip or block. It does not auto-retry.
 - No skill assumes. Anything unclear or under-documented that the code doesn't answer is asked, never guessed or defaulted silently.
 - `/aisdlc:create-goal` first checks for unfinished goals (pending, in-progress, blocked). It asks whether to merge into a pending goal, finish or cancel an unfinished one first, or create a separate goal, and never picks for the user. Merge is offered only for `pending` goals, because in-progress and blocked goals can't be re-challenged. A merge resets the challenge and adr gates.

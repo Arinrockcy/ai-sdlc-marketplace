@@ -45,7 +45,9 @@ Init is idempotent. It only creates what is missing and never overwrites existin
    Then ask whether to set up the project's own rules now (tests, secrets, stack standards and the other catalog rules). If they agree, run `/aisdlc:govern` with no argument. Otherwise tell them they can run it any time before their first goal is governed.
 
 7. Run `$AISDLC hooks run post_init`. Summarize: the resolved config (`$AISDLC config get`), the active hooks (`$AISDLC hooks list`, showing only points that have commands), the governance rules, and the next step, `/aisdlc:create-goal <description>`.
+   Point out that by default, before a goal completes, `after_goal` checks the coverage report the stack declares and then pushes the goal's branch to `origin`. It never pushes the base branch: a goal built on it isn't pushed. To keep the check but not push, set `hooks.after_goal` to `{"run": "{aisdlc} coverage check {goal_id}"}` in `.aisdlc/config.json`. To turn off both, set it to `null`.
 
 ## Hook overrides (for the user's reference)
 Precedence for each hook point: env `AISDLC_HOOK_<POINT>` > `.aisdlc/config.json` `hooks` > `.aisdlc/stacks/<stack>.json` > core defaults.
+Hook commands can use `{base_branch}`, `{branch_prefix}`, `{goal_id}`, `{goal_slug}`, `{goal_branch}`, `{task_id}`, and `{aisdlc}` (this script, run with the same Node).
 Values can be `{"run": "<cmd>"}`, `{"run": ["a", "b"]}`, `{"use": "stack"}`, `{"use": "default"}`, or `null` (disabled). An env value can be a command, `none`, `use:stack` or `use:default`.

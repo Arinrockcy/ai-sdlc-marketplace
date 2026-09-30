@@ -243,6 +243,122 @@ test('cli: hooks resolve uses stack manifest, config and env, with variables', (
   assert.equal(run(['hooks', 'run', 'on_block']).code, 3);
 });
 
+test('cli: after_goal checks the coverage report, then pushes the goal branch, by default', () => {
+  const { run } = project();
+  run(['init']);
+  run(['goal', 'new', 'Search']);
+  const r = run(['hooks', 'resolve', 'after_goal', '--goal', 'G-001']).json;
+  assert.equal(r.source, 'default');
+  assert.deepEqual(r.commands, [`"${process.execPath}" "${SCRIPT}" coverage check G-001`, `"${process.execPath}" "${SCRIPT}" goal push G-001`]);
+});
+
+test('cli: goal push pushes the goal branch and refuses the base branch', { skip: process.platform === 'win32' }, () => {
+  const { run, dir } = project();
+  run(['init']);
+  run(['goal', 'new', 'A']);
+  assert.match(run(['goal', 'push', 'G-001']).stderr, /needs a git repository/);
+  const remote = fs.mkdtempSync(path.join(os.tmpdir(), 'aisdlc-remote-'));
+  gitIn(remote, 'init', '-q', '--bare');
+  gitIn(dir, 'init', '-q', '-b', 'develop');
+  gitIn(dir, 'remote', 'add', 'origin', remote);
+  gitIn(dir, 'add', '-A');
+  gitIn(dir, 'commit', '-qm', 'base');
+
+  assert.match(run(['goal', 'push', 'G-001']).stderr, /G-001 has no branch recorded/);
+  run(['goal', 'set', 'G-001', 'branch', 'develop']);
+  const onBase = run(['goal', 'push', 'G-001']);
+  assert.equal(onBase.code, 1);
+  assert.match(onBase.stderr, /built on the base branch develop, and aisdlc never pushes the base branch/);
+  run(['goal', 'set', 'G-001', 'branch', 'feature/a']);
+  assert.match(run(['goal', 'push', 'G-001']).stderr, /The goal's branch feature\/a doesn't exist/);
+  gitIn(dir, 'checkout', '-q', '-b', 'feature/a');
+  const pushed = run(['goal', 'push', 'G-001']);
+  assert.equal(pushed.code, 0, pushed.stderr);
+  assert.match(pushed.stdout, /git push -u origin feature\/a/);
+  assert.match(gitIn(remote, 'branch', '--list').stdout, /feature\/a/);
+  assert.doesNotMatch(gitIn(remote, 'branch', '--list').stdout, /develop/);
+});
+
+test('cli: coverage check reads the report the stack declares and holds it to the thresholds', () => {
+  const { run, dir } = project();
+  fs.writeFileSync(path.join(dir, 'package.json'), '{}');
+  run(['init']);
+  run(['goal', 'new', 'Search']);
+  const check = () => run(['coverage', 'check', 'G-001']);
+  const manifest = (qualityGate) => fs.writeFileSync(path.join(dir, '.aisdlc/stacks/nodejs.json'), JSON.stringify({ name: 'nodejs', quality_gate: qualityGate }));
+  const report = (file, text) => { fs.mkdirSync(path.join(dir, 'coverage'), { recursive: true }); fs.writeFileSync(path.join(dir, 'coverage', file), text); };
+  const summary = (pct) => JSON.stringify({ total: Object.fromEntries(['lines', 'statements', 'functions', 'branches'].map((m) => [m, { total: 10, covered: 9, pct: pct[m] ?? 90 }])) });
+
+  assert.equal(run(['coverage', 'check']).code, 1);
+  assert.match(check().json.notes[0], /No \.aisdlc\/stacks\/nodejs\.json is installed/);
+  assert.equal(check().code, 0, 'without a stack manifest nothing is declared, so nothing fails');
+
+  manifest({ coverage_thresholds: { lines: 80 } });
+  assert.match(check().json.problems[0], /declares no quality_gate\.coverage_report/);
+  manifest({ coverage_report: { path: 'coverage/out.xml', format: 'cobertura' } });
+  assert.match(check().json.problems[0], /unknown coverage report format "cobertura"\. Valid: json-summary, lcov/);
+
+  const thresholds = { branches: 80, functions: 80, lines: 80, statements: 80 };
+  manifest({ coverage_report: { path: 'coverage/coverage-summary.json', format: 'json-summary' }, coverage_thresholds: thresholds });
+  assert.match(check().json.problems[0], /coverage\/coverage-summary\.json doesn't exist.*hooks run after_task --goal G-001/);
+  report('coverage-summary.json', '{"files":{}}');
+  assert.match(check().json.problems[0], /isn't a valid json-summary report: it has no "total" entry/);
+  report('coverage-summary.json', summary({}));
+  const ok = check();
+  assert.equal(ok.code, 0, ok.stdout);
+  assert.deepEqual(ok.json.metrics, { lines: 90, statements: 90, functions: 90, branches: 90 });
+  assert.match(ok.json.notes[0], /isn't a git repository/);
+  report('coverage-summary.json', summary({ branches: 72.5, lines: 'Unknown' }));
+  const low = check();
+  assert.equal(low.code, 1);
+  assert.deepEqual(low.json.problems, ['branches coverage is 72.5%, below the 80% threshold.']);
+  assert.equal(low.json.metrics.lines, 90, 'a pct Istanbul could not compute comes from covered/total');
+
+  // LCOV sums every file's records and has no statement figures.
+  manifest({ coverage_report: { path: 'coverage/lcov.info', format: 'lcov' }, coverage_thresholds: thresholds });
+  report('lcov.info', 'SF:a.js\nFNF:2\nFNH:2\nLF:10\nLH:9\nBRF:4\nBRH:3\nend_of_record\nSF:b.js\nFNF:2\nFNH:1\nLF:10\nLH:7\nend_of_record\n');
+  const lcov = check().json;
+  assert.deepEqual(lcov.metrics, { lines: 80, branches: 75, functions: 75 });
+  assert.deepEqual(lcov.problems, [
+    'branches coverage is 75%, below the 80% threshold.',
+    'functions coverage is 75%, below the 80% threshold.',
+    'coverage/lcov.info has no statements figure, but .aisdlc/stacks/nodejs.json sets a statements threshold of 80%.',
+  ]);
+  report('lcov.info', 'TN:\nend_of_record\n');
+  assert.match(check().json.problems[0], /isn't a valid lcov report: it has no LF: line counts/);
+});
+
+test('cli: coverage check fails a report older than a file the goal changed', { skip: process.platform === 'win32' }, () => {
+  const { run, dir } = project();
+  gitIn(dir, 'init', '-q', '-b', 'develop');
+  fs.writeFileSync(path.join(dir, 'package.json'), '{}');
+  fs.writeFileSync(path.join(dir, '.gitignore'), 'coverage/\n');
+  run(['init']);
+  run(['goal', 'new', 'A']);
+  fs.writeFileSync(path.join(dir, '.aisdlc/stacks/nodejs.json'), JSON.stringify({ name: 'nodejs', quality_gate: { coverage_report: { path: 'coverage/lcov.info', format: 'lcov' }, coverage_thresholds: { lines: 80 } } }));
+  gitIn(dir, 'add', '-A');
+  gitIn(dir, 'commit', '-qm', 'base');
+  gitIn(dir, 'checkout', '-q', '-b', 'feature/a');
+  run(['goal', 'set', 'G-001', 'branch', 'feature/a']);
+  fs.writeFileSync(path.join(dir, 'a.js'), '1\n');
+  gitIn(dir, 'add', 'a.js');
+  gitIn(dir, 'commit', '-qm', 'a');
+  fs.writeFileSync(path.join(dir, 'b.js'), '2\n');
+  fs.mkdirSync(path.join(dir, 'coverage'));
+  fs.writeFileSync(path.join(dir, 'coverage/lcov.info'), 'LF:10\nLH:9\n');
+  const past = new Date(Date.now() - 60_000);
+  for (const f of ['a.js', 'b.js']) fs.utimesSync(path.join(dir, f), past, past);
+  const fresh = run(['coverage', 'check', 'G-001']);
+  assert.equal(fresh.code, 0, fresh.stdout);
+  assert.deepEqual(fresh.json.notes, []);
+
+  const future = new Date(Date.now() + 60_000);
+  for (const f of ['a.js', 'b.js']) fs.utimesSync(path.join(dir, f), future, future);
+  const stale = run(['coverage', 'check', 'G-001']);
+  assert.equal(stale.code, 1);
+  assert.deepEqual(stale.json.problems, ['coverage/lcov.info is older than a.js, b.js, which the goal changed, so it may not cover the finished code. Run `hooks run after_task --goal G-001` to write it again.']);
+});
+
 test('cli: tasks cannot be finished, nor goals completed, outside the gated flow', () => {
   const { run } = project();
   run(['init']);

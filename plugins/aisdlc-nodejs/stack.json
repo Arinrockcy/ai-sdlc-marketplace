@@ -1,6 +1,6 @@
 {
   "name": "nodejs",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "detect": ["package.json"],
   "standards_skill": "aisdlc-nodejs:standards",
   "runtime": {
@@ -10,6 +10,10 @@
   "quality_gate": {
     "linter": "eslint",
     "test_runner": "jest",
+    "coverage_report": {
+      "path": "coverage/coverage-summary.json",
+      "format": "json-summary"
+    },
     "coverage_thresholds": {
       "branches": 80,
       "functions": 80,

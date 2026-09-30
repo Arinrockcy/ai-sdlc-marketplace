@@ -1,6 +1,6 @@
 {
   "before_goal": { "run": "git fetch origin {base_branch} && git checkout {base_branch} && git pull --ff-only origin {base_branch}" },
-  "after_goal": null,
+  "after_goal": { "run": ["{aisdlc} coverage check {goal_id}", "{aisdlc} goal push {goal_id}"] },
   "before_task": null,
   "after_task": { "use": "stack" },
   "on_block": null,

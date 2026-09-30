@@ -31,6 +31,12 @@ function verifyQualityFloor() {
   });
 }
 
+function verifyCoverageReport() {
+  const report = readJson('stack.json').quality_gate.coverage_report;
+
+  assert.deepEqual(report, { path: 'coverage/coverage-summary.json', format: 'json-summary' });
+}
+
 function verifyRuntimeDefaults() {
   const runtime = readJson('stack.json').runtime;
 
@@ -39,4 +45,5 @@ function verifyRuntimeDefaults() {
 
 test('nodejs stack runs lint and coverage as separate after-task gates', verifyAfterTaskGates);
 test('nodejs stack declares the complete 80 percent quality floor', verifyQualityFloor);
+test('nodejs stack declares the json-summary report that after_goal checks', verifyCoverageReport);
 test('nodejs stack requires Node.js 24+ and defaults to ES modules', verifyRuntimeDefaults);

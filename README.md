@@ -73,13 +73,29 @@ Each point resolves in this order: **env `AISDLC_HOOK_<POINT>` > `.aisdlc/config
 AISDLC_HOOK_AFTER_TASK="pnpm test" …   # one-off override; "none" disables
 ```
 
-Core defaults: `before_goal` pulls the base branch (`git.base_branch`, default `develop`), and `after_task` defers to the stack. `after_task` runs as part of `aisdlc.mjs task verify`, after the task's own `verify` command. Branch creation and auto-commit are always asked, never forced.
+Core defaults:
+- `before_goal` pulls the base branch (`git.base_branch`, default `develop`).
+- `after_task` defers to the stack. It runs as part of `aisdlc.mjs task verify`, after the task's own `verify` command.
+- `after_goal` runs `aisdlc.mjs coverage check <G-id>`, then `aisdlc.mjs goal push <G-id>`, before the goal completes. `goal push` runs `git push -u origin <branch>` for the goal's recorded branch, and refuses when that is the base branch. The check reads the coverage report the stack manifest declares (`quality_gate.coverage_report`), and fails when it is missing, older than a file the goal changed, or below the manifest's thresholds. To keep the check without the push, set `{"after_goal": {"run": "{aisdlc} coverage check {goal_id}"}}`.
+
+Hook commands can use `{base_branch}`, `{branch_prefix}`, `{goal_id}`, `{goal_slug}`, `{goal_branch}`, `{task_id}` and `{aisdlc}` (the core script). Branch creation and auto-commit are always asked, never forced.
 
 See [`plugins/aisdlc/docs/stack-plugin-contract.md`](plugins/aisdlc/docs/stack-plugin-contract.md) to add a stack.
 
 ## Upgrading
 
 Each plugin keeps a changelog: [`aisdlc`](plugins/aisdlc/CHANGELOG.md), [`aisdlc-nodejs`](plugins/aisdlc-nodejs/CHANGELOG.md). Breaking changes are listed there with their upgrade step.
+
+### 0.7.x → 0.8.0 (`aisdlc`)
+
+`after_goal` now checks the stack's coverage report and pushes the goal branch before a goal completes. Before the next goal finishes:
+
+1. **Re-register the stack** (for Node.js, `/aisdlc-nodejs:register`, see below), so `.aisdlc/stacks/<stack>.json` declares `quality_gate.coverage_report`. Without it, the check fails. A project without a stack manifest needs nothing: the check passes with a note.
+2. **Decide about the push.** It pushes the goal's branch to `origin`, never the base branch: a goal built on the base branch fails the push, and `/aisdlc:implement` offers to finish anyway. To keep the old behavior, set `"after_goal": null` under `hooks` in `.aisdlc/config.json`. To keep only the check, set `"after_goal": {"run": "{aisdlc} coverage check {goal_id}"}`. Commit the config.
+
+### `aisdlc-nodejs` 0.3.0 → 0.4.0
+
+Re-run `/aisdlc-nodejs:register`. It adds the `json-summary` reporter to Jest's `coverageReporters` (or LCOV for node:test) once you approve, checks that `test:coverage` writes the report, records it as `quality_gate.coverage_report` in `.aisdlc/stacks/nodejs.json`, and offers to ignore the coverage directory. Until then, `/aisdlc:implement` stops at the standards step. Commit the manifest and the tooling changes on their own.
 
 ### 0.6.x → 0.7.0 (`aisdlc`)
 

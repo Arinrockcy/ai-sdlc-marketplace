@@ -2,6 +2,21 @@
 
 All notable changes to the `aisdlc` plugin. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/). Until 1.0.0, a minor version may include breaking changes; each one is listed under **Breaking** with its upgrade step.
 
+## [0.8.0] - 2026-09-30
+
+### Breaking
+- The `after_goal` hook is no longer empty by default. It runs `coverage check <G-id>`, then `goal push <G-id>`, so a project without an `origin` remote, a goal built on the base branch, or with a stack manifest that declares no coverage report, now sees it fail. `/aisdlc:implement` asks whether to retry, finish anyway or stop. See [Upgrading to 0.8.0](../../README.md#upgrading).
+
+### Added
+- `coverage check <G-id>` checks the coverage report the stack manifest declares in `quality_gate.coverage_report` (`json-summary` or `lcov`). It fails when the report is missing or unreadable, older than a file the goal changed, or below `quality_gate.coverage_thresholds`. Without a stack manifest, it passes with a note.
+- `goal push <G-id>` pushes the goal's recorded branch to `origin` (`git push -u`). It refuses when no branch is recorded, the branch doesn't exist, or it is the base branch.
+- Hook commands can use `{aisdlc}`, which runs this script with the same Node.
+- The stack plugin contract requires `quality_gate.coverage_report`, written by the stack's test command on every run.
+
+### Changed
+- `/aisdlc:implement` offers to commit uncommitted work before the after-goal hook, whatever `auto_commit` says, because the hook pushes. After completing the goal, it asks whether to commit the completion and push again. For a failed coverage check, it offers to rewrite the report (`hooks run after_task`), or to add a task for missing tests.
+- `/aisdlc:init` tells the user that `after_goal` checks coverage and pushes by default, and how to change that.
+
 ## [0.7.0] - 2026-09-30
 
 ### Breaking

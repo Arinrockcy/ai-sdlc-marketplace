@@ -20,21 +20,44 @@ plugins/aisdlc-<stack>/
   "version": "0.1.0",
   "detect": ["<marker file>"],
   "standards_skill": "aisdlc-<stack>:standards",
+  "quality_gate": {
+    "coverage_report": { "path": "<report file>", "format": "json-summary" | "lcov" },
+    "coverage_thresholds": { "lines": 80, "branches": 80, "functions": 80 }
+  },
   "hooks": {
-    "after_task": { "run": "<test command>" }
+    "after_task": { "run": "<test command that writes the coverage report>" }
   }
 }
 ```
 
 - `name` must match the value `aisdlc.mjs detect-stack` reports and the `stack` value in `.aisdlc/config.json`. To detect a new stack, add its marker file to `STACK_MARKERS` in `scripts/aisdlc.mjs`.
 - `hooks` can set any hook point listed in `defaults/hooks.json`. Each value has the same form as in config: `{"run": "cmd" | ["cmd", ...]}`, `{"use": "default"}`, or `null`.
-- Hook commands can use these variables: `{base_branch}`, `{branch_prefix}`, `{goal_id}`, `{goal_slug}`, `{goal_branch}` and `{task_id}`.
+- Hook commands can use these variables: `{base_branch}`, `{branch_prefix}`, `{goal_id}`, `{goal_slug}`, `{goal_branch}`, `{task_id}` and `{aisdlc}` (the core script, run with the same Node).
+- `quality_gate.coverage_report` is required. It names the coverage report, relative to the project root, that the stack's test command writes on every run. `format` is one of:
+  - `json-summary`: Istanbul's summary (`coverage/coverage-summary.json`), written by Jest, Vitest, c8 and nyc. It measures lines, statements, functions and branches.
+  - `lcov`: an LCOV tracefile, written by node:test, c8, pytest-cov and most other runners. It measures lines, functions and branches, but not statements.
+
+  To support another format, add a parser to `COVERAGE_FORMATS` in `scripts/aisdlc.mjs`.
+- `quality_gate.coverage_thresholds` maps each metric to its minimum percentage. List only metrics the report measures and the test command enforces.
+
+## Coverage report
+
+The stack's `after_task` hook (its test command) must write the report named in `coverage_report` each time it runs. Its `register` skill configures the runner to do that, and checks that the file appears after the baseline run. The coverage directory belongs in `.gitignore`.
+
+The core `after_goal` default runs `aisdlc.mjs coverage check <G-id>` before a goal completes, then `aisdlc.mjs goal push <G-id>`, which pushes the goal branch (never the base branch). The check fails when:
+- the manifest declares no `coverage_report`, or an unknown format
+- the report is missing or can't be parsed
+- the report is older than a file the goal changed, so it may not cover the finished code
+- a metric in `coverage_thresholds` is missing from the report or below its minimum
+
+Without a stack manifest, the check passes with a note, because nothing is declared.
 
 ## How it is wired
 
 1. `/aisdlc:init` detects the stack and invokes `aisdlc-<stack>:register` if that skill is installed.
 2. `register` copies `stack.json` to `.aisdlc/stacks/<stack>.json` in the project. It can adapt the file first (for example, choosing the package manager). The core script only ever reads project-local files, so it doesn't need to know where plugins are installed.
 3. `/aisdlc:implement` reads `standards_skill` via `detect-stack` and invokes it before coding.
+4. `/aisdlc:implement` runs `after_task` (via `task verify`) after each task, and `after_goal` (coverage check, then push) before completing the goal.
 
 ## Hook precedence
 

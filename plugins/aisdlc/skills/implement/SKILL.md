@@ -36,7 +36,7 @@ Once `pre_implement` has run, every way this run ends (a finished task in single
       Then run `$AISDLC goal show <G-id>` again. If the goal is no longer found, its planning files were committed on a different branch than the one the hook switched to. Tell the user to bring `.aisdlc/` onto this branch (or disable the hook), and stop.
    3. **Branch.** If `branch` is empty, ask the user to pick one:
       - create the goal branch `suggested_branch` from `goal show` (`git checkout -b <suggested_branch>`)
-      - stay on the current branch
+      - stay on the current branch (on the base branch, the after-goal hook won't push: aisdlc never pushes the base branch)
       - use a branch name they provide
       Save the result with `$AISDLC goal set <G-id> branch <name>`. Never force a branch the user didn't choose.
    4. **Start.** Run `$AISDLC state move <G-id> in-progress`.
@@ -80,11 +80,16 @@ Repeat these steps for each task:
 ## 3. Complete the goal
 All tasks are done or skipped at this point.
 1. **Final review.** Run `$AISDLC goal show <G-id>`. If `final_review_required` is true and `gates.final` isn't `passed`, run the govern skill's final review (`/aisdlc:govern <G-id> --final`, Mode C) now. If it fails, show the Required Fixes, handle them as Mode C describes, run `post_implement` and stop.
-2. Run `$AISDLC hooks run after_goal --goal <G-id>`. If it fails, show the output and ask the user whether to retry or finish anyway.
-3. Run `$AISDLC state move <G-id> completed`. The goal completes automatically once every task passes and, if there are final rules, the final review passes. The registry updates itself.
-4. **Uncommitted work.** If `auto_commit` is false, run `$AISDLC goal diff <G-id>`. If `uncommitted` or `untracked` isn't empty, tell the user that the goal's work isn't committed yet, list the files, and ask whether to commit them now together with `.aisdlc/`. Never commit without asking.
-5. Run `$AISDLC hooks run post_implement`. Summarize:
+2. **Uncommitted work.** Run `$AISDLC goal diff <G-id>`. If `uncommitted` or `untracked` isn't empty, tell the user that the goal's work isn't committed yet and that the after-goal hook only pushes commits. List the files, and ask whether to commit them now together with `.aisdlc/`. Never commit without asking.
+3. **After-goal hook.** Run `$AISDLC hooks run after_goal --goal <G-id>`. By default it runs `coverage check`, then `goal push`, which pushes the goal's branch to `origin`. `goal push` refuses when the goal was built on the base branch: aisdlc never pushes the base branch. `coverage check` reads the report the stack manifest declares (`quality_gate.coverage_report`). It fails when the report is missing, is older than a file the goal changed, or falls below `quality_gate.coverage_thresholds`. If the hook fails, show the output and ask the user whether to retry, finish anyway or stop:
+   - **Retry:** for a missing or out-of-date report, run `$AISDLC hooks run after_task --goal <G-id>` first to write it again. Coverage below a threshold needs more tests, which is new work: offer to add it as a task (section 2, step 6). Adding a task resets governance, so run `post_implement` and stop.
+   - **Finish anyway:** go on to step 4, and name the failure in the summary. The hook stops at its first failing command, so after a failed coverage check the branch wasn't pushed. A refused `goal push` (the goal is on the base branch) is also a finish-anyway case: tell the user the branch wasn't pushed.
+   - **Stop:** run `post_implement` and stop. The goal stays in progress.
+4. Run `$AISDLC state move <G-id> completed`. The goal completes automatically once every task passes and, if there are final rules, the final review passes. The registry updates itself.
+5. **Completion state.** Completing the goal moves its folder and updates the registry in `.aisdlc/`, after the hook ran. Ask the user whether to commit these changes (`<G-id>: complete`), then whether to push the branch with `$AISDLC goal push <G-id>`, so the remote has the completed goal. Skip the push question when the goal was built on the base branch, because `goal push` refuses it. Never commit or push without asking.
+6. Run `$AISDLC hooks run post_implement`. Summarize:
    - the tasks completed
    - any skipped tasks, with their reasons
    - the commits made, or the work left uncommitted
+   - whether the branch was pushed, and the coverage figures from `coverage check` (or why it failed, if the user finished anyway)
    - every `should` rule that failed without blocking, from `governance.plan.failed` and `governance.final.failed` in `goal show`, so the user sees them before moving on

@@ -6,7 +6,7 @@ description: Enforce the aisdlc Node.js coding standard for JavaScript or option
 # Node.js standards (aisdlc)
 
 These are required Node.js plugin policies. Preserve stricter repository rules and established naming, but do not inherit a weaker convention that defeats a requirement below. Before writing code, check these once per session:
-- `.aisdlc/stacks/nodejs.json`: `runtime.node` and `runtime.module_type`. If `runtime` is missing, the manifest predates these rules: tell the user to re-run `/aisdlc-nodejs:register` and stop.
+- `.aisdlc/stacks/nodejs.json`: `runtime.node`, `runtime.module_type` and `quality_gate.coverage_report`. If `runtime` or `coverage_report` is missing, the manifest predates these rules: tell the user to re-run `/aisdlc-nodejs:register` and stop.
 - `package.json`: `type`, `engines`, `scripts`, `packageManager`
 - `tsconfig.json` or `jsconfig.json`: whether TypeScript is used, strictness, declaration output, module resolution, and path aliases
 - the ESLint, formatter, Jest, and coverage configuration
@@ -72,6 +72,7 @@ If these conflict (for example, a `type` that disagrees with `runtime.module_typ
 - Jest is the default runner. A user-selected alternative is acceptable only when it provides the same test layers and enforceable coverage. Global branches, functions, lines, and statements must each be at least 80%; existing higher thresholds win.
 - Coverage is a floor, not the test design target. Give extra attention to negative cases, boundary conditions, concurrency, resource cleanup, and measured performance risks.
 - The `after_task` hook must run `lint` and `test:coverage` after every task. Both commands and the task's own `verify` command must pass before the task is done.
+- Every `test:coverage` run writes the report named in the manifest's `quality_gate.coverage_report`. The core `after_goal` hook checks that report before the goal completes: it must exist, be newer than every file the goal changed, and meet the thresholds. Don't remove its reporter, move its output, or commit the coverage directory.
 
 ## Done checklist
 - [ ] ESLint passes with zero errors
@@ -79,6 +80,7 @@ If these conflict (for example, a `type` that disagrees with `runtime.module_typ
 - [ ] Public `.d.ts` files match the implementation (editor hints only; no TypeScript tooling added to a JavaScript project)
 - [ ] Mock-based unit tests and non-mocked data-driven tests pass
 - [ ] Coverage is at least 80% for branches, functions, lines, and statements; custom library replacements are 100%
+- [ ] The last `test:coverage` run wrote the coverage report named in `quality_gate.coverage_report`
 - [ ] Negative, boundary, cleanup, and relevant performance cases are covered
 - [ ] Static constants are grouped by purpose under the nearest `constant/`; deployable configuration is validated in `config/`
 - [ ] Stateful/dependency-owning behavior uses focused class modules and no new inline functions remain
