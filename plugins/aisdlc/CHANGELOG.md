@@ -2,6 +2,41 @@
 
 All notable changes to the `aisdlc` plugin. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/). Until 1.0.0, a minor version may include breaking changes; each one is listed under **Breaking** with its upgrade step.
 
+## [0.6.0] - 2026-09-30
+
+Fixes from a dogfood run, in which a plan review took seven rounds to pass. Reviews now separate questions for the user from real defects, carry earlier answers forward, and see the stack's standards at plan time. See [Upgrading to 0.6.0](../../README.md#upgrading) for a review that hasn't passed yet.
+
+### Breaking
+- `gate set govern|final passed` refuses a review row with more than three cells. A literal `|` in a note has to be written as `\|`. Before, the text after it was silently dropped.
+
+### Added
+- `task edit <G-id> <T-id> title|depends|risk|verify <value>` changes a task's planned fields. It validates the DAG, renames the file with the title, clears the verify result when the command changes, and resets governance.
+- `task remove <G-id> <T-id> --reason "<why>"` removes a task before the goal starts. It refuses while another task depends on it, logs the removal under `## Removed tasks` in `goal.md`, and resets governance.
+- `goal diff <G-id>` returns the goal's `committed` changes (`<base>...<branch>`), plus `uncommitted` and `untracked` files outside `.aisdlc/`. `warnings` says when no branch is recorded, the goal was built on the base branch, or the current branch isn't the goal's branch.
+- `gate set <G-id> govern|final pending` and `governance review` return `stale_reviews`, the earlier reviews oldest first.
+- `gate set <G-id> govern|final passed|failed` returns `checked`, `warnings`, `questions` and `readings`. For `failed`, the review is checked the same way as for `passed`, and its problems come back as `warnings` instead of a refusal. `goal show` includes a failed review's `questions`.
+- The review template has `## Questions for the user` and `## Readings` sections. The goal template has an optional `## Standards deviations` section.
+- `dag write` returns `warnings`, also written to `tasks.md`, when tasks in the same wave list the same file under Files.
+- `task verify` records a one-line summary in `verify_evidence`: each command, its exit code and the test count it printed. Manual evidence is kept, followed by the summary of the `after_task` hook.
+- `goal show` returns `next_hint` once every task is done: whether `/aisdlc:implement` still runs the final review or only completes the goal.
+- Catalog rule: a `plan`-stage companion to Stack standards. The plan's tasks carry the criteria the standards skill requires, or the goal records the user's deviation.
+- `goal preflight` warns when `.aisdlc/stacks/<stack>.json` has uncommitted changes, so a manifest edit stays out of the goal's changes.
+
+### Changed
+- `/aisdlc:govern <G-id>` defines when the unconfirmed-assumptions rule (GOV-05) fails: an open question about behavior inside Scope (In), or a contradiction between the goal, tasks, ADRs and standards. Other edge cases and implementation details go under Readings. Questions go under Questions for the user, and the session that started the review asks them and records the answers under Clarifications. The reviewer reads the latest archived review, treats Clarifications and Standards deviations as settled, and loads the stack's standards skill.
+- `/aisdlc:govern <G-id> --final` reviews `goal diff` (committed, uncommitted and untracked changes together), cites `verify_evidence`, and lets a recorded standards deviation take precedence over the standards skill.
+- `/aisdlc:govern` (no argument) offers the catalog by topic first, then asks about what it doesn't cover. Before, it asked about topics and then offered the catalog, which covered the same ground.
+- `/aisdlc:create-goal` and `/aisdlc:challenge` load the stack's standards skill before splitting tasks, add the criteria it implies, and ask about conflicts with the repo. `/aisdlc:challenge` changes tasks with `task edit` and `task remove`, and re-checks task criteria after a goal criterion changes. `/aisdlc:implement` follows recorded standards deviations.
+- `/aisdlc:implement` asks whether to commit the goal's work after completing it, when auto-commit is off and `goal diff` shows uncommitted files.
+- Skills write `graph query "<keywords>"` and say to pass identifiers, not a sentence: Graphify matches node names, not prose. When nothing matches, `graph query` suggests retrying with identifiers.
+- `governance review --stage final` leaves the `criteria-met` row empty and returns `to_check` (for example "1 goal and 2 task criteria to check"). Before, it pre-filled the row as `fail` with every unticked criterion, although criteria start unticked by design. `gate set final passed` still runs the check.
+- `task verify` prints each command's output when it finishes, instead of streaming it, so the output can be summarized.
+
+### Fixed
+- `task new` never reuses a removed task's ID. IDs come from the existing tasks and the Removed tasks log.
+- `init` lists `registry.md` and `registry-archive.md` in `created`.
+- Editing `.gitignore`, `.gitattributes` or `.editorconfig` no longer makes the code graph stale.
+
 ## [0.5.1] - 2026-09-30
 
 ### Added

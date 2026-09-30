@@ -58,7 +58,8 @@ function project() {
   // Graphify is pointed at a missing binary, so `graph` commands never run a real one installed on this machine.
   const env = { ...process.env, AISDLC_GRAPHIFY: path.join(dir, 'no-graphify'), ...Object.fromEntries(HOOK_POINTS.map((p) => [`AISDLC_HOOK_${p.toUpperCase()}`, 'none'])) };
   const run = (args) => spawnSync(process.execPath, [SCRIPT, ...args], { cwd: dir, encoding: 'utf8', env });
-  for (const args of [['init'], ['goal', 'new', 'Sample'], ['task', 'new', 'G-001', 'Sample', '--verify', 'true'], ['adr', 'new', 'Sample', '--goal', 'G-001']]) {
+  // T-02 depends on T-01, so `task remove … T-01` is refused and later invocations still find T-01.
+  for (const args of [['init'], ['goal', 'new', 'Sample'], ['task', 'new', 'G-001', 'Sample', '--verify', 'true'], ['task', 'new', 'G-001', 'Next', '--depends', 'T-01'], ['adr', 'new', 'Sample', '--goal', 'G-001']]) {
     assert.equal(run(args).status, 0);
   }
   return run;

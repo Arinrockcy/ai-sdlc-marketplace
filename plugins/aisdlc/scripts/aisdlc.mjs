@@ -4,6 +4,7 @@
 // Output is JSON on stdout (except `hooks run` and `task verify`, which stream command output); errors exit 1 with a message on stderr.
 
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { execSync, execFileSync, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
@@ -215,6 +216,12 @@ function nextId(prefix, existing, width) {
   return `${prefix}-${pad((nums.length ? Math.max(...nums) : 0) + 1, width)}`;
 }
 
+// The goal's log of removed tasks. The script writes it, and it keeps removed IDs from being allocated again.
+const REMOVED_TASKS = /^removed tasks\b/i;
+
+const removedTaskIds = (goal) => listItems(section(readDoc(goal.file).body, REMOVED_TASKS))
+  .map((item) => item.match(/\bT-\d+\b/)?.[0]).filter(Boolean);
+
 function listTasks(goal) {
   const dir = path.join(goal.dir, 'tasks');
   if (!fs.existsSync(dir)) return [];
@@ -315,6 +322,31 @@ export function goalProgress(tasks) {
   };
 }
 
+// Paths a task lists under `## Files`: the backticked spans of each item, or else its first word.
+function taskFiles(task) {
+  return listItems(section(readDoc(task.file).body, /^files\b/i)).flatMap((item) => {
+    const quoted = [...item.matchAll(/`([^`]+)`/g)].map((m) => m[1]);
+    return (quoted.length ? quoted : [item.split(/\s+/)[0]])
+      .map((f) => f.trim().replace(/^\.\//, '').replace(/[,;:.)]+$/, ''))
+      .filter((f) => f.includes('/') || /\.\w+$/.test(f));
+  });
+}
+
+// Tasks the DAG calls independent (same wave) that expect to change the same file.
+function sharedFiles(tasks, waves) {
+  const byId = new Map(tasks.map((t) => [t.id, t]));
+  return waves.flatMap((wave, i) => {
+    const owners = new Map();
+    for (const id of wave) for (const f of new Set(taskFiles(byId.get(id)))) owners.set(f, [...(owners.get(f) || []), id]);
+    const pairs = new Map();
+    for (const [f, ids] of owners) if (ids.length > 1) pairs.set(ids.join(', '), [...(pairs.get(ids.join(', ')) || []), f]);
+    return [...pairs].map(([ids, files]) => {
+      const n = ids.split(', ').length;
+      return `${n > 2 ? ids : ids.replace(', ', ' and ')} are in wave ${i + 1} as independent tasks, but ${n > 2 ? 'all' : 'both'} list ${files.join(', ')} under Files. Add a dependency if one has to go first, or confirm the changes don't conflict.`;
+    });
+  });
+}
+
 function writeTasksMd(goal) {
   const tasks = listTasks(goal);
   const dag = analyzeDag(tasks);
@@ -324,6 +356,7 @@ function writeTasksMd(goal) {
     const t = byId.get(id);
     return `| ${i + 1} | ${t.id} | ${t.title} | ${t.risk || 'medium'} | ${t.depends_on.join(', ') || '-'} | ${t.status} |`;
   }));
+  const warnings = sharedFiles(tasks, dag.waves);
   const text = [
     `# ${goal.id} Tasks`,
     '',
@@ -334,9 +367,10 @@ function writeTasksMd(goal) {
     '|------|----|-------|------|------------|--------|',
     ...rows,
     '',
+    ...(warnings.length ? ['## Warnings', '', ...warnings.map((w) => `- ${w}`), ''] : []),
   ].join('\n');
   fs.writeFileSync(path.join(goal.dir, 'tasks.md'), text);
-  return dag;
+  return { ...dag, warnings };
 }
 
 // ---------- stack ----------
@@ -507,6 +541,8 @@ const GRAPH_DIR = 'graphify-out';
 const GRAPH_STAMP = path.join(GRAPH_DIR, '.aisdlc-stamp');
 const GRAPH_WARNINGS = path.join(GRAPH_DIR, '.aisdlc-warnings');
 const GRAPH_IGNORED = ['.aisdlc/', `${GRAPH_DIR}/`];
+// Git settings files hold no code. A .gitignore change that matters still shows, as files entering or leaving the list.
+const GRAPH_IGNORED_FILES = new Set(['.gitignore', '.gitattributes', '.editorconfig']);
 const GRAPH_FEATURES = { update: /^\s*update <path>/m, query: /^\s*query "<question>"/m, budget: /--budget N/ };
 const GRAPH_INSTALL = 'Install Graphify 0.9 or later (Python 3.10+) so `graphify` is on PATH, for example `pipx install graphifyy`. The workflow only needs the CLI, not `graphify install`.';
 const DEFAULT_BUDGET = 1500;
@@ -552,7 +588,7 @@ function codeStamp(root) {
   const list = (...args) => git(root, ['ls-files', '-z', ...args])?.split('\0').filter(Boolean);
   const staged = list('-s');
   if (!staged) return null;
-  const keep = (f) => !GRAPH_IGNORED.some((d) => f.startsWith(d));
+  const keep = (f) => !GRAPH_IGNORED.some((d) => f.startsWith(d)) && !GRAPH_IGNORED_FILES.has(path.posix.basename(f));
   const blobs = new Map(staged.map((l) => { const [meta, f] = l.split('\t'); return [f, meta.split(' ')[1]]; }));
   for (const f of list('-d')) blobs.delete(f);
   const changed = [...new Set([...list('-m'), ...list('-o', '--exclude-standard')])].filter((f) => keep(f) && fs.existsSync(path.join(root, f)));
@@ -763,6 +799,14 @@ const CHECKS = {
   ],
 };
 
+// Checks that the review's own work makes pass, each with a summary of what is left to review.
+const REVIEWER_CHECKS = {
+  'criteria-met': (problems) => {
+    const goal = problems.filter((p) => p.startsWith('goal ')).length;
+    return `${goal} goal and ${problems.length - goal} task criteria to check`;
+  },
+};
+
 function runChecks(root, goal, rules) {
   const ctx = { root, goal, tasks: listTasks(goal) };
   return rules.filter((r) => r.check).map((r) => {
@@ -823,36 +867,56 @@ function requireStep(root, goal, step) {
 function readReview(file) {
   const doc = readDoc(file);
   const results = new Map();
+  const malformed = [];
   for (const r of tableRows(doc.body)) {
     const id = r[0].match(/[A-Z][A-Z0-9]*-\d+/)?.[0];
-    if (id) results.set(id, { result: (r[1] || '').toLowerCase().replace(/[^a-z/]/g, ''), notes: r[2] || '' });
+    if (!id) continue;
+    // An unescaped `|` in a note splits it into extra cells, and the text after it would be lost.
+    if (r.length > 3) malformed.push(`${id}'s row has ${r.length} cells instead of 3; write a literal | in a note as \\|`);
+    results.set(id, { result: (r[1] || '').toLowerCase().replace(/[^a-z/]/g, ''), notes: r[2] || '' });
   }
-  return { data: doc.data, results };
+  return {
+    data: doc.data, results, malformed,
+    questions: listItems(section(doc.body, /^questions\b/i)),
+    readings: listItems(section(doc.body, /^readings\b/i)),
+  };
 }
 
-// Problems that stop a governance review from counting as a pass.
+// What stops a governance review from counting as a pass. `invalid` problems make the review unusable whatever its
+// result; `blocking` ones are its verdict (it says fail, or a must rule failed).
 function reviewProblems(root, goal, stage) {
   const name = REVIEW_FILE[stage];
   const file = path.join(goal.dir, name);
-  if (!fs.existsSync(file)) return [`${name} is required`];
+  if (!fs.existsSync(file)) return { invalid: [`${name} is required`], blocking: [], review: null };
   const review = readReview(file);
-  const problems = [];
-  if (review.data.result !== 'pass') problems.push(`${name}: \`result\` is not \`pass\``);
-  if (review.data.goal && review.data.goal !== goal.id) problems.push(`${name}: review is for ${review.data.goal}, not ${goal.id}`);
-  if (review.data.stage && review.data.stage !== stage) problems.push(`${name}: review is for stage ${review.data.stage}, not ${stage}`);
+  const invalid = [...review.malformed];
+  const blocking = [];
+  if (review.data.result !== 'pass') blocking.push(`${name}: \`result\` is not \`pass\``);
+  if (review.data.goal && review.data.goal !== goal.id) invalid.push(`${name}: review is for ${review.data.goal}, not ${goal.id}`);
+  if (review.data.stage && review.data.stage !== stage) invalid.push(`${name}: review is for stage ${review.data.stage}, not ${stage}`);
   const rules = activeRules(root, stage);
   const checks = new Map(runChecks(root, goal, rules).map((c) => [c.rule, c]));
   for (const rule of rules) {
     const r = review.results.get(rule.id);
     const check = checks.get(rule.id);
-    if (!r) problems.push(`${rule.id} is missing from the review table`);
-    else if (!['pass', 'fail', 'n/a'].includes(r.result)) problems.push(`${rule.id} has result "${r.result}" (use pass, fail or n/a)`);
-    else if (check && !check.ok && r.result !== 'fail') problems.push(`${rule.id} is ${r.result} but its automatic check "${check.check}" failed: ${check.problems.join('; ')}`);
-    else if (r.result === 'fail' && rule.severity === 'must') problems.push(`${rule.id} is a must rule and failed`);
-    // A pass needs its evidence as much as a fail needs its reason.
-    else if (!r.notes) problems.push(`${rule.id} is ${r.result} without a note (cite the evidence)`);
+    if (!r) invalid.push(`${rule.id} is missing from the review table`);
+    else if (!['pass', 'fail', 'n/a'].includes(r.result)) invalid.push(`${rule.id} has result "${r.result}" (use pass, fail or n/a)`);
+    else if (check && !check.ok && r.result !== 'fail') invalid.push(`${rule.id} is ${r.result} but its automatic check "${check.check}" failed: ${check.problems.join('; ')}`);
+    else {
+      if (r.result === 'fail' && rule.severity === 'must') blocking.push(`${rule.id} is a must rule and failed`);
+      // A pass needs its evidence as much as a fail needs its reason.
+      if (!r.notes) invalid.push(`${rule.id} is ${r.result} without a note (${r.result === 'pass' ? 'cite the evidence' : 'give the reason'})`);
+    }
   }
-  return problems;
+  return { invalid, blocking, review };
+}
+
+// Earlier reviews of a stage, oldest first, so the next reviewer can find them without listing the folder.
+function staleReviews(root, goal, stage) {
+  const base = REVIEW_FILE[stage].replace(/\.md$/, '');
+  const n = (f) => Number(f.match(/\.stale-(\d+)\.md$/)[1]);
+  return fs.readdirSync(goal.dir).filter((f) => f.startsWith(`${base}.stale-`) && /\.stale-\d+\.md$/.test(f))
+    .sort((a, b) => n(a) - n(b)).map((f) => path.relative(root, path.join(goal.dir, f)));
 }
 
 // Moves a review aside as <name>.stale-N.md, never overwriting an earlier one. Returns the new name, or null.
@@ -905,9 +969,16 @@ function setGate(root, goal, gate, value) {
     if (problems.length) fail(`Cannot mark adr done: ${problems.join(', ')}.`);
   }
   const stage = { govern: 'plan', final: 'final' }[gate];
-  if (stage && value === 'passed') {
-    const problems = [...(gate === 'final' ? requireStep(root, goal, 'final') : []), ...reviewProblems(root, goal, stage)];
-    if (problems.length) fail(`Cannot mark ${gate} passed:\n- ${problems.join('\n- ')}`);
+  // Both verdicts are checked against the review, so the output says whether the review file itself holds up.
+  let checked = {};
+  if (stage && value !== 'pending') {
+    const { invalid, blocking, review } = reviewProblems(root, goal, stage);
+    if (value === 'passed') {
+      const problems = [...(gate === 'final' ? requireStep(root, goal, 'final') : []), ...invalid, ...blocking];
+      if (problems.length) fail(`Cannot mark ${gate} passed:\n- ${problems.join('\n- ')}`);
+    }
+    const warnings = [...invalid, ...(value === 'failed' && review?.data.result === 'pass' ? [`${REVIEW_FILE[stage]} says \`result: pass\`; set it to \`fail\``] : [])];
+    checked = { checked: true, warnings, questions: review?.questions || [], readings: review?.readings || [] };
   }
   // A new answer at one gate invalidates everything after it. Setting a review gate to pending starts a
   // fresh review, so the current one is archived.
@@ -918,7 +989,7 @@ function setGate(root, goal, gate, value) {
   const patch = { [`gate_${gate}`]: value };
   if (gate === 'govern') patch.govern_fingerprint = value === 'passed' ? planFingerprint(root, goal) : '';
   updateDoc(goal.file, patch);
-  return notes;
+  return { notes, ...checked, ...(stage && value === 'pending' && { stale_reviews: staleReviews(root, goal, stage) }) };
 }
 
 function reviewSummary(root, goal, stage) {
@@ -927,7 +998,7 @@ function reviewSummary(root, goal, stage) {
   const r = readReview(file);
   // Failed rules in a passing review are the `should` rules that did not block; keep them visible.
   const failed = [...r.results].filter(([, v]) => v.result === 'fail').map(([rule, v]) => ({ rule, notes: v.notes }));
-  return { file: path.relative(root, file), result: r.data.result || null, failed };
+  return { file: path.relative(root, file), result: r.data.result || null, failed, ...(r.questions.length && { questions: r.questions }) };
 }
 
 // ---------- commands ----------
@@ -951,7 +1022,9 @@ const commands = {
     if (opts.graph) cfg.graph = { ...cfg.graph, provider: opts.graph };
     if (opts['base-branch']) cfg.git = { ...cfg.git, base_branch: opts['base-branch'] };
     saveConfig(root, cfg);
+    const views = ['registry.md', 'registry-archive.md'].map((f) => path.join(base, f)).filter((f) => !fs.existsSync(f));
     registrySync(root);
+    created.push(...views);
     out({ root, created: created.map((f) => path.relative(root, f)), config: cfg, detected_stacks: detectStacks(root) });
   },
 
@@ -1014,22 +1087,64 @@ const commands = {
           warnings.push(`The goal's planning files are committed on the current branch but not on ${baseRef}, so the checkout leaves them behind. Bring .aisdlc/ onto ${base} first, or disable the before_goal hook.`);
         }
       }
+      // A stack registration rewrites its manifest; committed inside the goal, it would show up in the goal's diff.
+      const stack = activeStack(root);
+      const manifest = stack && `.aisdlc/stacks/${stack}.json`;
+      if (manifest && fs.existsSync(path.join(root, manifest)) && git(root, ['status', '--porcelain', '--', manifest])?.trim()) {
+        warnings.push(`${manifest} has uncommitted changes, for example from registering the stack again. Commit it on its own before the goal starts, so it stays out of the goal's changes.`);
+      }
       return out({ goal: g.id, before_goal: commands, switches_branch: switches, base_branch: base, other_in_progress: others, warnings });
+    }
+    if (action === 'diff') {
+      const g = getGoal(root, rest[0]);
+      if (git(root, ['rev-parse', '--git-dir']) === null) fail('goal diff needs a git repository. Ask the user which files belong to the goal.');
+      const base = loadConfig(root).git?.base_branch || 'develop';
+      const branch = g.data.branch || null;
+      const current = git(root, ['rev-parse', '--abbrev-ref', 'HEAD'])?.trim() || null;
+      const exists = (ref) => git(root, ['rev-parse', '--verify', '--quiet', `${ref}^{commit}`]) !== null;
+      // Workflow state and the code graph are not the goal's changes.
+      const files = (text) => (text || '').split('\n').filter((f) => f && !GRAPH_IGNORED.some((d) => f.startsWith(d)));
+      const baseRef = [base, `origin/${base}`].find(exists);
+      const warnings = [];
+      let range = null;
+      let committed = [];
+      if (!branch) warnings.push(`${g.id} has no branch recorded, so its commits can't be told apart from other work. Ask the user which commits belong to it.`);
+      else if (!exists(branch)) warnings.push(`The goal's branch ${branch} doesn't exist.`);
+      else if (!baseRef) warnings.push(`The base branch ${base} exists neither locally nor as origin/${base}.`);
+      else if (branch === base) warnings.push(`The goal was built on the base branch ${base}, so its commits can't be told apart from other work. Ask the user which commits belong to it.`);
+      else {
+        range = `${baseRef}...${branch}`;
+        committed = files(git(root, ['diff', '--name-only', range]));
+      }
+      if (branch && current !== branch) warnings.push(`The current branch is ${current}, not ${branch}, so uncommitted and untracked files come from ${current}'s working tree.`);
+      return out({
+        goal: g.id, base_branch: base, branch, current_branch: current, range, committed,
+        uncommitted: files(git(root, ['diff', '--name-only', 'HEAD'])),
+        untracked: files(git(root, ['ls-files', '-o', '--exclude-standard'])),
+        warnings,
+      });
     }
     if (action === 'show') {
       const g = getGoal(root, rest[0]);
       const tasks = listTasks(g);
+      const next = nextStep(root, g);
+      const finals = activeRules(root, 'final').length > 0;
+      const p = goalProgress(tasks);
+      // `next` names a command; say when all it has left to do is finish the goal.
+      const hint = next === 'implement' && p.complete && (!finals || g.data.gate_final === 'passed')
+        ? `Every task is done${finals ? ' and the final review passed' : ''}. /aisdlc:implement ${g.id} only completes the goal.`
+        : next === 'implement' && p.complete ? `Every task is done. /aisdlc:implement ${g.id} runs the final review, then completes the goal.` : null;
       return out({
         id: g.id, title: g.title, status: g.status, dir: path.relative(root, g.dir),
-        gates: gatesOf(g), next: nextStep(root, g),
-        final_review_required: activeRules(root, 'final').length > 0,
+        gates: gatesOf(g), next, ...(hint && { next_hint: hint }),
+        final_review_required: finals,
         governance: { plan: reviewSummary(root, g, 'plan'), final: reviewSummary(root, g, 'final') },
         ...(g.status === 'cancelled' && { cancel_reason: g.data.cancel_reason || null }),
         cancellations: listItems(section(readDoc(g.file).body, CANCELLATIONS)),
         adrs: g.data.adrs, auto_commit: g.data.auto_commit, branch: g.data.branch,
         suggested_branch: hookContext(root, loadConfig(root), { goal: g.id }).goal_branch,
         tasks: tasks.map((t) => ({ id: t.id, title: t.title, status: t.status, risk: t.risk, depends_on: t.depends_on, verify: t.verify, file: path.relative(root, t.file) })),
-        progress: goalProgress(tasks),
+        progress: p,
       });
     }
     if (action === 'set') {
@@ -1044,7 +1159,7 @@ const commands = {
       updateDoc(g.file, { [key]: parseScalar(value, key) });
       return out({ id, [key]: parseScalar(value, key) });
     }
-    fail('Usage: goal new|list|show|set');
+    fail('Usage: goal new|list|show|diff|preflight|set');
   },
 
   state([action, id, status], opts) {
@@ -1105,7 +1220,8 @@ const commands = {
       const risk = opts.risk || 'medium';
       if (!(risk in RISK_RANK)) fail(`Invalid risk "${risk}"`);
       const tasks = listTasks(g);
-      const id = nextId('T', tasks.map((t) => t.id), 2);
+      // Removed IDs count too: earlier reviews may still name them.
+      const id = nextId('T', [...tasks.map((t) => t.id), ...removedTaskIds(g)], 2);
       const depends = typeof opts.depends === 'string' ? opts.depends.split(',').map((s) => s.trim()).filter(Boolean) : [];
       const unknown = depends.filter((d) => !tasks.some((t) => t.id === d));
       if (unknown.length) fail(`Unknown dependencies: ${unknown.join(', ')} (create them first)`);
@@ -1115,6 +1231,61 @@ const commands = {
       // A task added after governance was never reviewed, so governance has to run again.
       const notes = invalidate(g, 'govern');
       return out({ id, file: path.relative(root, file), notes });
+    }
+    if (action === 'remove') {
+      const [taskId] = rest;
+      const reason = typeof opts.reason === 'string' ? opts.reason.replace(/\s+/g, ' ').trim() : '';
+      if (!taskId || !reason) fail('Usage: task remove <G-id> <T-id> --reason "<why>"');
+      const t = getTask(g, taskId);
+      assertOpen(g);
+      // Once work starts, a task that is no longer wanted is skipped with a reason, so the record stays.
+      if (g.status !== 'pending') fail(`${g.id} is ${g.status}; tasks can only be removed before the goal starts. Skip it instead: \`task set ${g.id} ${taskId} skipped --reason "<why>"\`.`);
+      const dependents = listTasks(g).filter((x) => x.depends_on.includes(taskId)).map((x) => x.id);
+      if (dependents.length) fail(`${dependents.join(', ')} depend${dependents.length > 1 ? '' : 's'} on ${taskId}. Change ${dependents.length > 1 ? 'their' : 'its'} dependencies first with \`task edit ${g.id} <T-id> depends …\`.`);
+      fs.rmSync(t.file);
+      const doc = readDoc(g.file);
+      doc.body = appendToSection(doc.body, REMOVED_TASKS, 'Removed tasks', `- ${today()}: ${taskId} "${t.title}" removed: ${reason}`);
+      doc.data.updated = today();
+      writeDoc(g.file, doc);
+      const notes = invalidate(g, 'govern');
+      writeTasksMd(g);
+      registrySync(root);
+      return out({ goal: g.id, removed: taskId, reason, notes });
+    }
+    if (action === 'edit') {
+      const [taskId, field, ...value] = rest;
+      const fields = ['title', 'depends', 'risk', 'verify'];
+      if (!taskId || !fields.includes(field) || !value.length) fail('Usage: task edit <G-id> <T-id> title|depends|risk|verify <value> (depends takes T-01,T-02 or none)');
+      const v = value.join(' ').trim();
+      const t = getTask(g, taskId);
+      assertOpen(g);
+      if (TASK_SATISFIED.has(t.status)) fail(`${taskId} is ${t.status}; a finished task no longer changes. Add a new task for the change.`);
+      const doc = readDoc(t.file);
+      let file = t.file;
+      if (field === 'title') {
+        if (!v) fail('Usage: task edit <G-id> <T-id> title "<title>"');
+        doc.data.title = v;
+        doc.body = doc.body.replace(new RegExp(`^# ${taskId}:.*$`, 'm'), `# ${taskId}: ${v}`);
+        file = path.join(path.dirname(t.file), `${taskId}-${slugify(v)}.md`);
+      } else if (field === 'depends') {
+        const depends = /^(none|-)$/i.test(v) ? [] : v.split(',').map((x) => x.trim()).filter(Boolean);
+        const dag = analyzeDag(listTasks(g).map((x) => (x.id === taskId ? { ...x, depends_on: depends } : x)));
+        if (!dag.ok) fail(`Cannot change ${taskId}'s dependencies:\n- ${dag.errors.join('\n- ')}`);
+        doc.data.depends_on = depends;
+      } else if (field === 'risk') {
+        if (!(v in RISK_RANK)) fail(`Invalid risk "${v}" (use high|medium|low)`);
+        doc.data.risk = v;
+      } else {
+        // A new check makes the old result meaningless.
+        Object.assign(doc.data, { verify: v, verified: '', verify_evidence: '' });
+      }
+      const changed = formatDoc(doc) !== fs.readFileSync(t.file, 'utf8') || file !== t.file;
+      writeDoc(t.file, doc);
+      if (file !== t.file) fs.renameSync(t.file, file);
+      // The planned fields are what governance reviewed.
+      const notes = changed ? invalidate(g, 'govern') : [];
+      writeTasksMd(g);
+      return out({ goal: g.id, task: taskId, [field]: field === 'depends' ? doc.data.depends_on : v, file: path.relative(root, file), notes });
     }
     if (action === 'set') {
       const [taskId, status] = rest;
@@ -1166,13 +1337,17 @@ const commands = {
       if (verify && !manual) steps.push([`${taskId} verify`, [verify]]);
       if (hook.commands.length) steps.push([`hook after_task (${hook.source})`, hook.commands]);
       let code = 0;
-      for (const [label, cmds] of steps) if ((code = runCommands(root, label, cmds))) break;
-      updateDoc(t.file, { verified: code ? 'fail' : 'pass', verify_evidence: byHand ? evidence : '' });
+      const ran = [];
+      for (const [label, cmds] of steps) if ((code = runCommands(root, label, cmds, ran))) break;
+      // One line the final review can cite instead of running everything again.
+      const summary = ran.map((r) => `${r.cmd}: exit ${r.code}${r.tests ? ` (${r.tests})` : ''}`).join('; ');
+      const recorded = [byHand ? evidence : '', summary].filter(Boolean).join('; ').replace(/\s*\n\s*/g, ' ');
+      updateDoc(t.file, { verified: code ? 'fail' : 'pass', verify_evidence: recorded.length > 400 ? `${recorded.slice(0, 399)}…` : recorded });
       process.stdout.write(`[aisdlc] verify ${taskId}: ${code ? 'fail' : 'pass'}\n`);
       if (code) process.exitCode = code;
       return;
     }
-    fail('Usage: task new|set|verify');
+    fail('Usage: task new|edit|remove|set|verify');
   },
 
   dag([action, goalId]) {
@@ -1200,9 +1375,9 @@ const commands = {
       return;
     }
     if (action === 'set') {
-      const notes = setGate(root, g, a, b);
+      const result = setGate(root, g, a, b);
       registrySync(root);
-      return out({ goal: g.id, gate: a, value: b, notes });
+      return out({ goal: g.id, gate: a, value: b, ...result });
     }
     fail('Usage: gate require <G-id> <step> | gate set <G-id> <gate> <value>');
   },
@@ -1291,9 +1466,11 @@ const commands = {
       const checks = new Map(runChecks(root, g, rules).map((c) => [c.rule, c]));
       const cell = (v) => v.replace(/\|/g, '\\|').replace(/\s*\n\s*/g, ' ');
       // A failed automatic check can only be a fail, so its row is filled in; every other row is left to the reviewer.
+      // A check the review itself satisfies (criteria-met: the reviewer ticks what the code meets) is not a finding yet.
+      const prefilled = (c) => c && !c.ok && !REVIEWER_CHECKS[c.check];
       const rows = rules.map((r) => {
         const c = checks.get(r.id);
-        return c && !c.ok ? `| ${r.id} | fail | ${cell(`check ${c.check}: ${c.problems.join('; ')}`)} |` : `| ${r.id} |  |  |`;
+        return prefilled(c) ? `| ${r.id} | fail | ${cell(`check ${c.check}: ${c.problems.join('; ')}`)} |` : `| ${r.id} |  |  |`;
       });
       const text = render('governance-review.md', { goal: g.id, stage, result: '', date: today() }).replace(/(\|-+\|-+\|-+\|\n)/, `$1${rows.map((r) => `${r}\n`).join('')}`);
       fs.writeFileSync(file, text);
@@ -1301,8 +1478,11 @@ const commands = {
         file: path.relative(root, file),
         rules: rules.map((r) => {
           const c = checks.get(r.id);
-          return { id: r.id, rule: r.rule, severity: r.severity, ...(c && { check: c.check, check_ok: c.ok, ...(!c.ok && { problems: c.problems }) }) };
+          if (!c) return { id: r.id, rule: r.rule, severity: r.severity };
+          const detail = c.ok ? {} : REVIEWER_CHECKS[c.check] ? { to_check: REVIEWER_CHECKS[c.check](c.problems) } : { problems: c.problems };
+          return { id: r.id, rule: r.rule, severity: r.severity, check: c.check, check_ok: c.ok, ...detail };
         }),
+        stale_reviews: staleReviews(root, g, stage),
       });
     }
     if (action !== 'add' && action !== 'set') fail('Usage: governance list | checks <G-id> [--stage plan|final] | review <G-id> [--stage plan|final] | add <rule> --severity must|should --stage plan|final [--check <name>] | set <rule-id> rule|severity|stage|check <value>');
@@ -1362,12 +1542,12 @@ const commands = {
     }
     if (provider !== 'graphify') {
       if (action === 'update' || action === 'query') return out({ provider, note: 'No code graph is set up; search the code directly.' });
-      fail('Usage: graph status | setup | update | query "<question>" [--budget N]');
+      fail('Usage: graph status | setup | update | query "<keywords>" [--budget N]');
     }
     if (action === 'update') return out(graphUpdate(root));
     if (action === 'query') {
       const question = words.join(' ').trim();
-      if (!question) fail('Usage: graph query "<question>" [--budget N]');
+      if (!question) fail('Usage: graph query "<keywords>" [--budget N]');
       const budget = opts.budget === undefined ? DEFAULT_BUDGET : Number(opts.budget);
       if (!Number.isInteger(budget) || budget < 100) fail('--budget must be a whole number of tokens, 100 or more');
       let refresh;
@@ -1383,23 +1563,49 @@ const commands = {
       if (refresh.updated) process.stdout.write(`[aisdlc] graph refreshed in ${refresh.ms} ms (${refresh.reason})\n`);
       if (refresh.warning) process.stdout.write(`[aisdlc] ${refresh.warning}\n`);
       process.stdout.write(result);
-      // The graph holds code structure (functions, classes, imports), not data fields or text, so a miss is common.
-      if (/^No matching nodes found/m.test(result)) process.stdout.write('[aisdlc] Nothing in the graph matches; search the code directly.\n');
+      // The graph holds code structure (functions, classes, imports), not data fields or text, and matches node
+      // names, not prose, so a miss is common.
+      if (/^No matching nodes found/m.test(result)) process.stdout.write('[aisdlc] Nothing in the graph matches. Retry with identifiers (function, file or module names) rather than a sentence, or search the code directly.\n');
       return;
     }
-    fail('Usage: graph status | setup | update | query "<question>" [--budget N]');
+    fail('Usage: graph status | setup | update | query "<keywords>" [--budget N]');
   },
 };
 
+// The test count a runner prints last: node:test's `# tests/pass/fail N` lines, or a line such as Jest's
+// "Tests: 12 passed, 12 total", Mocha's "12 passing" or pytest's "12 passed in 0.5s".
+export function testCounts(output) {
+  const tap = [...output.matchAll(/^# (tests|pass|fail) (\d+)$/gm)];
+  if (tap.length) return Object.entries(Object.fromEntries(tap.map((m) => [m[1], m[2]]))).map(([k, n]) => `${k} ${n}`).join(', ');
+  const line = output.split('\n').reverse().find((l) => /\b\d+ (passed|passing|failed|failing)\b/i.test(l));
+  return line ? line.replace(/\x1b\[[0-9;]*m/g, '').replace(/^[\s=]+|[\s=]+$/g, '').replace(/\s+/g, ' ').slice(0, 120) : '';
+}
+
 // Runs commands in order with the platform's default shell; returns the first failing exit code, or 0.
-function runCommands(root, label, cmds) {
+// With `record`, output goes through a file so it can be summarized, then is printed in full; each command's
+// exit code and test count are pushed onto `record`.
+function runCommands(root, label, cmds, record) {
   for (const cmd of cmds) {
     process.stdout.write(`[aisdlc] ${label}: ${cmd}\n`);
-    try {
-      execSync(cmd, { cwd: root, stdio: 'inherit' });
-    } catch (e) {
-      process.stderr.write(`[aisdlc] ${label} failed (exit ${e.status ?? 1}): ${cmd}\n`);
-      return e.status || 1;
+    let code = 0;
+    if (!record) {
+      try { execSync(cmd, { cwd: root, stdio: 'inherit' }); } catch (e) { code = e.status || 1; }
+    } else {
+      const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'aisdlc-run-'));
+      const log = path.join(tmp, 'out');
+      const fd = fs.openSync(log, 'w');
+      try {
+        const r = spawnSync(cmd, { cwd: root, shell: true, stdio: ['inherit', fd, fd] });
+        code = r.error ? 1 : r.status ?? 1;
+      } finally { fs.closeSync(fd); }
+      const output = fs.readFileSync(log, 'utf8');
+      fs.rmSync(tmp, { recursive: true, force: true });
+      process.stdout.write(output);
+      record.push({ cmd, code, tests: testCounts(output) });
+    }
+    if (code) {
+      process.stderr.write(`[aisdlc] ${label} failed (exit ${code}): ${cmd}\n`);
+      return code;
     }
   }
   return 0;

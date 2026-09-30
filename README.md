@@ -39,12 +39,14 @@ Each step refuses to run until the previous gate passes, and the script enforces
 - A goal with `final`-stage rules completes only after the final review passes. New projects start with one: GOV-06, every acceptance criterion met.
 - A goal you no longer want is cancelled with a reason (`aisdlc.mjs state move G-001 cancelled --reason "…"`). Every reason stays in the goal's `## Cancellations` log, even after the goal is reopened. It reopens with `state move G-001 pending`, or `state move G-001 blocked` if its work had started. Completed goals can't change.
 - A goal is `pending` only until its first task starts. After that, new scope goes in as new tasks (governance runs again), or in a new goal.
+- Tasks change only through the script: `task edit` for a title, dependencies, risk or verify command, and `task remove --reason` before the goal starts. Removals are logged in the goal, and a task ID is never reused.
 
 Governance is tied to what it reviewed:
 - Rules can name automatic checks (`goal-defined`, `tasks-verifiable`, `dag-valid`, `adr-recorded`, `questions-resolved`, `criteria-met`) that a review can't overrule.
 - Every row of a review needs a note: the evidence for a `pass`, the reason for a `fail` or `n/a`.
 - The plan is fingerprinted when governance passes. Editing the goal, tasks, linked ADRs or plan rules afterwards blocks the next task until it is re-governed.
-- Re-running `challenge` or `adr`, linking another ADR, or adding a task resets the governance gate. The old review is archived as `governance-review.stale-N.md`.
+- Re-running `challenge` or `adr`, linking another ADR, or adding or editing a task resets the governance gate. The old review is archived as `governance-review.stale-N.md`. Archived reviews are kept on purpose, as the goal's audit trail, and the next reviewer reads the latest one.
+- A reviewer that runs into a question only the user can answer writes it under Questions for the user. The review fails, the questions are asked, and the answers go under Clarifications, which later reviewers treat as settled.
 - There is no waiver.
 
 ## Project layout created by init
@@ -78,6 +80,16 @@ See [`plugins/aisdlc/docs/stack-plugin-contract.md`](plugins/aisdlc/docs/stack-p
 ## Upgrading
 
 Each plugin keeps a changelog: [`aisdlc`](plugins/aisdlc/CHANGELOG.md), [`aisdlc-nodejs`](plugins/aisdlc-nodejs/CHANGELOG.md). Breaking changes are listed there with their upgrade step.
+
+### 0.5.x → 0.6.0 (`aisdlc`)
+
+Update the plugin. Then, in each project with a review that hasn't passed yet (`governance-review.md` or `governance-final.md`), escape each literal `|` in a note as `\|`. `gate set … passed` now refuses a row with more than three cells, because the text after an unescaped `|` was silently dropped.
+
+Goal files need no edits. The new `## Standards deviations` section is optional, so older goals simply don't have it. The first `graph query` after the update rebuilds the graph once, because `.gitignore` no longer counts as code.
+
+### `aisdlc-nodejs` 0.2.0 → 0.2.1
+
+Nothing is required. To bring an existing manifest in line with the tools you chose, re-run `/aisdlc-nodejs:register`: it writes the chosen test runner and enforced thresholds into `.aisdlc/stacks/nodejs.json`, and checks that the gate passes on the current code. Commit the manifest on its own.
 
 ### `aisdlc-nodejs` 0.1.0 → 0.2.0
 

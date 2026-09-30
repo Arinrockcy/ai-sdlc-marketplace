@@ -1,6 +1,6 @@
 {
   "name": "nodejs",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "detect": ["package.json"],
   "standards_skill": "aisdlc-nodejs:standards",
   "quality_gate": {

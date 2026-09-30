@@ -1,6 +1,6 @@
 {
   "name": "aisdlc-nodejs",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Node.js stack plugin for aisdlc: class-oriented coding standards and lint/coverage quality gates.",
   "author": {
     "name": "arin"

@@ -9,14 +9,14 @@
       "name": "aisdlc",
       "source": "./plugins/aisdlc",
       "description": "Core AI-SDLC workflow: init, create-goal, challenge, adr, govern, implement.",
-      "version": "0.5.1",
+      "version": "0.6.0",
       "category": "development"
     },
     {
       "name": "aisdlc-nodejs",
       "source": "./plugins/aisdlc-nodejs",
       "description": "Node.js stack plugin for aisdlc: class-oriented coding standards and lint/coverage quality gates.",
-      "version": "0.2.0",
+      "version": "0.2.1",
       "category": "development"
     }
   ]

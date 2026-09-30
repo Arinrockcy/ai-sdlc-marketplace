@@ -37,15 +37,15 @@ Each plugin has its own version and `CHANGELOG.md` (Keep a Changelog format).
 - gates
 - hook resolution and execution
 - registry regeneration and search
-- review scaffolds (`governance review`) and pre-switch checks (`goal preflight`)
+- review scaffolds (`governance review`), pre-switch checks (`goal preflight`) and a goal's changes (`goal diff`)
 - the code graph: Graphify setup, freshness and queries
 
-Skills call the script (written `$AISDLC` in the skill files) and should never hand-edit state the script owns. Every `$AISDLC …` span in a skill must be a complete, runnable invocation. Write placeholders as `<G-id>`, `<T-id>`, `<ADR-id>`, `<GOV-id>`, `<keywords>` or `<name>`, alternatives as `a|b`, optional parts as `[...]`, and `…` only as an option's value. `tests/skills.test.mjs` runs each one and fails if the script no longer understands it. The script rejects unknown options, so every option must be in `OPTIONS`. The state the script owns: `status`, `gate_*`, `govern_fingerprint` and `cancel_reason` fields, the `## Cancellations` log in `goal.md`, the rules table in `governance.md`, `registry.md`, `registry-archive.md`, `tasks.md`, and goal folder moves. When adding workflow behavior, put invariants in the script with tests, and keep instructions in the skill.
+Skills call the script (written `$AISDLC` in the skill files) and should never hand-edit state the script owns. Every `$AISDLC …` span in a skill must be a complete, runnable invocation. Write placeholders as `<G-id>`, `<T-id>`, `<ADR-id>`, `<GOV-id>`, `<keywords>` or `<name>`, alternatives as `a|b`, optional parts as `[...]`, and `…` only as an option's value. `tests/skills.test.mjs` runs each one and fails if the script no longer understands it. The script rejects unknown options, so every option must be in `OPTIONS`. The state the script owns: `status`, `gate_*`, `govern_fingerprint` and `cancel_reason` fields, the `## Cancellations` and `## Removed tasks` logs in `goal.md`, the rules table in `governance.md`, `registry.md`, `registry-archive.md`, `tasks.md`, and goal folder moves. When adding workflow behavior, put invariants in the script with tests, and keep instructions in the skill.
 
 **State model.** Everything lives in the target project's `.aisdlc/`, stored as markdown with flat frontmatter. The parser only supports `key: value` scalars and inline `[a, b]` arrays; there is no nested YAML.
 - A goal's status is the folder it sits in: `goals/<status>/G-NNN-slug/`.
 - Gates are the `gate_challenge`, `gate_adr` and `gate_govern` fields in `goal.md`.
-- Tasks are `tasks/T-NN-*.md` files with `depends_on` and `risk`.
+- Tasks are `tasks/T-NN-*.md` files with `depends_on` and `risk`. They change only through `task new|edit|remove`, and a task ID is never reused.
 - `registry.md`, `registry-archive.md` and `tasks.md` are generated views. Rebuild them rather than editing them. `registry.md` holds unfinished goals and every ADR. Finished goals go to the archive, so the file skills read whole only grows with open work.
 - Skills must not read an index that grows without bound (the archive, `GRAPH_REPORT.md`, unfiltered `goal list`) in full. Filter it with the script, search it, or query it.
 
@@ -90,6 +90,7 @@ These were settled with the repo owner:
 - Governance has two stages. `plan` rules gate implementation. `final` rules gate completion, and `/aisdlc:implement` runs the final review itself.
 - `init` seeds GOV-06 (`must`, `final`, check `criteria-met`), so finished code is reviewed against its acceptance criteria by default. Init also offers `/aisdlc:govern` for the project's own rules.
 - Every review row needs a note, and a `pass` note cites evidence. Reviews run in a sub-agent or fresh session when the agent supports one.
+- The plan review fails GOV-05 only for an open question about behavior inside Scope (In), or a contradiction between goal, tasks, ADRs and standards. Other details go under Readings. Questions for the user stay a `fail` (no separate result value): the review lists them under `## Questions for the user`, the calling session asks them, and the answers go under Clarifications, which later reviewers treat as settled.
 - Unanswered questions are recorded as `- **Open:** …` under Risks & Unknowns, and the `questions-resolved` check on GOV-05 fails while any remain.
 - Goals can be cancelled and reopened. A cancel always records the user's reason, and the `## Cancellations` log keeps every one for good. A started goal never returns to `pending`. It takes new scope only as new tasks, which reset governance. Several goals may be in progress at once: `/aisdlc:implement` warns before `before_goal` switches branches under another goal and asks, but never refuses.
 - A task added after governance passed (including one discovered mid-implement) resets governance. Implement stops until the goal is re-governed.

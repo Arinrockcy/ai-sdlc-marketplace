@@ -34,6 +34,10 @@ updated: {{date}}
 
 <!-- Write each unanswered question as `- **Open:** <question>`. /aisdlc:govern fails GOV-05 while any remain. -->
 
+## Standards deviations
+
+<!-- Optional. Where the user chose to depart from the stack's standards skill (for example another test runner), one `- ` item each with the reason. Reviewers treat these as settled. -->
+
 ## Clarifications
 
 <!-- Q/A pairs from /aisdlc:create-goal intake and /aisdlc:challenge. -->

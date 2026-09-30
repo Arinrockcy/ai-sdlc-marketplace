@@ -7,6 +7,7 @@ Optional rules `/aisdlc:govern` (no argument) offers. The user picks which to ad
 | Tests | New or changed behavior is covered by automated tests that run in the verify command or `after_task` hook. | must | final |
 | Secrets | No secrets, keys, tokens or credentials are committed; config reads them from the environment or a secret store. | must | final |
 | Stack standards | Code follows the active stack's standards skill (`detect-stack` → `standards_skill`). | must | final |
+| Stack standards | The plan's tasks carry the criteria the active standards skill requires, or the goal records the user's deviation under Standards deviations. | must | plan |
 | Scope | Changed files stay within the goal's Scope (In); extra work became new tasks instead of being done silently. | should | final |
 | Docs | User-facing or API changes update the README, docs or changelog. | should | final |
 | Dependencies | Every new third-party dependency is named in a task or ADR, with the reason it is needed. | should | plan |

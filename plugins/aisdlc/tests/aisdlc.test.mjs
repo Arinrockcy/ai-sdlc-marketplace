@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { analyzeDag, goalProgress, resolveHook, parseDoc, formatDoc } from '../scripts/aisdlc.mjs';
+import { analyzeDag, goalProgress, resolveHook, parseDoc, formatDoc, testCounts } from '../scripts/aisdlc.mjs';
 
 const SCRIPT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../scripts/aisdlc.mjs');
 
@@ -132,6 +132,7 @@ test('cli: full gated flow from init to completed', () => {
   assert.equal(init.code, 0, init.stderr);
   assert.deepEqual(init.json.detected_stacks, ['nodejs']);
   for (const s of ['pending', 'in-progress', 'blocked', 'completed', 'cancelled']) assert.ok(fs.existsSync(path.join(dir, '.aisdlc/goals', s)));
+  assert.ok(['registry.md', 'registry-archive.md'].every((f) => init.json.created.includes(path.join('.aisdlc', f))), 'init reports the registry views');
   assert.equal(run(['init']).json.created.length, 0, 'init is idempotent');
 
   const goal = run(['goal', 'new', 'User', 'login']).json;
@@ -754,13 +755,15 @@ test('cli: graph setup, freshness and query drive graphify without the model', {
   gitIn(dir, 'add', '-A');
   gitIn(dir, 'commit', '-qm', 'all');
   assert.equal(run(['graph', 'update'], env).json.updated, false);
+  fs.appendFileSync(path.join(dir, '.gitignore'), 'tmp/\n');
+  assert.equal(run(['graph', 'status'], env).json.stale, false, 'a .gitignore edit is not a code change');
   fs.appendFileSync(path.join(dir, 'app.js'), 'export const b = 2;\n');
   const q = run(['graph', 'query', 'who uses a', '--budget', '400'], env);
   assert.match(q.stdout, /^\[aisdlc\] graph refreshed in \d+ ms \(code changed since the graph was built\)\nQUERY who uses a --budget 400\n$/);
   assert.equal(runs(), 2);
   assert.equal(run(['graph', 'query', 'again'], env).stdout, 'QUERY again --budget 1500\n');
   assert.match(run(['graph', 'query', 'x', '--budget', 'lots'], env).stderr, /--budget must be/);
-  assert.equal(run(['graph', 'query', 'nothing'], env).stdout, 'No matching nodes found.\n[aisdlc] Nothing in the graph matches; search the code directly.\n');
+  assert.equal(run(['graph', 'query', 'nothing'], env).stdout, 'No matching nodes found.\n[aisdlc] Nothing in the graph matches. Retry with identifiers (function, file or module names) rather than a sentence, or search the code directly.\n');
 
   // Setup always rebuilds, and Graphify's warnings are returned and kept for status until a build has none.
   const rebuilt = run(['graph', 'setup'], { ...env, FAKE_WARN: '1' }).json;
@@ -786,4 +789,183 @@ test('cli: graph setup, freshness and query drive graphify without the model', {
 
   run(['config', 'set', 'graph.path', 'docs/graph']);
   assert.match(run(['graph', 'status'], env).stderr, /graph\.path "docs\/graph" is not supported/);
+});
+
+test('cli: tasks are removed with a reason before the goal starts, edited in place, and IDs are never reused', () => {
+  const { run, dir } = project();
+  run(['init']);
+  plannedGoal(run, dir, [['Schema'], ['API', '--depends', 'T-01'], ['Docs']]);
+  const goalFile = () => path.join(dir, run(['goal', 'show', 'G-001']).json.dir, 'goal.md');
+
+  assert.match(run(['task', 'remove', 'G-001', 'T-01']).stderr, /Usage: task remove/);
+  assert.match(run(['task', 'remove', 'G-001', 'T-01', '--reason', 'x']).stderr, /T-02 depends on T-01\. Change its dependencies first/);
+  const removed = run(['task', 'remove', 'G-001', 'T-03', '--reason', 'docs live elsewhere']);
+  assert.equal(removed.code, 0, removed.stderr);
+  assert.deepEqual(run(['goal', 'show', 'G-001']).json.tasks.map((x) => x.id), ['T-01', 'T-02']);
+  assert.match(fs.readFileSync(goalFile(), 'utf8'), /## Removed tasks\n\n- \d{4}-\d{2}-\d{2}: T-03 "Docs" removed: docs live elsewhere\n/);
+  const added = run(['task', 'new', 'G-001', 'Tests', '--verify', 'true']).json;
+  assert.equal(added.id, 'T-04', 'a removed ID is not allocated again');
+  fill(path.join(dir, added.file));
+
+  // Edits validate like `task new`, rename the file with the title, and reset governance.
+  assert.match(run(['task', 'edit', 'G-001', 'T-01', 'depends', 'T-02']).stderr, /Cannot change T-01's dependencies:\n- Dependency cycle/);
+  assert.match(run(['task', 'edit', 'G-001', 'T-01', 'depends', 'T-09']).stderr, /depends on unknown task T-09/);
+  assert.match(run(['task', 'edit', 'G-001', 'T-01', 'risk', 'huge']).stderr, /Invalid risk "huge"/);
+  assert.match(run(['task', 'edit', 'G-001', 'T-01', 'owner', 'me']).stderr, /Usage: task edit/);
+  assert.deepEqual(run(['task', 'edit', 'G-001', 'T-02', 'depends', 'none']).json.depends, []);
+  const renamed = run(['task', 'edit', 'G-001', 'T-02', 'title', 'Parse', 'arguments']).json;
+  assert.equal(renamed.file.endsWith('tasks/T-02-parse-arguments.md'), true);
+  const text = fs.readFileSync(path.join(dir, renamed.file), 'utf8');
+  assert.match(text, /^title: Parse arguments$/m);
+  assert.match(text, /^# T-02: Parse arguments$/m);
+  assert.match(fs.readFileSync(path.join(dir, run(['goal', 'show', 'G-001']).json.dir, 'tasks.md'), 'utf8'), /\| T-02 \| Parse arguments \| medium \| - \|/);
+
+  // Governance judged the planned fields, so an edit after it passed resets it; an edit that changes nothing does not.
+  run(['task', 'edit', 'G-001', 'T-04', 'verify', 'npm test']);
+  run(['gate', 'set', 'G-001', 'challenge', 'done']);
+  run(['adr', 'none', 'G-001', '--reason', 'none needed']);
+  run(['gate', 'set', 'G-001', 'adr', 'done']);
+  writeReview(path.dirname(goalFile()), 'G-001');
+  assert.equal(run(['gate', 'set', 'G-001', 'govern', 'passed']).code, 0);
+  assert.deepEqual(run(['task', 'edit', 'G-001', 'T-04', 'verify', 'npm test']).json.notes, []);
+  assert.match(run(['task', 'edit', 'G-001', 'T-04', 'risk', 'high']).json.notes.join('\n'), /gate_govern reset to pending/);
+
+  // After the goal starts, removing is refused in favor of skipping, and finished tasks don't change.
+  writeReview(path.dirname(goalFile()), 'G-001');
+  run(['gate', 'set', 'G-001', 'govern', 'passed']);
+  run(['state', 'move', 'G-001', 'in-progress']);
+  assert.match(run(['task', 'remove', 'G-001', 'T-04', '--reason', 'x']).stderr, /in-progress; tasks can only be removed before the goal starts\. Skip it instead/);
+  run(['task', 'set', 'G-001', 'T-01', 'in-progress']);
+  run(['task', 'verify', 'G-001', 'T-01']);
+  run(['task', 'set', 'G-001', 'T-01', 'done']);
+  assert.match(run(['task', 'edit', 'G-001', 'T-01', 'risk', 'low']).stderr, /T-01 is done; a finished task no longer changes/);
+});
+
+test('cli: gate set reports what it checked in the review, its questions and readings, and earlier rounds', () => {
+  const { run, dir } = project();
+  run(['init']);
+  governedGoal(run, dir, [['A']]);
+  const goalDir = path.join(dir, run(['goal', 'show', 'G-001']).json.dir);
+  const review = path.join(goalDir, 'governance-review.md');
+
+  const pending = run(['gate', 'set', 'G-001', 'govern', 'pending']).json;
+  assert.deepEqual(pending.stale_reviews, [path.relative(dir, path.join(goalDir, 'governance-review.stale-1.md'))]);
+  assert.deepEqual(run(['governance', 'review', 'G-001']).json.stale_reviews, pending.stale_reviews);
+
+  // A review whose only must failure is questions for the user: it fails, and the questions come back to the caller.
+  writeReview(goalDir, 'G-001', { 'GOV-05': ['fail', 'two behaviors are open, see Questions'] }, 'fail');
+  fs.appendFileSync(review, '\n## Questions for the user\n\n- Which error wins when the text is empty and the date is invalid?\n\n## Readings\n\n- The clock is injected, as the repo already does.\n');
+  const failed = run(['gate', 'set', 'G-001', 'govern', 'failed']).json;
+  assert.deepEqual([failed.checked, failed.warnings], [true, []]);
+  assert.deepEqual(failed.questions, ['Which error wins when the text is empty and the date is invalid?']);
+  assert.deepEqual(failed.readings, ['The clock is injected, as the repo already does.']);
+  assert.deepEqual(run(['goal', 'show', 'G-001']).json.governance.plan.questions, failed.questions);
+
+  // A failed verdict is still checked: an unescaped | splits a note into cells, and a pass result contradicts it.
+  writeReview(goalDir, 'G-001', { 'GOV-02': ['fail', 'usage is add | list'] }, 'pass');
+  const warned = run(['gate', 'set', 'G-001', 'govern', 'failed']).json;
+  assert.deepEqual(warned.warnings, ['GOV-02\'s row has 4 cells instead of 3; write a literal | in a note as \\|', 'governance-review.md says `result: pass`; set it to `fail`']);
+  assert.match(run(['gate', 'set', 'G-001', 'govern', 'passed']).stderr, /GOV-02's row has 4 cells/);
+  writeReview(goalDir, 'G-001', { 'GOV-02': ['pass', 'usage is add \\| list'] });
+  const passed = run(['gate', 'set', 'G-001', 'govern', 'passed']).json;
+  assert.deepEqual([passed.checked, passed.warnings], [true, []]);
+  assert.match(fs.readFileSync(review, 'utf8'), /add \\\| list/);
+});
+
+test('cli: the final review scaffold leaves criteria-met for the reviewer', () => {
+  const { run, dir } = project();
+  run(['init']);
+  governedGoal(run, dir, [['A'], ['B']]);
+  run(['state', 'move', 'G-001', 'in-progress']);
+  for (const id of ['T-01', 'T-02']) {
+    run(['task', 'set', 'G-001', id, 'in-progress']);
+    run(['task', 'verify', 'G-001', id]);
+    run(['task', 'set', 'G-001', id, 'done']);
+  }
+  const show = run(['goal', 'show', 'G-001']).json;
+  assert.equal(show.next_hint, 'Every task is done. /aisdlc:implement G-001 runs the final review, then completes the goal.');
+  const r = run(['governance', 'review', 'G-001', '--stage', 'final']).json;
+  assert.deepEqual(r.rules[0], { id: 'GOV-06', rule: r.rules[0].rule, severity: 'must', check: 'criteria-met', check_ok: false, to_check: '1 goal and 2 task criteria to check' });
+  assert.match(fs.readFileSync(path.join(dir, r.file), 'utf8'), /\| GOV-06 \| {2}\| {2}\|/);
+  assert.deepEqual(run(['goal', 'show', 'G-001']).json.governance.final.failed, []);
+
+  tick(path.join(dir, show.dir, 'goal.md'));
+  for (const t of show.tasks) tick(path.join(dir, t.file));
+  writeReview(path.join(dir, show.dir), 'G-001', {}, 'pass', { rules: ['GOV-06'], file: 'governance-final.md' });
+  run(['gate', 'set', 'G-001', 'final', 'passed']);
+  assert.equal(run(['goal', 'show', 'G-001']).json.next_hint, 'Every task is done and the final review passed. /aisdlc:implement G-001 only completes the goal.');
+});
+
+test('cli: dag write warns when tasks in the same wave expect to change the same file', () => {
+  const { run, dir } = project();
+  run(['init']);
+  plannedGoal(run, dir, [['Parse'], ['List'], ['Store', '--depends', 'T-01']]);
+  const files = (id, text) => {
+    const f = path.join(dir, run(['goal', 'show', 'G-001']).json.tasks.find((x) => x.id === id).file);
+    edit(f, (s) => s.replace('## Files (expected)\n', `## Files (expected)\n\n${text}\n`));
+  };
+  files('T-01', '- `src/cli.mjs`: add --due\n- src/store.mjs');
+  files('T-02', '- ./src/cli.mjs (print overdue)');
+  files('T-03', '- `src/cli.mjs`');
+  const w = run(['dag', 'write', 'G-001']).json;
+  assert.deepEqual(w.warnings, ["T-01 and T-02 are in wave 1 as independent tasks, but both list src/cli.mjs under Files. Add a dependency if one has to go first, or confirm the changes don't conflict."]);
+  assert.match(fs.readFileSync(path.join(dir, w.file), 'utf8'), /## Warnings\n\n- T-01 and T-02 are in wave 1/);
+  run(['task', 'edit', 'G-001', 'T-02', 'depends', 'T-01']);
+  assert.deepEqual(run(['dag', 'write', 'G-001']).json.warnings, ["T-02 and T-03 are in wave 2 as independent tasks, but both list src/cli.mjs under Files. Add a dependency if one has to go first, or confirm the changes don't conflict."]);
+});
+
+test('cli: task verify records a one-line summary of what ran', () => {
+  const { run, dir } = project();
+  run(['init']);
+  run(['config', 'set', 'hooks.after_task', '{"run":"echo \'Tests:       3 passed, 3 total\'"}']);
+  governedGoal(run, dir, [['A', '--verify', 'printf "# tests 2\\n# pass 2\\n# fail 0\\n"'], ['B', '--verify', 'manual: open it']]);
+  run(['state', 'move', 'G-001', 'in-progress']);
+  run(['task', 'set', 'G-001', 'T-01', 'in-progress']);
+  const v = run(['task', 'verify', 'G-001', 'T-01']);
+  assert.match(v.stdout, /# pass 2[\s\S]*Tests: {7}3 passed[\s\S]*verify T-01: pass/, 'output is still printed');
+  const task = (id) => parseDoc(fs.readFileSync(path.join(dir, run(['goal', 'show', 'G-001']).json.tasks.find((x) => x.id === id).file), 'utf8')).data;
+  assert.equal(task('T-01').verify_evidence, 'printf "# tests 2\\n# pass 2\\n# fail 0\\n": exit 0 (tests 2, pass 2, fail 0); echo \'Tests:       3 passed, 3 total\': exit 0 (Tests: 3 passed, 3 total)');
+  run(['task', 'set', 'G-001', 'T-02', 'in-progress']);
+  run(['task', 'verify', 'G-001', 'T-02', '--evidence', 'page loads']);
+  assert.equal(task('T-02').verify_evidence, 'page loads; echo \'Tests:       3 passed, 3 total\': exit 0 (Tests: 3 passed, 3 total)');
+
+  assert.equal(testCounts('  12 passing (40ms)\n'), '12 passing (40ms)');
+  assert.equal(testCounts('==== 5 passed, 1 skipped in 0.2s ====\n'), '5 passed, 1 skipped in 0.2s');
+  assert.equal(testCounts('built\n'), '');
+});
+
+test('cli: goal diff lists committed, uncommitted and untracked changes, and preflight flags an edited stack manifest', { skip: process.platform === 'win32' }, () => {
+  const { run, dir } = project();
+  gitIn(dir, 'init', '-q', '-b', 'develop');
+  fs.writeFileSync(path.join(dir, 'package.json'), '{}');
+  fs.writeFileSync(path.join(dir, 'a.js'), '1\n');
+  run(['init']);
+  run(['goal', 'new', 'A']);
+  gitIn(dir, 'add', '-A');
+  gitIn(dir, 'commit', '-qm', 'base');
+
+  assert.match(run(['goal', 'diff', 'G-001']).json.warnings[0], /no branch recorded/);
+  gitIn(dir, 'checkout', '-q', '-b', 'feature/a');
+  run(['goal', 'set', 'G-001', 'branch', 'feature/a']);
+  fs.writeFileSync(path.join(dir, 'b.js'), '2\n');
+  gitIn(dir, 'add', 'b.js');
+  gitIn(dir, 'commit', '-qm', 'b');
+  fs.writeFileSync(path.join(dir, 'a.js'), 'changed\n');
+  fs.writeFileSync(path.join(dir, 'c.js'), '3\n');
+  const d = run(['goal', 'diff', 'G-001']).json;
+  assert.deepEqual(d, {
+    goal: 'G-001', base_branch: 'develop', branch: 'feature/a', current_branch: 'feature/a', range: 'develop...feature/a',
+    committed: ['b.js'], uncommitted: ['a.js'], untracked: ['c.js'], warnings: [],
+  });
+  gitIn(dir, 'stash', '-q');
+  gitIn(dir, 'checkout', '-q', 'develop');
+  run(['goal', 'set', 'G-001', 'branch', 'feature/a']);
+  const away = run(['goal', 'diff', 'G-001']).json;
+  assert.deepEqual([away.committed, away.warnings], [['b.js'], ['The current branch is develop, not feature/a, so uncommitted and untracked files come from develop\'s working tree.']]);
+
+  fs.writeFileSync(path.join(dir, '.aisdlc/stacks/nodejs.json'), '{"name":"nodejs"}\n');
+  assert.match(run(['goal', 'preflight', 'G-001']).json.warnings.join('\n'), /\.aisdlc\/stacks\/nodejs\.json has uncommitted changes/);
+  gitIn(dir, 'add', '-A');
+  gitIn(dir, 'commit', '-qm', 'stack');
+  assert.doesNotMatch(run(['goal', 'preflight', 'G-001']).json.warnings.join('\n'), /nodejs\.json/);
 });

@@ -2,6 +2,13 @@
 
 All notable changes to the `aisdlc-nodejs` plugin. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/).
 
+## [0.2.1] - 2026-09-30
+
+### Changed
+- `register` runs `lint` and `test:coverage` once on the existing code. When the baseline fails, it says that every task's verify will fail until it is fixed, and offers to plan that fix as the first goal.
+- `register` writes the chosen tools into the copied manifest's `quality_gate`: the selected `test_runner`, and only the coverage thresholds the command enforces. It says which metric was left out and why (node:test has no `statements` threshold). Before, the manifest kept `jest` and all four thresholds whatever was chosen.
+- `register` asks the user to commit the manifest and tooling changes on their own, before a goal starts.
+
 ## [0.2.0] - 2026-09-30
 
 ### Breaking

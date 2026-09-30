@@ -41,7 +41,7 @@ Once `pre_implement` has run, every way this run ends (a finished task in single
       Save the result with `$AISDLC goal set <G-id> branch <name>`. Never force a branch the user didn't choose.
    4. **Start.** Run `$AISDLC state move <G-id> in-progress`.
 5. **Interrupted task.** If `progress.in_progress` from `goal show` is not empty, an earlier run stopped mid-task. For each such task, ask the user whether to resume it (continue from the current state of the code and go to step 2.3 for it) or reset it with `$AISDLC task set <G-id> <T-id> pending`.
-6. **Stack standards.** Run `$AISDLC detect-stack`. If `standards_skill` is set (for example `aisdlc-nodejs:standards`), invoke that skill now and follow it for all code in this run. If it isn't set, follow the conventions already in the repo.
+6. **Stack standards.** Run `$AISDLC detect-stack`. If `standards_skill` is set (for example `aisdlc-nodejs:standards`), invoke that skill now and follow it for all code in this run, except where the goal's `## Standards deviations` records a departure the user chose. If it isn't set, follow the conventions already in the repo.
 7. **Mode.** Run the whole goal if `$ARGUMENTS` contains `--all` or `$AISDLC config get implement.mode` returns `"auto"`. Otherwise run **one task**, then stop.
 
 ## 2. Task loop
@@ -51,7 +51,7 @@ Repeat these steps for each task:
 2. **Start.** Run `$AISDLC task set <G-id> <T-id> in-progress`, then `$AISDLC hooks run before_task --goal <G-id> --task <T-id>`.
    If `task set` refuses because governance is pending or the plan changed after governance passed, show the message, run `post_implement` and stop. The user runs `/aisdlc:govern <G-id>`, then `/aisdlc:implement <G-id>` again.
 3. **Implement** against the task's acceptance criteria and its linked ADRs.
-   - Read only what the task needs. Run `$AISDLC graph query "<question>"` before searching broadly. It refreshes the graph when the code changed, including in earlier tasks, and says so when no graph is set up.
+   - Read only what the task needs. Run `$AISDLC graph query "<keywords>"` before searching broadly. It refreshes the graph when the code changed, including in earlier tasks, and says so when no graph is set up.
    - If the task, its acceptance criteria and its ADRs don't settle a choice you have to make (behavior, a public name, error handling, data shape), and the repo's conventions don't either, stop and ask the user. Record the answer in the task file's Notes.
    - Stay inside the task's scope. If you discover extra work, don't do it. Write it down and add it after this task is done (step 6). Adding a task resets governance, and a task can't be marked done while governance is pending.
 4. **Verify.**
@@ -82,8 +82,9 @@ All tasks are done or skipped at this point.
 1. **Final review.** Run `$AISDLC goal show <G-id>`. If `final_review_required` is true and `gates.final` isn't `passed`, run the govern skill's final review (`/aisdlc:govern <G-id> --final`, Mode C) now. If it fails, show the Required Fixes, handle them as Mode C describes, run `post_implement` and stop.
 2. Run `$AISDLC hooks run after_goal --goal <G-id>`. If it fails, show the output and ask the user whether to retry or finish anyway.
 3. Run `$AISDLC state move <G-id> completed`. The goal completes automatically once every task passes and, if there are final rules, the final review passes. The registry updates itself.
-4. Run `$AISDLC hooks run post_implement`. Summarize:
+4. **Uncommitted work.** If `auto_commit` is false, run `$AISDLC goal diff <G-id>`. If `uncommitted` or `untracked` isn't empty, tell the user that the goal's work isn't committed yet, list the files, and ask whether to commit them now together with `.aisdlc/`. Never commit without asking.
+5. Run `$AISDLC hooks run post_implement`. Summarize:
    - the tasks completed
    - any skipped tasks, with their reasons
-   - the commits made
+   - the commits made, or the work left uncommitted
    - every `should` rule that failed without blocking, from `governance.plan.failed` and `governance.final.failed` in `goal show`, so the user sees them before moving on

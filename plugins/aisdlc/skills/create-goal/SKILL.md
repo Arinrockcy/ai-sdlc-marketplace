@@ -16,7 +16,7 @@ Input: `$ARGUMENTS` is the goal description. If it is empty, ask the user for on
 - Run `$AISDLC hooks run pre_create_goal`.
 - Read `.aisdlc/registry.md`. It lists the unfinished goals and every ADR. Reuse existing ADRs and avoid duplicating an unfinished goal.
 - Run `$AISDLC registry search <keywords>` with a few keywords from the description, to find completed or cancelled goals that overlap it. Don't read `registry-archive.md` whole: it keeps every finished goal, so it only grows.
-- Run `$AISDLC graph query "<question>"` to find the modules the goal touches, before searching the code. It refreshes the graph if the code changed, and says so when no graph is set up; then read only the files you need. Never read `graphify-out/` files whole: they grow with the codebase.
+- Run `$AISDLC graph query "<keywords>"` to find the modules the goal touches, before searching the code. Pass identifiers and domain words (function, file or module names), not a sentence: the graph matches names, not prose. It refreshes the graph if the code changed, and says so when no graph is set up; then read only the files you need. Never read `graphify-out/` files whole: they grow with the codebase.
 
 ## 1. Unfinished goals (before anything else)
 Run `$AISDLC goal list --status pending,in-progress,blocked` to get the unfinished goals. If there are none, go to section 2. If the archive search found a `cancelled` goal that overlaps the new description, tell the user and offer **Reopen `<G-id>`** below.
@@ -62,6 +62,8 @@ Before you write anything, find the gaps in the description and ask the user abo
 ## 4. Split into tasks
 Apply these rules in order. If a split depends on something the user hasn't said (for example, whether existing data needs migrating), ask; don't assume.
 
+First, the stack's standards. Run `$AISDLC detect-stack`. If `standards_skill` is set, load that skill before splitting, and give each task the criteria the standard implies for it (for example declaration files, both test layers, lint and coverage). If the repo conflicts with the standard (another test runner, a threshold its tooling can't enforce), ask the user which way to go. Record a chosen departure under `## Standards deviations` in `goal.md`, with the reason.
+
 1. **Vertical and independently verifiable.** Each task delivers a slice that can be checked on its own. Each task has its own acceptance criteria and a `verify` command (a test, build, lint or script). If you can't tell how a slice would be checked, ask the user. If no command exists, write a concrete manual check prefixed with `manual:` (for example `--verify "manual: GET /health returns 200"`). `/aisdlc:implement` then records evidence for it instead of running it.
 2. **Size cap.** One concern per task, touching about 5 files or fewer, and finishable in one focused session. If a task is bigger, split it again until it fits.
 3. **Explicit dependencies.** A task depends on another only if it truly needs that task's output. Don't chain tasks just to force an order. Fewer edges means more parallel waves.
@@ -73,8 +75,10 @@ $AISDLC task new <G-id> "<title>" --risk high|medium|low --depends T-01,T-02 --v
 ```
 Then fill in each task file's What, Acceptance Criteria and Files sections.
 
+To change a task afterwards, use `task edit` or `task remove` as `/aisdlc:challenge` describes. Never rename or delete task files by hand: the script keeps task IDs unique and logs removals.
+
 ## 5. Validate and write the plan
-- Run `$AISDLC dag write <G-id>`. It rejects cycles and unknown dependencies and writes `tasks.md` with waves. Fix any errors it reports.
+- Run `$AISDLC dag write <G-id>`. It rejects cycles and unknown dependencies and writes `tasks.md` with waves. Fix any errors it reports. Its `warnings` name tasks in the same wave that list the same file under Files: add a dependency if one has to go first, or keep them parallel if the changes don't conflict.
 - Review the waves. If one wave holds one huge task, or the graph is a single long chain, reconsider the split.
 
 ## 6. Finish

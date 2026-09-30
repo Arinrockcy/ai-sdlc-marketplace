@@ -39,7 +39,9 @@ Prerequisite: `.aisdlc/` must exist. If it doesn't, tell the user to run `/aisdl
 
    Existing stricter thresholds win. Do not reduce them to 80%. Keep `test` available for fast local runs if the project already distinguishes it from the coverage gate.
 
-5. **Write the stack manifest.** Copy `${CLAUDE_PLUGIN_ROOT}/stack.json` to `.aisdlc/stacks/nodejs.json` (create the folder if needed). Adapt both commands in `hooks.after_task.run` to the detected package manager:
+5. **Check the baseline.** Run the two gate commands once on the current code, with the selected package manager (for example `npm run lint`, then `npm run test:coverage`). If either fails, show the output and tell the user that every task's verify will fail on it until it is fixed, whatever the task changes. Offer to make that fix the first goal (`/aisdlc:create-goal`, once `/aisdlc:init` has finished), so later goals don't inherit the failure. Don't fix it as part of registration, and don't lower a threshold to make it pass.
+
+6. **Write the stack manifest.** Copy `${CLAUDE_PLUGIN_ROOT}/stack.json` to `.aisdlc/stacks/nodejs.json` (create the folder if needed). Adapt both commands in `hooks.after_task.run` to the detected package manager:
    - npm: `npm run lint`, `npm run test:coverage`
    - pnpm: `pnpm run lint`, `pnpm run test:coverage`
    - yarn: `yarn run lint`, `yarn run test:coverage`
@@ -47,6 +49,10 @@ Prerequisite: `.aisdlc/` must exist. If it doesn't, tell the user to run `/aisdl
 
    If the user selected an alternative, keep the stable script names and make those scripts invoke it. This keeps the hook independent of the underlying tool.
 
-6. **Keep the gate active.** Remove any `.aisdlc/config.json` `hooks.after_task` override that would shadow the stack hook. If one exists, show it to the user and ask before removing or changing it. Do not offer `None` as a normal setup choice: disabling this required gate needs an explicit user override.
+   Then make `quality_gate` in the copy say what was chosen, because reviewers read it as the project's standard:
+   - `linter` and `test_runner`: the selected tools (for example `node:test` instead of `jest`).
+   - `coverage_thresholds`: the thresholds the `test:coverage` command actually enforces. Leave out a metric the selected runner can't enforce (node:test's coverage options cover lines, branches and functions, but not statements), and tell the user which one was left out and why.
 
-7. **Report the result.** Show the two resolved `after_task` commands, selected lint and test tools, coverage thresholds, and any missing setup. Remind the user that `AISDLC_HOOK_AFTER_TASK="<cmd>"` (or `none`) is an explicit one-run override, not a change to the registered standard.
+7. **Keep the gate active.** Remove any `.aisdlc/config.json` `hooks.after_task` override that would shadow the stack hook. If one exists, show it to the user and ask before removing or changing it. Do not offer `None` as a normal setup choice: disabling this required gate needs an explicit user override.
+
+8. **Report the result.** Show the two resolved `after_task` commands, the selected lint and test tools, the coverage thresholds in the manifest (and any left out), the baseline result from step 5, and any missing setup. Tell the user to commit `.aisdlc/stacks/nodejs.json` and the tooling changes on their own, before a goal starts, so they don't end up in a goal's changes. Remind the user that `AISDLC_HOOK_AFTER_TASK="<cmd>"` (or `none`) is an explicit one-run override, not a change to the registered standard.
