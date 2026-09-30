@@ -53,7 +53,7 @@ Repeat these steps for each task:
 2. **Start.** Run `$AISDLC task set <G-id> <T-id> in-progress`, then `$AISDLC hooks run before_task --goal <G-id> --task <T-id>`.
    If `task set` refuses because governance is pending or the plan changed after governance passed, show the message, run `post_implement` and stop. The user runs `/aisdlc:govern <G-id>`, then `/aisdlc:implement <G-id>` again.
 3. **Implement** against the task's acceptance criteria and its linked ADRs.
-   - Read only what the task needs. If `graph.provider` is `graphify`, consult the graph before searching broadly.
+   - Read only what the task needs. If `graph.provider` is `graphify`, consult the graph in `graph.path` before searching broadly. It doesn't reflect code changed since it was last built, including earlier tasks of this goal.
    - If the task, its acceptance criteria and its ADRs don't settle a choice you have to make (behavior, a public name, error handling, data shape), and the repo's conventions don't either, stop and ask the user. Record the answer in the task file's Notes.
    - Stay inside the task's scope. If you discover extra work, don't do it. Write it down and add it after this task is done (step 6). Adding a task resets governance, and a task can't be marked done while governance is pending.
 4. **Verify.**
@@ -84,7 +84,8 @@ All tasks are done or skipped at this point.
 1. **Final review.** Run `$AISDLC goal show <G-id>`. If `final_review_required` is true and `gates.final` isn't `passed`, run the govern skill's final review (`/aisdlc:govern <G-id> --final`, Mode C) now. If it fails, show the Required Fixes, handle them as Mode C describes, run `post_implement` and stop.
 2. Run `$AISDLC hooks run after_goal --goal <G-id>`. If it fails, show the output and ask the user whether to retry or finish anyway.
 3. Run `$AISDLC state move <G-id> completed`. The goal completes automatically once every task passes and, if there are final rules, the final review passes. The registry updates itself.
-4. Run `$AISDLC hooks run post_implement`. Summarize:
+4. **Graph.** If `graph.provider` is `graphify` (`$AISDLC config get graph`), the graph no longer matches the code this goal changed. Ask the user whether to rebuild it now with `/graphify .`. Rebuild only if they agree.
+5. Run `$AISDLC hooks run post_implement`. Summarize:
    - the tasks completed
    - any skipped tasks, with their reasons
    - the commits made

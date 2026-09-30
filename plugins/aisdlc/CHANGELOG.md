@@ -2,6 +2,15 @@
 
 All notable changes to the `aisdlc` plugin. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/). Until 1.0.0, a minor version may include breaking changes; each one is listed under **Breaking** with its upgrade step.
 
+## [0.3.1] - 2026-09-30
+
+### Changed
+- `/aisdlc:init` no longer presents `registry.md` as an alternative to a code graph. The option is now **No graph**: skills search the code directly, and the registry, which indexes goals and ADRs only, is kept either way.
+- `/aisdlc:implement` asks whether to rebuild the Graphify graph once a goal completes, and `/aisdlc:create-goal` asks whether to rebuild it first when it is missing or older than the latest commit. Before, the graph was built once at init and went stale.
+
+### Fixed
+- `graph.path` is now honored. `/aisdlc:create-goal` read `graphify-out/` whatever the setting, and `/aisdlc:init` suggested ignoring `graphify-out/` instead of the configured directory.
+
 ## [0.3.0] - 2026-09-30
 
 Finished work is now reviewed by default, reviews must show their evidence, and goals can be cancelled. See [Upgrading to 0.3.0](../../README.md#upgrading) before updating a project that already has goals.
