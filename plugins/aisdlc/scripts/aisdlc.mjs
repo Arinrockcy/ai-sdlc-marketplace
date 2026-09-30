@@ -5,7 +5,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { execSync, execFileSync } from 'node:child_process';
+import { execSync, execFileSync, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 
@@ -505,6 +505,7 @@ function registrySearch(root, words) {
 // through .graphifyignore, so workflow state never makes it stale.
 const GRAPH_DIR = 'graphify-out';
 const GRAPH_STAMP = path.join(GRAPH_DIR, '.aisdlc-stamp');
+const GRAPH_WARNINGS = path.join(GRAPH_DIR, '.aisdlc-warnings');
 const GRAPH_IGNORED = ['.aisdlc/', `${GRAPH_DIR}/`];
 const GRAPH_FEATURES = { update: /^\s*update <path>/m, query: /^\s*query "<question>"/m, budget: /--budget N/ };
 const GRAPH_INSTALL = 'Install Graphify 0.9 or later (Python 3.10+) so `graphify` is on PATH, for example `pipx install graphifyy`. The workflow only needs the CLI, not `graphify install`.';
@@ -533,6 +534,12 @@ function graphTool(root) {
   const missing = Object.keys(GRAPH_FEATURES).filter((f) => !GRAPH_FEATURES[f].test(help));
   return { installed: true, version, supported: !missing.length, ...(missing.length && { missing, install: GRAPH_INSTALL }) };
 }
+
+// Graphify's warnings from the last build, for example files it left out because an optional grammar is missing.
+const graphWarnings = (root) => {
+  const file = path.join(root, GRAPH_WARNINGS);
+  return fs.existsSync(file) ? fs.readFileSync(file, 'utf8').split('\n').filter(Boolean) : [];
+};
 
 const graphIgnoreOk = (root) => {
   const file = path.join(root, '.graphifyignore');
@@ -567,26 +574,32 @@ function graphFreshness(root) {
   return { ...built, stale: true, reason: was ? 'code changed since the graph was built' : 'graph was not built by aisdlc' };
 }
 
-// Rebuilds the graph if the code changed. Incremental and model-free, but it still takes seconds on a large repo.
-function graphUpdate(root) {
+// Rebuilds the graph if the code changed, or always with `force`. Incremental and model-free, but it still takes
+// seconds on a large repo.
+function graphUpdate(root, force = false) {
   const fresh = graphFreshness(root);
-  if (!fresh.stale) return { updated: false };
+  if (!fresh.stale && !force) return { updated: false };
   const started = Date.now();
   const graphFile = path.join(root, GRAPH_DIR, 'graph.json');
   const before = fs.existsSync(graphFile) ? fs.statSync(graphFile).mtimeMs : null;
-  let log;
-  try { log = graphify(root, ['update', '.']); } catch (e) {
-    fail(`graphify update failed: ${String(e.stderr || e.message).trim().split('\n').slice(-3).join(' ')}`);
+  const r = spawnSync(graphBin(), ['update', '.'], { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 1 << 26 });
+  if (r.error || r.status !== 0) {
+    fail(`graphify update failed: ${String(r.error?.message || r.stderr || r.stdout).trim().split('\n').slice(-3).join(' ')}`);
   }
+  const warnings = [...r.stderr.matchAll(/^\s*warning:\s*(.+)$/gm)].map((m) => m[1].trim());
+  const reported = warnings.length ? { warnings } : {};
   // An edit that changes no symbol or edge (a comment, a function body) leaves graph.json untouched but current.
-  const current = /No code-graph topology changes detected/.test(log);
+  const current = /No code-graph topology changes detected/.test(r.stdout);
   // Graphify can also decline to overwrite a graph (for example one that shrank); never mark such a graph fresh.
   if (!current && (!fs.existsSync(graphFile) || fs.statSync(graphFile).mtimeMs === before)) {
-    return { updated: false, warning: `graphify update left ${GRAPH_DIR}/graph.json unchanged, so it may be out of date. Run \`graphify update . --force\` to rebuild it.` };
+    return { updated: false, warning: `graphify update left ${GRAPH_DIR}/graph.json unchanged, so it may be out of date. Run \`graphify update . --force\` to rebuild it.`, ...reported };
   }
   const stamp = codeStamp(root);
   if (stamp) fs.writeFileSync(path.join(root, GRAPH_STAMP), `${stamp}\n`);
-  return { updated: true, reason: fresh.reason, ms: Date.now() - started };
+  const warningsFile = path.join(root, GRAPH_WARNINGS);
+  if (warnings.length) fs.writeFileSync(warningsFile, `${warnings.join('\n')}\n`);
+  else fs.rmSync(warningsFile, { force: true });
+  return { updated: true, reason: fresh.stale ? fresh.reason : 'rebuild requested', ms: Date.now() - started, ...reported };
 }
 
 // ---------- governance ----------
@@ -1329,7 +1342,8 @@ const commands = {
     const { provider } = graphConfig(root);
     if (action === 'status') {
       const tool = graphTool(root);
-      return out({ provider, dir: GRAPH_DIR, ...tool, aisdlc_ignored: graphIgnoreOk(root), ...graphFreshness(root) });
+      const warnings = graphWarnings(root);
+      return out({ provider, dir: GRAPH_DIR, ...tool, aisdlc_ignored: graphIgnoreOk(root), ...graphFreshness(root), ...(warnings.length && { warnings }) });
     }
     if (action === 'setup') {
       const tool = graphTool(root);
@@ -1343,7 +1357,8 @@ const commands = {
       const cfg = loadConfig(root);
       cfg.graph = { provider: 'graphify' };
       saveConfig(root, cfg);
-      return out({ provider: 'graphify', version: tool.version, dir: GRAPH_DIR, ignore_added: addedIgnore, ...graphUpdate(root) });
+      // Setup always rebuilds, so running it again picks up file types a newly installed Graphify extra can parse.
+      return out({ provider: 'graphify', version: tool.version, dir: GRAPH_DIR, ignore_added: addedIgnore, ...graphUpdate(root, true) });
     }
     if (provider !== 'graphify') {
       if (action === 'update' || action === 'query') return out({ provider, note: 'No code graph is set up; search the code directly.' });
@@ -1368,6 +1383,8 @@ const commands = {
       if (refresh.updated) process.stdout.write(`[aisdlc] graph refreshed in ${refresh.ms} ms (${refresh.reason})\n`);
       if (refresh.warning) process.stdout.write(`[aisdlc] ${refresh.warning}\n`);
       process.stdout.write(result);
+      // The graph holds code structure (functions, classes, imports), not data fields or text, so a miss is common.
+      if (/^No matching nodes found/m.test(result)) process.stdout.write('[aisdlc] Nothing in the graph matches; search the code directly.\n');
       return;
     }
     fail('Usage: graph status | setup | update | query "<question>" [--budget N]');

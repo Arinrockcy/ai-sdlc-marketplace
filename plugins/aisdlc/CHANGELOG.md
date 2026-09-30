@@ -4,6 +4,13 @@ All notable changes to the `aisdlc` plugin. The format follows [Keep a Changelog
 
 ## [0.5.1] - 2026-09-30
 
+### Added
+- `graph setup` and `graph update` return Graphify's warnings as `warnings`, and `graph status` shows those from the last build. They name files left out of the graph, for example SQL files when Graphify's `sql` extra isn't installed. `/aisdlc:init` shows them and offers the install.
+- `graph query` adds "search the code directly" when nothing in the graph matches. The graph holds code structure, not data fields or text, so a miss is common.
+
+### Changed
+- `graph setup` always rebuilds the graph, so running it again after installing a Graphify extra picks up the files it can now parse.
+
 ### Fixed
 - An edit that changes no symbol or edge in the code graph (a comment, or a change inside a function body) no longer leaves the graph stale for good. Graphify leaves `graph.json` untouched in that case because the graph is still current. `graph update` used to take that as a refused write: it warned, and every later `graph query` ran the rebuild again (about 1.7 s on a 100-file repo). Now it marks the graph fresh.
 

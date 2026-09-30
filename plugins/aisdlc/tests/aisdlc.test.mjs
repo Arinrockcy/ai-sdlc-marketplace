@@ -653,9 +653,10 @@ function fakeGraphify(dir) {
 case "$1" in
   --help) printf '  update <path>   re-extract code\\n  query "<question>"  BFS\\n    --budget N  cap\\n' ;;
   --version) echo "graphify 9.9.9" ;;
-  update) [ -n "$FAKE_SAME" ] && echo '[graphify watch] No code-graph topology changes detected; outputs left untouched.' && exit 0
+  update) [ -n "$FAKE_WARN" ] && echo '  warning: 2 .sql file(s) contributed nothing to the graph because a dependency is missing' >&2
+    [ -n "$FAKE_SAME" ] && echo '[graphify watch] No code-graph topology changes detected; outputs left untouched.' && exit 0
     [ -n "$FAKE_NOOP" ] && exit 0; mkdir -p graphify-out && echo '{}' > graphify-out/graph.json && echo run >> graphify-out/runs ;;
-  query) echo "QUERY $2 $3 $4" ;;
+  query) [ "$2" = nothing ] && echo 'No matching nodes found.' || echo "QUERY $2 $3 $4" ;;
 esac
 `, { mode: 0o755 });
   return bin;
@@ -759,6 +760,15 @@ test('cli: graph setup, freshness and query drive graphify without the model', {
   assert.equal(runs(), 2);
   assert.equal(run(['graph', 'query', 'again'], env).stdout, 'QUERY again --budget 1500\n');
   assert.match(run(['graph', 'query', 'x', '--budget', 'lots'], env).stderr, /--budget must be/);
+  assert.equal(run(['graph', 'query', 'nothing'], env).stdout, 'No matching nodes found.\n[aisdlc] Nothing in the graph matches; search the code directly.\n');
+
+  // Setup always rebuilds, and Graphify's warnings are returned and kept for status until a build has none.
+  const rebuilt = run(['graph', 'setup'], { ...env, FAKE_WARN: '1' }).json;
+  assert.deepEqual([rebuilt.updated, rebuilt.reason, runs()], [true, 'rebuild requested', 3]);
+  assert.match(rebuilt.warnings[0], /^2 \.sql file\(s\) contributed nothing/);
+  assert.deepEqual(run(['graph', 'status'], env).json.warnings, rebuilt.warnings);
+  run(['graph', 'setup'], env);
+  assert.equal(run(['graph', 'status'], env).json.warnings, undefined);
 
   // An update that leaves the graph untouched is reported, and the graph stays stale so the next query retries.
   fs.appendFileSync(path.join(dir, 'app.js'), 'export const d = 4;\n');
