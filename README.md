@@ -21,7 +21,7 @@ Requires Node.js 18+. Graphify is optional; `/aisdlc:init` offers to set it up.
 
 ```
 /aisdlc:init
-/aisdlc:create-goal <description>   → intake questions first, then goal + task DAG (waves, risk-first)
+/aisdlc:create-goal <description>   → checks unfinished goals (merge / finish first / separate), intake questions, then goal + task DAG (waves, risk-first)
 /aisdlc:challenge G-001             → one-question-at-a-time clarification
 /aisdlc:adr G-001                   → ADRs, or "none needed" with a reason
 /aisdlc:govern                      → edit project rules (no argument), with an optional rule catalog
@@ -95,6 +95,7 @@ Update the plugin, then in each project that already has `.aisdlc/`:
 4. **Check any tooling around `.aisdlc/`.** If you have scripts that depend on the following, update them:
    - `governance-review.stale.md`: archives are now numbered.
    - `task verify` passing a task that has no verify command and no `after_task` hook: it now requires `--evidence`.
+   - unknown options: the script used to ignore them, and now fails on them.
 
 Goal files from 0.1.0 need no edits. Missing `gate_final` and `govern_fingerprint` fields count as pending.
 

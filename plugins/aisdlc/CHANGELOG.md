@@ -13,6 +13,7 @@ Governance now checks what it reviewed and stays tied to it. See [Upgrading to 0
 - `task verify` needs `--evidence` when a task has no verify command and no `after_task` hook runs, instead of passing with nothing run.
 - An invalid rule in `governance.md` (a duplicate ID, or an unknown severity, stage or check) now fails loudly. Before, an unknown severity quietly made the rule non-blocking.
 - Archived reviews are named `governance-review.stale-N.md` instead of `governance-review.stale.md`.
+- The script fails on unknown options (for example `--reson`) instead of ignoring them.
 
 ### Added
 - Rules have **Stage** (`plan` or `final`) and **Check** columns. `init` seeds the five baseline rules with automatic checks: `goal-defined`, `tasks-verifiable`, `dag-valid` and `adr-recorded`. A review can't mark a rule `pass` or `n/a` while its check fails.
@@ -22,6 +23,8 @@ Governance now checks what it reviewed and stays tied to it. See [Upgrading to 0
 - `templates/governance-catalog.md`: optional rules that `/aisdlc:govern` offers as choices (tests, secrets, stack standards, scope, docs, dependencies, sensitive areas, migrations, observability).
 - `goal show` reports `gates.final`, `final_review_required`, and a `governance` summary that lists `should` rules that failed without blocking. `/aisdlc:implement` includes them in its completion summary.
 - Commands that reset gates return `notes` saying what was reset and which command to re-run.
+- `/aisdlc:create-goal` first checks for unfinished goals (pending, in-progress, blocked). It asks whether to merge the new description into a pending goal, finish an unfinished goal first, or create a separate goal. A merge reopens the goal's challenge and adr gates, so the new scope is clarified and decided before governance.
+- Test that every `$AISDLC …` invocation written in a skill is still understood by the script.
 
 ### Fixed
 - Archiving a review never overwrites an earlier archive.

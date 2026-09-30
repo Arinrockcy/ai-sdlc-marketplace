@@ -23,7 +23,7 @@ const RULE_SEVERITIES = ['must', 'should', 'retired'];
 const RULE_STAGES = ['plan', 'final'];
 const REVIEW_FILE = { plan: 'governance-review.md', final: 'governance-final.md' };
 const STEPS = ['init', 'create_goal', 'challenge', 'adr', 'govern', 'implement'];
-const HOOK_POINTS = [
+export const HOOK_POINTS = [
   'before_goal', 'after_goal', 'before_task', 'after_task', 'on_block',
   ...STEPS.flatMap((s) => [`pre_${s}`, `post_${s}`]),
 ];
@@ -156,8 +156,9 @@ function setPath(obj, dotted, value) {
   o[keys.at(-1)] = value;
 }
 
-// Options that always take a value, even one that starts with "--" (e.g. --verify "--version").
-const VALUE_OPTS = new Set(['depends', 'risk', 'verify', 'reason', 'evidence', 'goal', 'task', 'status', 'stack', 'graph', 'base-branch', 'dir', 'severity', 'stage', 'check']);
+// Every option takes a value, even one that starts with "--" (e.g. --verify "--version").
+// Unknown options fail, so a typo in a skill can't be silently ignored.
+export const OPTIONS = new Set(['depends', 'risk', 'verify', 'reason', 'evidence', 'goal', 'task', 'status', 'stack', 'graph', 'base-branch', 'dir', 'severity', 'stage', 'check']);
 
 function parseArgs(argv) {
   const pos = [];
@@ -166,12 +167,9 @@ function parseArgs(argv) {
     const a = argv[i];
     if (a.startsWith('--')) {
       const key = a.slice(2);
-      const next = argv[i + 1];
-      if (VALUE_OPTS.has(key)) {
-        if (next === undefined) fail(`--${key} needs a value`);
-        opts[key] = next; i++;
-      } else if (next === undefined || next.startsWith('--')) opts[key] = true;
-      else { opts[key] = next; i++; }
+      if (!OPTIONS.has(key)) fail(`Unknown option --${key}. Valid: ${[...OPTIONS].map((o) => `--${o}`).join(', ')}`);
+      if (argv[i + 1] === undefined) fail(`--${key} needs a value`);
+      opts[key] = argv[++i];
     } else pos.push(a);
   }
   return { pos, opts };

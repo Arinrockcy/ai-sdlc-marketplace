@@ -37,7 +37,7 @@ Each plugin has its own version and `CHANGELOG.md` (Keep a Changelog format).
 - hook resolution and execution
 - registry regeneration
 
-Skills call the script (written `$AISDLC` in the skill files) and should never hand-edit state the script owns: `status`, `gate_*` fields, `registry.md`, `tasks.md`, or moving goal folders. When adding workflow behavior, put invariants in the script with tests, and keep instructions in the skill.
+Skills call the script (written `$AISDLC` in the skill files) and should never hand-edit state the script owns. Every `$AISDLC …` span in a skill must be a complete, runnable invocation. Write placeholders as `<G-id>`, `<T-id>`, `<ADR-id>`, `<GOV-id>` or `<name>`, alternatives as `a|b`, optional parts as `[...]`, and `…` only as an option's value. `tests/skills.test.mjs` runs each one and fails if the script no longer understands it. The script rejects unknown options, so every option must be in `OPTIONS`. The state the script owns: `status`, `gate_*` and `govern_fingerprint` fields, the rules table in `governance.md`, `registry.md`, `tasks.md`, and goal folder moves. When adding workflow behavior, put invariants in the script with tests, and keep instructions in the skill.
 
 **State model.** Everything lives in the target project's `.aisdlc/`, stored as markdown with flat frontmatter. The parser only supports `key: value` scalars and inline `[a, b]` arrays; there is no nested YAML.
 - A goal's status is the folder it sits in: `goals/<status>/G-NNN-slug/`.
@@ -79,7 +79,8 @@ These were settled with the repo owner:
 - The `before_goal` default only pulls the base branch (default `develop`).
 - On a verify failure, `/aisdlc:implement` asks the user to retry, skip or block. It does not auto-retry.
 - No skill assumes. Anything unclear or under-documented that the code doesn't answer is asked, never guessed or defaulted silently.
-- `/aisdlc:create-goal` starts with intake questions about the gaps in the description, before writing the goal. Answers go under Clarifications so challenge doesn't repeat them.
+- `/aisdlc:create-goal` first checks for unfinished goals. It asks whether to merge into a pending goal, finish an unfinished one first, or create a separate goal, and never picks for the user. Merge is offered only for `pending` goals, because in-progress and blocked goals can't be re-challenged. A merge resets the challenge and adr gates.
+- `/aisdlc:create-goal` then asks intake questions about the gaps in the description, before writing the goal. Answers go under Clarifications so challenge doesn't repeat them.
 - `/aisdlc:challenge` is clarification Q&A, one question at a time. It is not a critique.
 - There is no governance waiver.
 - Governance has two stages. `plan` rules gate implementation. `final` rules gate completion, and `/aisdlc:implement` runs the final review itself.

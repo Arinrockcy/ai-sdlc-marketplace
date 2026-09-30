@@ -18,7 +18,7 @@ Each rule in `.aisdlc/governance.md` has:
 - a **stage**: `plan` rules are reviewed before implementation, `final` rules against the finished work
 - an optional **check**: an automatic check the script runs (`goal-defined`, `tasks-verifiable`, `dag-valid` or `adr-recorded`)
 
-The script owns the rules table. Change it only through `$AISDLC governance add|set`, never by editing the table by hand.
+The script owns the rules table. Change it only through the `governance add` and `governance set` commands (Mode A), never by editing the table by hand.
 
 ## Mode A: no argument (edit the rules)
 1. Run `$AISDLC hooks run pre_govern`, then `$AISDLC governance list`. `init` seeds the baseline rules GOV-01 to GOV-05, all `must` and `plan`. If the list fails, the file has an invalid rule (a duplicate ID, or an unknown severity, stage or check). Show the error and ask the user how to fix it.
@@ -70,7 +70,7 @@ Runs once every task is done or skipped, and only when governance.md has active 
 6. Set the gate:
    - **Pass:** run `$AISDLC gate set <G-id> final passed`. The goal can now complete.
    - **Fail:** run `$AISDLC gate set <G-id> final failed`. Show the Required Fixes and ask the user how to handle each one:
-     - add a fix task with `$AISDLC task new`. This resets the plan review, so the goal is re-governed before the task runs.
+     - add a fix task with `$AISDLC task new <G-id> "<title>" --risk … --verify "…"`. This resets the plan review, so the goal is re-governed before the task runs.
      - stop so they can fix it themselves.
 
      Either way, the final review runs again afterwards. Any task change resets the final gate.
