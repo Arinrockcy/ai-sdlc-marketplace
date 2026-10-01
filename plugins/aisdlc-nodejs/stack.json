@@ -1,7 +1,6 @@
 {
   "name": "nodejs",
-  "version": "0.7.0",
-  "detect": ["package.json"],
+  "version": "0.7.1",
   "standards_skill": "aisdlc-nodejs:standards",
   "runtime": {
     "node": ">=24",
@@ -22,7 +21,6 @@
     }
   },
   "hooks": {
-    "before_task": null,
     "after_task": {
       "run": [
         "npm run lint",

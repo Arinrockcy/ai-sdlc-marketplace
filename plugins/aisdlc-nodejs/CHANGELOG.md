@@ -2,6 +2,14 @@
 
 All notable changes to the `aisdlc-nodejs` plugin. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/).
 
+## [0.7.1] - 2026-10-01
+
+### Removed
+- `detect` and `"before_task": null` from `stack.json`. The core never read `detect` (stack detection uses its own marker list), and the `null` only repeated the core default while hiding any later one. Installed manifests that still have them work as before.
+
+### Added
+- Tests that `stack.json` sets only real hook points, and that `standards_skill` names this plugin's standards skill.
+
 ## [0.7.0] - 2026-09-30
 
 ### Added

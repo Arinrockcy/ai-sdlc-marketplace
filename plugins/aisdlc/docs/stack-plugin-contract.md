@@ -21,7 +21,6 @@ A stack plugin can't run the core script (`${CLAUDE_PLUGIN_ROOT}` points to the 
 {
   "name": "<stack>",
   "version": "0.1.0",
-  "detect": ["<marker file>"],
   "standards_skill": "aisdlc-<stack>:standards",
   "quality_gate": {
     "coverage_report": { "path": "<report file>", "format": "json-summary" | "lcov" },
@@ -34,7 +33,8 @@ A stack plugin can't run the core script (`${CLAUDE_PLUGIN_ROOT}` points to the 
 ```
 
 - `name` must match the value `aisdlc.mjs detect-stack` reports and the `stack` value in `.aisdlc/config.json`. To detect a new stack, add its marker file to `STACK_MARKERS` in `scripts/aisdlc.mjs`. With `stack` set to `auto`, the active stack is the only one detected or, when several are detected, the only one with a manifest in `.aisdlc/stacks/`. Otherwise no stack is active, and the manifest's hooks and coverage report are ignored.
-- `hooks` can set any hook point listed in `defaults/hooks.json`. Each value has the same form as in config: `{"run": "cmd" | ["cmd", ...]}`, `{"use": "default"}`, or `null`.
+- Stack detection doesn't read the manifest: the manifest is only in the project once the stack is registered. It uses `STACK_MARKERS` (above).
+- `hooks` can set any hook point listed in `defaults/hooks.json`. Set only the points the stack changes: a point the manifest leaves out falls through to the core default, so a later core default still applies. Each value has the same form as in config: `{"run": "cmd" | ["cmd", ...]}`, `{"use": "default"}`, or `null`.
 - Hook commands can use these variables: `{base_branch}`, `{branch_prefix}`, `{goal_id}`, `{goal_slug}`, `{goal_branch}`, `{task_id}` and `{aisdlc}` (the core script, run with the same Node).
 - `quality_gate.coverage_report` is required. It names the coverage report, relative to the project root, that the stack's test command writes on every run. `format` is one of:
   - `json-summary`: Istanbul's summary (`coverage/coverage-summary.json`), written by Jest, Vitest, c8 and nyc. It measures lines, statements, functions and branches.
