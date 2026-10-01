@@ -65,6 +65,49 @@ function project() {
   return run;
 }
 
+// Agents other than Claude Code (GitHub Copilot) parse frontmatter as strict YAML and follow the Agent Skills spec.
+// A plain scalar can't hold ": " or " #", or start with an indicator character; quote such values.
+function frontmatterProblems(file) {
+  const text = fs.readFileSync(file, 'utf8');
+  const block = text.match(/^---\n([\s\S]*?)\n---\n/)?.[1];
+  if (block === undefined) return ['no frontmatter'];
+  const problems = [];
+  const fields = {};
+  for (const line of block.split('\n')) {
+    const m = line.match(/^([a-z-]+): (.*)$/);
+    if (!m) { problems.push(`not a "key: value" line: ${line}`); continue; }
+    let value = m[2];
+    if (/^".*"$/.test(value)) value = JSON.parse(value);
+    else if (/^'.*'$/.test(value)) value = value.slice(1, -1).replaceAll("''", "'");
+    else if (/: | #|^[-?:,[\]{}#&*!|>'"%@`]/.test(value)) problems.push(`${m[1]} needs quotes in strict YAML`);
+    fields[m[1]] = value;
+  }
+  const folder = path.basename(path.dirname(file));
+  if (fields.name !== folder) problems.push(`name "${fields.name}" doesn't match its folder "${folder}"`);
+  if (!/^[a-z0-9]+(-[a-z0-9]+)*$/.test(fields.name ?? '') || fields.name.length > 64) problems.push(`name "${fields.name}" isn't 1-64 lowercase letters, digits and single hyphens`);
+  if (!fields.description || fields.description.length > 1024) problems.push('description is missing or longer than 1024 characters');
+  return problems;
+}
+
+test('skills: frontmatter parses as strict YAML and follows the Agent Skills spec', () => {
+  const bad = skillFiles().flatMap((f) => frontmatterProblems(f).map((p) => `${path.relative(REPO, f)}: ${p}`));
+  assert.deepEqual(bad, []);
+});
+
+// Claude Code expands `${CLAUDE_PLUGIN_ROOT}` and `$ARGUMENTS` in skill text and namespaces skills as `/plugin:skill`.
+// GitHub Copilot does neither, so a skill that relies on one says what it stands for.
+test('skills: explain Claude Code variables and skill names for agents that leave them as written', () => {
+  const missing = [];
+  for (const file of skillFiles()) {
+    const text = fs.readFileSync(file, 'utf8');
+    const rel = path.relative(REPO, file);
+    if (text.includes('${CLAUDE_PLUGIN_ROOT}') && !text.includes('still starts with an unexpanded variable, that variable stands for this plugin\'s folder: two levels above the folder that holds this SKILL.md')) missing.push(`${rel}: \${CLAUDE_PLUGIN_ROOT}`);
+    if (text.includes('$ARGUMENTS') && !text.includes('(the text after the skill\'s name)') && !text.includes('after the skill\'s name: `$ARGUMENTS`')) missing.push(`${rel}: $ARGUMENTS`);
+    if (/\/aisdlc(-[a-z]+)?:[a-z]/.test(text) && !text.includes('in an agent without plugin namespaces, such as GitHub Copilot, call them `/<skill>`')) missing.push(`${rel}: /plugin:skill names`);
+  }
+  assert.deepEqual(missing, []);
+});
+
 test('skills: placeholder expansion', () => {
   assert.deepEqual(expand('task set <G-id> <T-id> skipped --reason "<why>"'), [['task', 'set', 'G-001', 'T-01', 'skipped', '--reason', 'x']]);
   assert.deepEqual(expand('goal set <G-id> auto_commit true|false'), [['goal', 'set', 'G-001', 'auto_commit', 'true'], ['goal', 'set', 'G-001', 'auto_commit', 'false']]);

@@ -6,11 +6,11 @@ argument-hint: "<goal description>"
 
 # aisdlc: create-goal
 
-`$AISDLC` below means `node "${CLAUDE_PLUGIN_ROOT}/scripts/aisdlc.mjs"`. Run it from the project root.
+`$AISDLC` below means `node "${CLAUDE_PLUGIN_ROOT}/scripts/aisdlc.mjs"`. Run it from the project root. Where a path in this skill still starts with an unexpanded variable, that variable stands for this plugin's folder: two levels above the folder that holds this SKILL.md. Skills are written `/<plugin>:<skill>`; in an agent without plugin namespaces, such as GitHub Copilot, call them `/<skill>` (`/aisdlc:govern` is `/govern`).
 
 **Don't assume.** If something this step needs is unclear, missing or under-documented, and neither the code nor the `.aisdlc/` files answer it, ask the user. Never fill a gap with a guess or a silent default.
 
-Input: `$ARGUMENTS` is the goal description. If it is empty, ask the user for one.
+Input: `$ARGUMENTS` (the text after the skill's name) is the goal description. If it is empty, ask the user for one.
 
 ## 0. Context (keep it cheap)
 - Run `$AISDLC hooks run pre_create_goal`.

@@ -1,11 +1,11 @@
 ---
 name: standards
-description: Enforce the aisdlc Node.js coding standard for JavaScript or optional TypeScript work: Node.js 24+, ES modules by default, class-oriented modules, named functions, purpose-grouped constants, external configuration, editor-only declaration files, security, process lifecycle, logging, package hygiene, dependency approval, ESLint, and coverage-gated tests. Loaded by /aisdlc:implement when the project stack is nodejs; also usable directly when writing Node.js code in an aisdlc project.
+description: "Enforce the aisdlc Node.js coding standard for JavaScript or optional TypeScript work: Node.js 24+, ES modules by default, class-oriented modules, named functions, purpose-grouped constants, external configuration, editor-only declaration files, security, process lifecycle, logging, package hygiene, dependency approval, ESLint, and coverage-gated tests. Loaded by /aisdlc:implement when the project stack is nodejs; also usable directly when writing Node.js code in an aisdlc project."
 ---
 
 # Node.js standards (aisdlc)
 
-`$NODEJS` below means `node "${CLAUDE_PLUGIN_ROOT}/scripts/nodejs.mjs"`. Run it from the project root.
+`$NODEJS` below means `node "${CLAUDE_PLUGIN_ROOT}/scripts/nodejs.mjs"`. Run it from the project root. Where a path in this skill still starts with an unexpanded variable, that variable stands for this plugin's folder: two levels above the folder that holds this SKILL.md. Skills are written `/<plugin>:<skill>`; in an agent without plugin namespaces, such as GitHub Copilot, call them `/<skill>` (`/aisdlc:govern` is `/govern`).
 
 These are required Node.js plugin policies. Preserve stricter repository rules and established naming, but do not inherit a weaker convention that defeats a requirement below. Before writing code, run `$NODEJS manifest check` once per session. It compares the installed `.aisdlc/stacks/nodejs.json` with the oldest manifest version this plugin accepts. If it exits non-zero, show its `problems`, tell the user to re-run `/aisdlc-nodejs:register`, and stop. Mention any `notes` (a manifest from an older, still compatible release) without stopping. Then check these once per session:
 - `.aisdlc/stacks/nodejs.json`: `runtime.node`, `runtime.module_type` and `quality_gate.coverage_report`

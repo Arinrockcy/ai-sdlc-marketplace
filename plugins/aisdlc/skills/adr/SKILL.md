@@ -6,11 +6,11 @@ argument-hint: "<G-id>"
 
 # aisdlc: adr
 
-`$AISDLC` below means `node "${CLAUDE_PLUGIN_ROOT}/scripts/aisdlc.mjs"`. Run it from the project root.
+`$AISDLC` below means `node "${CLAUDE_PLUGIN_ROOT}/scripts/aisdlc.mjs"`. Run it from the project root. Where a path in this skill still starts with an unexpanded variable, that variable stands for this plugin's folder: two levels above the folder that holds this SKILL.md. Skills are written `/<plugin>:<skill>`; in an agent without plugin namespaces, such as GitHub Copilot, call them `/<skill>` (`/aisdlc:govern` is `/govern`).
 
 **Don't assume.** If something this step needs is unclear, missing or under-documented, and neither the code nor the `.aisdlc/` files answer it, ask the user. Never fill a gap with a guess or a silent default. If the context a decision depends on (scale, constraints, who owns what) isn't recorded, ask before you write options.
 
-Input: `$ARGUMENTS` is the goal ID. If it is missing, ask the user which goal.
+Input: `$ARGUMENTS` (the text after the skill's name) is the goal ID. If it is missing, ask the user which goal.
 
 ADRs are project-wide and live in `.aisdlc/adr/ADR-NNN-slug.md` (Nygard format). One ADR can serve many goals.
 

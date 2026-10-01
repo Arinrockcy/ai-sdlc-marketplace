@@ -2,6 +2,12 @@
 
 All notable changes to the `aisdlc` plugin. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/). Until 1.0.0, a minor version may include breaking changes; each one is listed under **Breaking** with its upgrade step.
 
+## [0.9.1] - 2026-10-01
+
+### Added
+- GitHub Copilot support. Copilot CLI installs the plugin from this marketplace unchanged (`copilot plugin marketplace add`, then `copilot plugin install aisdlc@aisdlc-marketplace`). Copilot doesn't expand `${CLAUDE_PLUGIN_ROOT}` or `$ARGUMENTS` in skill text and doesn't namespace skills, so each skill now says what they stand for: the plugin's folder (two levels above the skill's folder), the text after the skill's name, and `/govern` for `/aisdlc:govern`. Claude Code behaves as before.
+- Tests that every skill's frontmatter parses as strict YAML and follows the Agent Skills spec, and that a skill using a Claude Code variable or a `/plugin:skill` name explains it.
+
 ## [0.9.0] - 2026-09-30
 
 ### Breaking

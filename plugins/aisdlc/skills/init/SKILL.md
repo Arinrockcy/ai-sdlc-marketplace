@@ -6,7 +6,7 @@ argument-hint: "[--base-branch <branch>]"
 
 # aisdlc: init
 
-`$AISDLC` below means `node "${CLAUDE_PLUGIN_ROOT}/scripts/aisdlc.mjs"`. Run every command from the project root. The script prints JSON.
+`$AISDLC` below means `node "${CLAUDE_PLUGIN_ROOT}/scripts/aisdlc.mjs"`. Run every command from the project root. The script prints JSON. Where a path in this skill still starts with an unexpanded variable, that variable stands for this plugin's folder: two levels above the folder that holds this SKILL.md. Skills are written `/<plugin>:<skill>`; in an agent without plugin namespaces, such as GitHub Copilot, call them `/<skill>` (`/aisdlc:govern` is `/govern`).
 
 **Don't assume.** If something this step needs is unclear, missing or under-documented, and neither the code nor the `.aisdlc/` files answer it, ask the user. Never fill a gap with a guess or a silent default. Detected values (stack, base branch, package manager) are suggestions: confirm them with the user.
 
@@ -14,7 +14,7 @@ Init is idempotent. It only creates what is missing and never overwrites existin
 
 ## Steps
 
-1. **Scaffold.** Run `$AISDLC hooks run pre_init`. On a first init only the env override and core default apply, because `.aisdlc/config.json` doesn't exist yet. Then run `$AISDLC init` (pass `--base-branch <b>` if the user gave one in `$ARGUMENTS`).
+1. **Scaffold.** Run `$AISDLC hooks run pre_init`. On a first init only the env override and core default apply, because `.aisdlc/config.json` doesn't exist yet. Then run `$AISDLC init` (pass `--base-branch <b>` if the user gave one after the skill's name: `$ARGUMENTS`).
    Report the `created` list. If it is empty, tell the user the workflow was already initialized and continue with the checks below. Change only what they ask to change.
 
 2. **Base branch.** Show `git.base_branch` from the JSON output (default `develop`). Ask the user to confirm it or give another name. If it changes, run `$AISDLC config set git.base_branch <name>`.

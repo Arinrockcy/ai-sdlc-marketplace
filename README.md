@@ -1,6 +1,6 @@
 # AI-SDLC Marketplace
 
-A stack-agnostic AI-SDLC workflow for Claude Code. Its skills are written in neutral markdown so adapters for Codex, Cursor and other agents can follow later.
+A stack-agnostic AI-SDLC workflow for Claude Code and GitHub Copilot. Its skills are written in neutral markdown so adapters for Codex, Cursor and other agents can follow later.
 
 | Plugin | Purpose |
 |--------|---------|
@@ -14,6 +14,20 @@ A stack-agnostic AI-SDLC workflow for Claude Code. Its skills are written in neu
 /plugin install aisdlc@aisdlc-marketplace
 /plugin install aisdlc-nodejs@aisdlc-marketplace   # optional, per stack
 ```
+
+### GitHub Copilot
+
+Copilot CLI reads the same marketplace:
+
+```
+copilot plugin marketplace add <path-or-owner/repo>
+copilot plugin install aisdlc@aisdlc-marketplace
+copilot plugin install aisdlc-nodejs@aisdlc-marketplace   # optional, per stack
+```
+
+In VS Code, add the repository to the `chat.plugins.marketplaces` setting, then install the plugins from the Extensions view.
+
+Copilot doesn't namespace plugin skills, so drop the prefix from the commands below: `/aisdlc:govern G-001` is `/govern G-001`, and `/aisdlc-nodejs:register` is `/register`. `/init` is Copilot's own command, so start with a prompt such as `Use the aisdlc init skill` instead. A project skill of the same name (for example in `.github/skills/`) hides the plugin's.
 
 The Node.js plugin also provides `/aisdlc-nodejs:express-rest-api` for designing, implementing, or reviewing Express endpoints, authentication, authorization, sessions/tokens, and production API security.
 

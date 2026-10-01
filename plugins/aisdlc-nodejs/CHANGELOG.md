@@ -2,6 +2,14 @@
 
 All notable changes to the `aisdlc-nodejs` plugin. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/).
 
+## [0.7.2] - 2026-10-01
+
+### Added
+- GitHub Copilot support (`copilot plugin install aisdlc-nodejs@aisdlc-marketplace`). `register` and `standards` say what `${CLAUDE_PLUGIN_ROOT}` and `/plugin:skill` names stand for where the agent leaves them as written.
+
+### Fixed
+- `standards` failed to load in GitHub Copilot: its frontmatter `description` held an unquoted `: `, which strict YAML rejects. It is quoted now.
+
 ## [0.7.1] - 2026-10-01
 
 ### Removed

@@ -15,6 +15,8 @@ plugins/aisdlc-<stack>/
 
 A stack plugin can't run the core script (`${CLAUDE_PLUGIN_ROOT}` points to the stack plugin), so deterministic work in its skills (detecting the package manager, writing the manifest, running the baseline) goes in its own zero-dependency script, with tests. `aisdlc-nodejs/scripts/nodejs.mjs` is the reference. The manifest's `version` records the plugin release that wrote it; the plugin compares it with the oldest version it still accepts, instead of checking for individual fields.
 
+Skills must work in GitHub Copilot too. It installs plugins from the same marketplace, but leaves `${CLAUDE_PLUGIN_ROOT}` and `$ARGUMENTS` as written, calls skills without the plugin prefix, and skips a skill whose frontmatter isn't strict YAML. Copy the preamble of `aisdlc-nodejs`'s skills, and quote a frontmatter value that contains `: `. The core's `tests/skills.test.mjs` checks every plugin's skills for both.
+
 ## `stack.json`
 
 ```json
