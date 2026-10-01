@@ -9,9 +9,12 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
+import { createHash } from 'node:crypto';
 import aisdlcStandards from '../templates/eslint.aisdlc.mjs';
+import { TEMPLATE_HISTORY } from '../scripts/nodejs.mjs';
 
 const PLUGIN = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const REPO = path.resolve(PLUGIN, '../..');
 const TEMPLATE = path.join(PLUGIN, 'templates/eslint.aisdlc.mjs');
 const SCRIPT = path.join(PLUGIN, 'scripts/nodejs.mjs');
 const ESLINT_FROM = process.env.AISDLC_ESLINT;
@@ -47,6 +50,13 @@ const MODULE_CASES = [
   ['src/a.js', '// eslint-disable-next-line no-console\nexport const x = 1;', [null]],
   ['src/a.mjs', 'export const here = __filename;', ['no-restricted-globals']],
   ['src/a.cjs', "const fs = require('fs');\nmodule.exports = { fs, dir: __dirname };", [INLINE]],
+  ['src/a.js', "export const run = (code) => eval(code);", ['no-eval']],
+  ['src/a.js', "export const make = new Function('a', 'return a');", ['no-new-func']],
+  ['src/a.js', "setTimeout('tick()', 10);", ['no-implied-eval']],
+  ['src/a.js', "import { exec } from 'node:child_process';\nexport default exec;", ['no-restricted-imports']],
+  ['src/a.js', "import { execFile, spawn } from 'node:child_process';\nexport default [execFile, spawn];", []],
+  ['src/a.js', 'export const agent = { rejectUnauthorized: false };', [INLINE]],
+  ['src/a.js', 'export const agent = { rejectUnauthorized: true };', []],
   ['src/a.cjs', "const fs = require('node:fs');\nmodule.exports = { fs, dir: __dirname };", []],
 ];
 
@@ -62,8 +72,11 @@ async function loadESLint() {
   return (await import(require.resolve('eslint'))).ESLint;
 }
 
+// Projects declare Node's globals (for example with the globals package); no-implied-eval needs setTimeout among them.
+const NODE_GLOBALS = { name: 'test/node-globals', languageOptions: { globals: { setTimeout: 'readonly' } } };
+
 async function ruleIds(ESLint, config, file, code) {
-  const eslint = new ESLint({ cwd: PLUGIN, overrideConfigFile: true, overrideConfig: config });
+  const eslint = new ESLint({ cwd: PLUGIN, overrideConfigFile: true, overrideConfig: [...config, NODE_GLOBALS] });
   const [result] = await eslint.lintText(code, { filePath: path.join(PLUGIN, file) });
   return result.messages.map(ruleIdOf);
 }
@@ -79,7 +92,7 @@ function verifyTemplateShape() {
 
   const config = aisdlcStandards();
   assert.deepEqual(config.map(configName), ['aisdlc/linter-options', 'aisdlc/source-type', 'aisdlc/standards', 'aisdlc/es-modules', 'aisdlc/config-and-tests']);
-  const imported = config[2].rules['no-restricted-imports'][1].paths.map(pathName);
+  const imported = config[2].rules['no-restricted-imports'][1].paths.filter(isWholeModule).map(pathName);
   assert.ok(imported.includes('fs') && imported.includes('fs/promises'));
   assert.ok(!imported.some(isPrefixed));
   assert.deepEqual(aisdlcStandards({ sourceType: 'commonjs' })[3].files, ['**/*.mjs']);
@@ -95,6 +108,10 @@ function importSpecifier(match) {
 
 function configName(entry) {
   return entry.name;
+}
+
+function isWholeModule(entry) {
+  return !entry.importNames;
 }
 
 function pathName(entry) {
@@ -115,6 +132,54 @@ function verifyTemplateCommand() {
   const refused = run();
   assert.equal(refused.status, 1);
   assert.match(refused.stderr, /differs from this plugin's template/);
+
+  const [oldHash] = Object.keys(TEMPLATE_HISTORY.eslint);
+  const oldCopy = olderTemplate(oldHash);
+  fs.writeFileSync(path.join(dir, 'eslint.aisdlc.mjs'), oldCopy);
+  assert.equal(JSON.parse(run().stdout).status, 'updated');
+  assert.equal(fs.readFileSync(path.join(dir, 'eslint.aisdlc.mjs'), 'utf8'), fs.readFileSync(TEMPLATE, 'utf8'));
+}
+
+// The released template with this hash, from git history.
+function olderTemplate(hash) {
+  const log = spawnSync('git', ['log', '--format=%H', '--', 'plugins/aisdlc-nodejs/templates/eslint.aisdlc.mjs'], { cwd: REPO, encoding: 'utf8' });
+  for (const commit of log.stdout.split('\n').filter(Boolean)) {
+    const shown = spawnSync('git', ['show', `${commit}:plugins/aisdlc-nodejs/templates/eslint.aisdlc.mjs`], { cwd: REPO, encoding: 'utf8' });
+    if (shown.status === 0 && sha256(shown.stdout) === hash) return shown.stdout;
+  }
+  throw new Error(`No commit has the template with hash ${hash}.`);
+}
+
+function sha256(text) {
+  return createHash('sha256').update(text).digest('hex');
+}
+
+// Every committed version of the template except the current one is in TEMPLATE_HISTORY, so an unedited copy
+// from any release updates instead of counting as modified.
+function verifyTemplateHistory() {
+  const current = sha256(fs.readFileSync(TEMPLATE, 'utf8'));
+  assert.ok(!Object.hasOwn(TEMPLATE_HISTORY.eslint, current), 'TEMPLATE_HISTORY lists the current template, so a current copy would count as outdated');
+  for (const hash of Object.keys(TEMPLATE_HISTORY.eslint)) assert.ok(olderTemplate(hash));
+  const committed = committedTemplateHashes().filter(isNot.bind(null, current));
+  const missing = committed.filter(isMissingFromHistory);
+  assert.deepEqual(missing, [], 'add these hashes of earlier templates to TEMPLATE_HISTORY in scripts/nodejs.mjs');
+}
+
+function committedTemplateHashes() {
+  const log = spawnSync('git', ['log', '--format=%H', '--', 'plugins/aisdlc-nodejs/templates/eslint.aisdlc.mjs'], { cwd: REPO, encoding: 'utf8' });
+  return log.stdout.split('\n').filter(Boolean).map(templateHashAt);
+}
+
+function templateHashAt(commit) {
+  return sha256(spawnSync('git', ['show', `${commit}:plugins/aisdlc-nodejs/templates/eslint.aisdlc.mjs`], { cwd: REPO, encoding: 'utf8' }).stdout);
+}
+
+function isNot(value, other) {
+  return other !== value;
+}
+
+function isMissingFromHistory(hash) {
+  return !Object.hasOwn(TEMPLATE_HISTORY.eslint, hash);
 }
 
 async function verifyRules(t) {
@@ -134,5 +199,6 @@ async function verifyTemplatePassesItsOwnRules(t) {
 
 test('eslint template: core rules only, configurable and extendable', verifyTemplateShape);
 test('eslint template: template eslint copies it once and keeps a modified copy', verifyTemplateCommand);
+test('eslint template: TEMPLATE_HISTORY holds exactly the earlier committed templates', verifyTemplateHistory);
 test('eslint template: rules catch what the standards forbid and allow what they permit', verifyRules);
 test('eslint template: the template passes its own rules', verifyTemplatePassesItsOwnRules);

@@ -92,6 +92,10 @@ Each plugin keeps a changelog: [`aisdlc`](plugins/aisdlc/CHANGELOG.md), [`aisdlc
 
 This only affects a project with more than one stack marker (for example `package.json` and `pyproject.toml`), `stack` set to `auto` in `.aisdlc/config.json`, and exactly one manifest in `.aisdlc/stacks/`. Until now no stack was active there, so `after_task` ran nothing and `coverage check` passed with a note. Now that manifest's stack is active, so its task gate and coverage check run. Run `aisdlc.mjs detect-stack` to see which stack is active. To choose another one, set `stack` in `.aisdlc/config.json`.
 
+### `aisdlc-nodejs` 0.6.x → 0.7.0
+
+Nothing is required. The new security, lifecycle, logging and package rules apply to code written from now on. If you added the ESLint template, re-run `/aisdlc-nodejs:register` to update it: it asks before replacing your copy, and the baseline shows what the new rules report in existing code.
+
 ### `aisdlc-nodejs` 0.5.x → 0.6.0
 
 Nothing is required. To have ESLint enforce the lintable standards, re-run `/aisdlc-nodejs:register`: it offers `eslint.aisdlc.mjs` for your ESLint configuration, and the baseline shows what existing code breaks. Commit the template and configuration change on their own.

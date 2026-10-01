@@ -2,6 +2,20 @@
 
 All notable changes to the `aisdlc-nodejs` plugin. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/).
 
+## [0.7.0] - 2026-09-30
+
+### Added
+- `standards` has Security, Process lifecycle, Logging and Package hygiene sections, with matching done-checklist items:
+  - security: no shell or evaluator on input, parameterized queries, contained paths, prototype-safe merges, `node:crypto` for tokens and `timingSafeEqual` for secrets, bounded input, TLS verification always on, no secrets in logs
+  - lifecycle: one class owns `SIGTERM`/`SIGINT` shutdown, `AbortSignal` with configured deadlines, a fatal handler only at the entry point, no `process.exit()` in library code, `pipeline` for streams
+  - logging: the project's logger (asked for when there is none), structured events, levels by meaning, each error logged once with its cause
+  - packages: `exports` with `types`, dependency placement, committed lockfile with frozen CI installs, no install scripts without approval
+- The ESLint template also reports `eval`, `new Function` and string timers, `exec`/`execSync` from `node:child_process`, and `rejectUnauthorized: false`.
+
+### Changed
+- `standards` draws the line with the planned `dependency-guardian` plugin: these rules decide whether to take on a dependency, and the guardian decides whether a package version is safe. Without it, a package is checked for deprecation and advisories before it is offered.
+- `$NODEJS template eslint` replaces an unedited copy from an earlier release (`inspect` reports it as `outdated`) instead of refusing it as modified. `register` asks first, because the newer rules can fail code that passed before.
+
 ## [0.6.0] - 2026-09-30
 
 ### Added

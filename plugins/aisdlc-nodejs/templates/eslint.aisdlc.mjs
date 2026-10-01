@@ -10,13 +10,24 @@
 // ESLint replaces a rule's options rather than merging them, so a project that sets one of these rules itself adds
 // its own entries through the matching option (for example `restrictedSyntax`) instead of a separate config object.
 //
+// `no-implied-eval` only sees setTimeout and setInterval when the project's configuration declares Node's globals,
+// for example with the globals package (`languageOptions.globals: globals.node`).
+//
 // What this can't check (class modules, constants grouped under constant/, floating promises without type
-// information) stays with review against the aisdlc-nodejs standards skill.
+// information, most of the security, lifecycle and logging rules) stays with review against the aisdlc-nodejs
+// standards skill.
 import { builtinModules } from 'node:module';
 
 const INLINE_FUNCTION_MESSAGE = 'No inline functions: declare an intention-revealing named function or method and pass its reference (aisdlc-nodejs standards).';
 const NODE_PREFIX_MESSAGE = 'Import Node.js built-ins with the node: prefix (aisdlc-nodejs standards).';
 const PROCESS_ENV_MESSAGE = 'Read process.env only in a config/ module, validate it at startup and inject the result (aisdlc-nodejs standards).';
+const SHELL_EXEC_MESSAGE = 'Run child processes with execFile or spawn and an argument array, not through a shell (aisdlc-nodejs standards).';
+const TLS_MESSAGE = 'Never turn off TLS certificate verification (aisdlc-nodejs standards).';
+
+// Security restrictions that need no type information.
+const SECURITY_SELECTORS = [
+  { selector: 'Property[key.name="rejectUnauthorized"][value.value=false]', message: TLS_MESSAGE },
+];
 
 // Where an arrow or anonymous function expression counts as inline: passed to a call or constructor, returned,
 // set as an object property or a member, or returned from an arrow. Declarations, variables and class fields stay
@@ -67,6 +78,7 @@ function toSelectorPattern(name) {
 }
 
 function toImportRestriction(name) {
+  if (name === 'child_process') return { name, message: `${NODE_PREFIX_MESSAGE} ${SHELL_EXEC_MESSAGE}` };
   return { name, message: NODE_PREFIX_MESSAGE };
 }
 
@@ -102,8 +114,8 @@ export default function aisdlcStandards(options = {}) {
       name: 'aisdlc/standards',
       files: settings.files,
       rules: {
-        'no-restricted-syntax': ['error', ...INLINE_FUNCTION_SELECTORS.map(toInlineFunctionRestriction), unprefixedRequireRestriction(builtins), ...settings.restrictedSyntax],
-        'no-restricted-imports': ['error', { paths: [...builtins.map(toImportRestriction), ...settings.restrictedImports] }],
+        'no-restricted-syntax': ['error', ...INLINE_FUNCTION_SELECTORS.map(toInlineFunctionRestriction), unprefixedRequireRestriction(builtins), ...SECURITY_SELECTORS, ...settings.restrictedSyntax],
+        'no-restricted-imports': ['error', { paths: [...builtins.map(toImportRestriction), { name: 'node:child_process', importNames: ['exec', 'execSync'], message: SHELL_EXEC_MESSAGE }, ...settings.restrictedImports] }],
         'no-restricted-properties': ['error', { object: 'process', property: 'env', message: PROCESS_ENV_MESSAGE }, ...settings.restrictedProperties],
         'no-throw-literal': 'error',
         'prefer-promise-reject-errors': 'error',
@@ -111,6 +123,9 @@ export default function aisdlcStandards(options = {}) {
         'no-async-promise-executor': 'error',
         'no-promise-executor-return': 'error',
         'no-console': 'error',
+        'no-eval': 'error',
+        'no-implied-eval': 'error',
+        'no-new-func': 'error',
       },
     },
     {

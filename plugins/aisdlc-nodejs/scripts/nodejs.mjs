@@ -6,6 +6,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 
@@ -14,6 +15,13 @@ const PLUGIN_ROOT = path.resolve(path.dirname(SCRIPT_FILE), '..');
 const MANIFEST_FILE = '.aisdlc/stacks/nodejs.json';
 // Templates `template <name>` copies into the project root.
 const TEMPLATES = { eslint: 'eslint.aisdlc.mjs' };
+// SHA-256 of each earlier release of a template, so an unedited copy from an older release counts as outdated
+// rather than modified. Add the old hash whenever a template changes.
+export const TEMPLATE_HISTORY = {
+  eslint: {
+    '5589d066fa55ae77feb5f68a6cac1c708274fe4b25cb1a29c751ca8835f133a7': '0.6.0',
+  },
+};
 
 // Raise this with every release that changes what a manifest must contain. Older manifests must be re-registered;
 // newer ones within the same plugin version line stay valid, so a non-breaking release asks nothing of projects.
@@ -484,21 +492,28 @@ export function checkManifest(root, pluginVersion = pluginManifest().version) {
 
 // ---------- templates ----------
 
-// 'missing', 'current', or 'modified' when the project's copy differs from this plugin's template.
+function sha256(text) {
+  return createHash('sha256').update(text).digest('hex');
+}
+
+// 'missing', 'current', 'outdated' (an unedited copy from an earlier release), or 'modified' (edited in the project).
 function templateStatus(root, name) {
   const target = path.join(root, TEMPLATES[name]);
   if (!fs.existsSync(target)) return 'missing';
-  const source = fs.readFileSync(path.join(PLUGIN_ROOT, 'templates', TEMPLATES[name]), 'utf8');
-  return fs.readFileSync(target, 'utf8') === source ? 'current' : 'modified';
+  const copy = fs.readFileSync(target, 'utf8');
+  if (copy === fs.readFileSync(path.join(PLUGIN_ROOT, 'templates', TEMPLATES[name]), 'utf8')) return 'current';
+  return Object.hasOwn(TEMPLATE_HISTORY[name], sha256(copy)) ? 'outdated' : 'modified';
 }
+
+const TEMPLATE_RESULTS = { missing: 'created', outdated: 'updated', current: 'unchanged' };
 
 function copyTemplate(root, name) {
   if (!Object.hasOwn(TEMPLATES, name)) fail(`Usage: template ${Object.keys(TEMPLATES).join('|')}`);
   const file = TEMPLATES[name];
   const status = templateStatus(root, name);
   if (status === 'modified') fail(`${file} differs from this plugin's template (${path.join(PLUGIN_ROOT, 'templates', file)}). Show the user the difference; to replace it, delete ${file} with their approval and run this again.`);
-  if (status === 'missing') fs.copyFileSync(path.join(PLUGIN_ROOT, 'templates', file), path.join(root, file));
-  out({ template: name, file, status: status === 'missing' ? 'created' : 'unchanged' });
+  if (status !== 'current') fs.copyFileSync(path.join(PLUGIN_ROOT, 'templates', file), path.join(root, file));
+  out({ template: name, file, status: TEMPLATE_RESULTS[status] });
 }
 
 // ---------- baseline ----------

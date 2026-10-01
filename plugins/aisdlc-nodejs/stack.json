@@ -1,6 +1,6 @@
 {
   "name": "nodejs",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "detect": ["package.json"],
   "standards_skill": "aisdlc-nodejs:standards",
   "runtime": {

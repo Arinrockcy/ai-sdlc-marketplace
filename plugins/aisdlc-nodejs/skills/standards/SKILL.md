@@ -1,6 +1,6 @@
 ---
 name: standards
-description: Enforce the aisdlc Node.js coding standard for JavaScript or optional TypeScript work: Node.js 24+, ES modules by default, class-oriented modules, named functions, purpose-grouped constants, external configuration, editor-only declaration files, dependency approval, ESLint, and coverage-gated tests. Loaded by /aisdlc:implement when the project stack is nodejs; also usable directly when writing Node.js code in an aisdlc project.
+description: Enforce the aisdlc Node.js coding standard for JavaScript or optional TypeScript work: Node.js 24+, ES modules by default, class-oriented modules, named functions, purpose-grouped constants, external configuration, editor-only declaration files, security, process lifecycle, logging, package hygiene, dependency approval, ESLint, and coverage-gated tests. Loaded by /aisdlc:implement when the project stack is nodejs; also usable directly when writing Node.js code in an aisdlc project.
 ---
 
 # Node.js standards (aisdlc)
@@ -49,20 +49,57 @@ If these conflict (for example, a `type` that disagrees with `runtime.module_typ
 - Validate configuration once at startup and inject the resulting configuration into class modules. Never read `process.env` throughout business logic, commit secrets, or mix configuration access with domain behavior.
 - A business invariant may be a named constant rather than configuration when operators must not change it. Make that distinction explicit in its name, location, and tests.
 
+## Security
+
+- Run child processes with `execFile` or `spawn` and an argument array. Never pass input to `exec`, `execSync` or `shell: true`, where the shell interprets it.
+- Never evaluate code built at runtime: no `eval`, `new Function`, string arguments to `setTimeout` or `setInterval`, or `node:vm` on untrusted input (`vm` is not a security boundary).
+- Build queries with parameters or the query builder's bindings. Never concatenate input into SQL, shell commands, NoSQL filters or regular expressions.
+- Resolve a path that comes from input against a fixed base directory, and reject it when the result leaves that directory. Compare against the base plus `path.sep`, not a bare prefix.
+- When copying or merging objects from input, skip `__proto__`, `constructor` and `prototype` keys. Key lookups on input with a `Map` or `Object.create(null)`, not a plain object.
+- Generate tokens, IDs and secrets with `node:crypto` (`randomUUID`, `randomBytes`), never `Math.random`. Compare secrets and signatures with `crypto.timingSafeEqual`.
+- Bound what input can cost: request and payload sizes, collection lengths, and regular expressions that can't backtrack catastrophically on untrusted text. Limits come from configuration.
+- Never turn off TLS verification (`rejectUnauthorized: false`, `NODE_TLS_REJECT_UNAUTHORIZED=0`), not even for tests. Use test certificates instead.
+- Never put secrets, tokens, credentials or full personal data in logs, errors or exceptions sent to clients.
+
+## Process lifecycle
+
+- A long-running process (server, worker, queue consumer) handles `SIGTERM` and `SIGINT`: it stops taking new work, finishes or cancels in-flight work within a configured timeout, closes servers, connections and timers, then exits. Keep this in one lifecycle class that owns the shutdown order, not in `process.on` calls spread across modules.
+- Async operations that do I/O or wait accept an `AbortSignal` and pass it on to `fetch`, `node:timers/promises`, streams and clients. Set deadlines with `AbortSignal.timeout`, using a timeout from configuration.
+- Handle `unhandledRejection` and `uncaughtException` once, at the entry point: log the error with its context and exit non-zero so the supervisor restarts the process. Never use them to keep running.
+- Don't call `process.exit()` in library or business code. Return or throw to the entry point, and set `process.exitCode` there.
+- Release resources in `finally` (or the project's cleanup helper). Connect streams with `pipeline` from `node:stream/promises`, so errors and cleanup propagate.
+
+## Logging
+
+- Log through the project's logger. If the project has none and the task needs logging, ask the user which to use: the dependency rules below apply.
+- Log structured events: a stable message plus fields (IDs, counts, durations, outcome), not values interpolated into the text.
+- Use levels by meaning: `error` for failures someone must act on, `warn` for degraded but handled conditions, `info` for lifecycle and business events, `debug` for diagnostics. The level comes from configuration, and `debug` is off by default.
+- Log an error once, where it is handled, with its cause chain (`new Error(message, { cause })`). Don't log and rethrow at every layer.
+- `console` is for a CLI's intended output only, never for logging in application code.
+
 ## ESLint
 
 - ESLint is mandatory for JavaScript and TypeScript maintained by the task. Follow the repository's ESLint configuration, extending it when needed to enforce these standards.
-- When the project has `eslint.aisdlc.mjs` in its ESLint configuration (added by `/aisdlc-nodejs:register`), it reports the lintable part of these standards as errors: inline functions, `process.env` outside `config/`, built-ins without `node:`, CommonJS globals in ES modules, thrown literals, empty `catch` blocks and `console` calls. Fix the code, not the template. Changing that file or its options is a project-wide exception and needs the user's approval.
+- When the project has `eslint.aisdlc.mjs` in its ESLint configuration (added by `/aisdlc-nodejs:register`), it reports the lintable part of these standards as errors: inline functions, `process.env` outside `config/`, built-ins without `node:`, CommonJS globals in ES modules, thrown literals, empty `catch` blocks, `console` calls, `eval` and its equivalents, `exec` from `node:child_process`, and `rejectUnauthorized: false`. Fix the code, not the template. Changing that file or its options is a project-wide exception and needs the user's approval.
 - Set ESLint's `languageOptions.sourceType` to match the module system. Run ESLint over source, tests, and configuration (and over declarations only in TypeScript projects). The gate passes with zero errors. Do not use warning-only rules for required policies, broad ignore patterns, blanket disable comments, or `--no-eslintrc` to make it pass.
 - A narrow disable requires a code comment explaining the concrete incompatibility. Ask the user before adding or weakening a project-wide exception.
 
 ## Third-party dependencies
 
+- These rules decide whether the project takes on a dependency: the need, the choice and its ADR. The `dependency-guardian` plugin, when installed, decides whether a package version is safe to install, and blocks vulnerable, deprecated or denied packages. Run its checks on an approved install, and never work around a block: a waiver is the user's decision. Without it, check before offering a package that it isn't deprecated (`npm view <package> deprecated`) and has no open security advisory.
 - Before adding a dependency, check whether the standard library or an existing dependency already covers it.
 - Before installing or replacing a third-party library, ask the user to choose. Offer concise options: the best-fitting established library and what it handles, any already-installed viable library, a user-named alternative, or a custom implementation. State maintenance, security, bundle/runtime, typing, and performance trade-offs that matter to the task. Respect the user's selection.
 - Never install a package merely by running an `npx`, `npm exec`, or equivalent command that can download it implicitly. After approval, add it with the project's package manager so the lockfile updates. Never edit lockfiles by hand.
 - A new runtime dependency that changes the architecture needs an ADR. If the task has none, stop and tell the user to run `/aisdlc:adr`.
 - If the user chooses a custom replacement for a library, isolate it behind a class/module boundary and give that replacement 100% unit coverage for branches, functions, lines, and statements. Cover invalid input, dependency failures, timeouts, limits, and recovery behavior. When performance motivates the custom version, add a deterministic benchmark or performance regression test with a documented baseline; optimize only from measured evidence.
+
+## Package hygiene
+
+- `package.json` `exports` lists the public entry points, with a `types` condition pointing at each declaration file. Don't expose internal files. A published package lists what it ships in `files`.
+- Runtime needs go in `dependencies`, tools in `devDependencies`. Remove a dependency in the task that removes its last use.
+- Commit the lockfile. CI installs from it without changing it: `npm ci`, `pnpm install --frozen-lockfile`, `yarn install --immutable` or `bun install --frozen-lockfile`.
+- Don't add install lifecycle scripts (`preinstall`, `install`, `postinstall`) without the user's approval.
+- Keep the `lint` and `test:coverage` script names: the `after_task` hook runs them.
 
 ## Tests
 
@@ -89,5 +126,8 @@ If these conflict (for example, a `type` that disagrees with `runtime.module_typ
 - [ ] Negative, boundary, cleanup, and relevant performance cases are covered
 - [ ] Static constants are grouped by purpose under the nearest `constant/`; deployable configuration is validated in `config/`
 - [ ] Stateful/dependency-owning behavior uses focused class modules and no new inline functions remain
-- [ ] No debug logging or commented-out code is left behind
+- [ ] Input never reaches a shell, an evaluator, a query string or a file path unchecked; no secrets in logs; TLS verification stays on
+- [ ] Long-running processes shut down on `SIGTERM`/`SIGINT`, and I/O accepts an `AbortSignal` with a configured deadline
+- [ ] Logging goes through the project's logger, with structured fields and levels; no debug logging or commented-out code is left behind
+- [ ] `exports`, dependencies and the lockfile match the code; no new install scripts without approval
 - [ ] The public API or config changes are documented where the project documents them (README, JSDoc)

@@ -249,6 +249,7 @@ Acceptance requires:
 
 ## Assumptions and Boundaries
 
+- Ownership with `aisdlc-nodejs`: its standards decide whether a project takes on a dependency (the need, the user's choice, an ADR for an architectural one). The guardian decides whether a given package version is safe to install. The standards already tell the agent to run the guardian's checks on an approved install, and never to work around a block.
 - V1 supports npm projects and npm workspaces only; pnpm, Yarn, Bun, Maven, Gradle, license compliance, typosquatting detection, and external vulnerability services are deferred.
 - V1 ships Claude packaging only. The scanner, JSON contract, and skill wording remain reusable for later Codex and other agent adapters.
 - Registry access is required for complete strict scans. Registry or audit failures fail closed in CI and pre-install checks; an explicit offline scan may run local catalog checks but cannot report a strict pass.
