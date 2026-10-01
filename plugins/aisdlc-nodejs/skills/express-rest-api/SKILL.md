@@ -5,9 +5,9 @@ description: Design, implement, review, or secure production Express REST APIs i
 
 # Express REST API
 
-Skills are named `<plugin>:<skill>` (`/aisdlc:govern`, `aisdlc-nodejs:standards`); in an agent without plugin namespaces, such as GitHub Copilot, use only the `<skill>` part, both to load a skill and when you tell the user what to run (`/aisdlc:govern` is `/govern`, `aisdlc-nodejs:standards` is `standards`).
+Skills are named `<plugin>:<skill>` (`/aisdlc:govern`, `aisdlc-nodejs:nodejs-standards`); in an agent without plugin namespaces, such as GitHub Copilot, use only the `<skill>` part, both to load a skill and when you tell the user what to run (`/aisdlc:govern` is `/govern`, `aisdlc-nodejs:nodejs-standards` is `nodejs-standards`).
 
-Apply [`aisdlc-nodejs:standards`](../standards/SKILL.md) first. This skill adds Express and HTTP-specific guidance; it does not replace the plugin's runtime, structure, dependency-approval, lint, test, or coverage rules. Preserve a project's established contract and authentication system unless the task explicitly changes them.
+Apply [`aisdlc-nodejs:nodejs-standards`](../nodejs-standards/SKILL.md) first. This skill adds Express and HTTP-specific guidance; it does not replace the plugin's runtime, structure, dependency-approval, lint, test, or coverage rules. Preserve a project's established contract and authentication system unless the task explicitly changes them.
 
 ## Start from evidence
 
@@ -46,7 +46,7 @@ Read every reference that applies to the task. Ordinary endpoint work often need
 - Confirm Express behavior from the installed major version. Express 5 forwards rejected async handlers to error middleware; Express 4 requires an explicit compatible wrapper or `next(error)` path.
 - Order middleware deliberately: request context and safe logging; proxy/security/CORS policy; bounded parsers; authentication; route-specific validation and authorization; routes; not-found handling; final error handling. Raw-body signature verification is a special case and must run before a parser consumes the bytes.
 - Configure `trust proxy` from the actual proxy topology. Do not set it broadly just to make secure cookies or client IPs appear to work.
-- Do not add auth, validation, CORS, session, rate-limit, or security-header packages without the dependency choice required by `aisdlc-nodejs:standards`. Do not implement cryptography or token parsing from scratch.
+- Do not add auth, validation, CORS, session, rate-limit, or security-header packages without the dependency choice required by `aisdlc-nodejs:nodejs-standards`. Do not implement cryptography or token parsing from scratch.
 - Do not mutate state from `GET` or `HEAD`, put credentials in URLs, use CORS as authorization, trust decoded-but-unverified JWT claims, accept an ID or refresh token as an API access token, or accept a tenant/user identifier from input as proof of identity.
 - Keep credentials and raw tokens out of source, URLs, error responses, telemetry, and logs. Redact authorization, cookie, API-key, reset-token, and secret fields recursively.
 
@@ -61,4 +61,4 @@ Add or update tests proportional to the risk. At minimum cover:
 - duplicate/retried writes, concurrent updates, pagination boundaries, and downstream failures when applicable;
 - redacted errors/logging, rate-limit behavior, proxy assumptions, CORS/CSRF behavior, and cleanup of open resources where relevant.
 
-Use non-mocked HTTP tests against the assembled Express app for middleware order and end-to-end policy behavior. Keep sockets, clocks, randomness, identity-provider calls, and external services deterministic or locally faked. Then run the repository's lint and coverage gates from `aisdlc-nodejs:standards`.
+Use non-mocked HTTP tests against the assembled Express app for middleware order and end-to-end policy behavior. Keep sockets, clocks, randomness, identity-provider calls, and external services deterministic or locally faked. Then run the repository's lint and coverage gates from `aisdlc-nodejs:nodejs-standards`.

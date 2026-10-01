@@ -8,7 +8,7 @@ A Claude Code plugin marketplace (`.claude-plugin/marketplace.json`) that ships 
 - `plugins/aisdlc`: the core plugin
 - `plugins/aisdlc-nodejs`: a reference stack plugin
 
-Skills must stay agent-neutral markdown, because GitHub Copilot loads the same plugins, and Codex and Cursor adapters are planned. Put Claude-specific details only in path variables (`${CLAUDE_PLUGIN_ROOT}`, `$ARGUMENTS`). Copilot leaves those variables as written (it shows the model the skill's folder instead) and doesn't namespace skills (`/govern`, not `/aisdlc:govern`; its skill tool loads `standards`, not `aisdlc-nodejs:standards`), so:
+Skills must stay agent-neutral markdown, because GitHub Copilot loads the same plugins, and Codex and Cursor adapters are planned. Put Claude-specific details only in path variables (`${CLAUDE_PLUGIN_ROOT}`, `$ARGUMENTS`). Copilot leaves those variables as written (it shows the model the skill's folder instead) and doesn't namespace skills (`/govern`, not `/aisdlc:govern`; its skill tool loads `nodejs-standards`, not `aisdlc-nodejs:nodejs-standards`), so:
 - A skill that uses one of them, a `plugin:skill` name, or the `standards_skill` from `detect-stack` keeps the preamble sentence that says what it stands for. `tests/skills.test.mjs` checks this.
 - A step that hands work to a sub-agent passes the resolved `$AISDLC` command: the sub-agent doesn't see the skill's folder.
 - Frontmatter must parse as strict YAML: quote a value that contains `: `. Claude Code accepts it unquoted, but Copilot skips the skill.
@@ -76,8 +76,10 @@ Skills call the script (written `$AISDLC` in the skill files) and should never h
 
 **Stack plugins** follow `plugins/aisdlc/docs/stack-plugin-contract.md`:
 - a `stack.json` manifest, including `quality_gate.coverage_report`, the report its test command writes on every run
-- a `register` skill that copies the manifest into the project's `.aisdlc/stacks/`
-- a `standards` skill that `/aisdlc:implement` loads
+- a `<stack>-register` skill that copies the manifest into the project's `.aisdlc/stacks/`
+- a `<stack>-standards` skill that `/aisdlc:implement` loads
+
+Both names carry the stack, because Copilot keeps only one of two plugin skills with the same name.
 - optionally, a zero-dependency script for the plugin's deterministic steps, as `aisdlc-nodejs` has in `scripts/nodejs.mjs` (written `$NODEJS` in its skills). It reads the plugin's own `stack.json` and project-local files, never the core's. Its `OLDEST_COMPATIBLE_MANIFEST` names the oldest installed manifest the plugin still accepts: raise it with any release that changes what the manifest must contain. Its `TEMPLATE_HISTORY` holds the hash of every earlier committed template, so unedited copies update; a test fails until a changed template's old hash is added.
 
 The core script never reads other plugins' directories, only project-local files. To add stack detection, edit `STACK_MARKERS`.

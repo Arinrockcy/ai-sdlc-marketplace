@@ -168,7 +168,7 @@ function verifyManifestCheck() {
   assert.deepEqual([run(dir, ['manifest', 'check']).code, run(dir, ['manifest', 'check']).json.current], [0, true]);
 
   const versions = [
-    ['0.3.0', 1, /needs one from 0\.4\.0 or later/],
+    ['0.3.0', 1, new RegExp(`needs one from ${OLDEST_COMPATIBLE_MANIFEST.replaceAll('.', '\\.')} or later`)],
     ['99.0.0', 1, /newer than this plugin/],
     ['not-a-version', 1, /no valid version/],
   ];

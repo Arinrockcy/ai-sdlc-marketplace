@@ -2,6 +2,14 @@
 
 All notable changes to the `aisdlc` plugin. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/). Until 1.0.0, a minor version may include breaking changes; each one is listed under **Breaking** with its upgrade step.
 
+## [0.10.0] - 2026-10-01
+
+### Breaking
+- Stack plugins name their skills after their stack: `/aisdlc:init` now looks for `aisdlc-<stack>:<stack>-register` instead of `aisdlc-<stack>:register`, and the contract names the standards skill `<stack>-standards`. GitHub Copilot doesn't namespace plugin skills and keeps only one of two with the same name, so two stack plugins that both had `register` and `standards` lost one plugin's skills without a warning. A third-party stack plugin renames its skills. See [Upgrading to 0.10.0](../../README.md#upgrading).
+
+### Changed
+- `/aisdlc:implement` stops and tells the user to re-run the stack's register skill when `standards_skill` names a skill that isn't installed, as in a manifest from an older stack plugin release.
+
 ## [0.9.2] - 2026-10-01
 
 ### Fixed

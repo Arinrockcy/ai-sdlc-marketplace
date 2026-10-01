@@ -27,7 +27,7 @@ copilot plugin install aisdlc-nodejs@aisdlc-marketplace   # optional, per stack
 
 VS Code picks up plugins that Copilot CLI installed. To install them from VS Code instead, make sure `chat.plugins.enabled` is on, and add the repository to the `chat.plugins.marketplaces` setting, as `owner/repo`, a git URL, or a `file:///` URI for a local clone (a plain path isn't accepted). Then search `@agentPlugins` in the Extensions view and install both plugins.
 
-Copilot doesn't namespace plugin skills, so drop the prefix from the commands below: `/aisdlc:govern G-001` is `/govern G-001`, and `/aisdlc-nodejs:register` is `/register`. `/init` is Copilot's own command, so start with a prompt such as `Use the aisdlc init skill` instead. A project skill of the same name (for example in `.github/skills/`) hides the plugin's, and when two installed plugins have skills of the same name, Copilot loads only one of them without a warning.
+Copilot doesn't namespace plugin skills, so drop the prefix from the commands below: `/aisdlc:govern G-001` is `/govern G-001`, and `/aisdlc-nodejs:nodejs-register` is `/nodejs-register`. `/init` is Copilot's own command, so start with a prompt such as `Use the aisdlc init skill` instead. A project skill of the same name (for example in `.github/skills/`) hides the plugin's, and when two installed plugins have skills of the same name, Copilot loads only one of them without a warning.
 
 The Node.js plugin also provides `/aisdlc-nodejs:express-rest-api` for designing, implementing, or reviewing Express endpoints, authentication, authorization, JWTs, sessions/tokens, and production API security.
 
@@ -112,6 +112,20 @@ See [`plugins/aisdlc/docs/stack-plugin-contract.md`](plugins/aisdlc/docs/stack-p
 
 Each plugin keeps a changelog: [`aisdlc`](plugins/aisdlc/CHANGELOG.md), [`aisdlc-nodejs`](plugins/aisdlc-nodejs/CHANGELOG.md). Breaking changes are listed there with their upgrade step.
 
+### 0.9.x → 0.10.0 (both plugins)
+
+Stack plugin skills are now named after their stack, because GitHub Copilot drops one of two plugin skills that share a name:
+
+| Before | Now |
+|--------|-----|
+| `/aisdlc-nodejs:register` | `/aisdlc-nodejs:nodejs-register` |
+| `aisdlc-nodejs:standards` | `aisdlc-nodejs:nodejs-standards` |
+
+1. Update both plugins together. `/aisdlc:init` 0.10.0 looks for `<stack>-register`, so it doesn't find an older stack plugin's `register`.
+2. Re-run `/aisdlc-nodejs:nodejs-register` in each project. It rewrites `.aisdlc/stacks/nodejs.json` with the new `standards_skill`. Until then `manifest check` fails, and `/aisdlc:implement` stops because the old standards skill name isn't installed. Commit the manifest on its own, before a goal starts.
+
+A third-party stack plugin renames its skills to `<stack>-register` and `<stack>-standards` and its `standards_skill` to match (see the [stack plugin contract](plugins/aisdlc/docs/stack-plugin-contract.md)).
+
 ### 0.8.x → 0.9.0 (`aisdlc`)
 
 This only affects a project with more than one stack marker (for example `package.json` and `pyproject.toml`), `stack` set to `auto` in `.aisdlc/config.json`, and exactly one manifest in `.aisdlc/stacks/`. Until now no stack was active there, so `after_task` ran nothing and `coverage check` passed with a note. Now that manifest's stack is active, so its task gate and coverage check run. Run `aisdlc.mjs detect-stack` to see which stack is active. To choose another one, set `stack` in `.aisdlc/config.json`.
@@ -122,11 +136,11 @@ Nothing is required for existing projects. Sonar and vulnerability scans are opt
 
 ### `aisdlc-nodejs` 0.6.x → 0.7.0
 
-Nothing is required. The new security, lifecycle, logging and package rules apply to code written from now on. If you added the ESLint template, re-run `/aisdlc-nodejs:register` to update it: it asks before replacing your copy, and the baseline shows what the new rules report in existing code.
+Nothing is required. The new security, lifecycle, logging and package rules apply to code written from now on. If you added the ESLint template, re-run `/aisdlc-nodejs:nodejs-register` to update it: it asks before replacing your copy, and the baseline shows what the new rules report in existing code.
 
 ### `aisdlc-nodejs` 0.5.x → 0.6.0
 
-Nothing is required. To have ESLint enforce the lintable standards, re-run `/aisdlc-nodejs:register`: it offers `eslint.aisdlc.mjs` for your ESLint configuration, and the baseline shows what existing code breaks. Commit the template and configuration change on their own.
+Nothing is required. To have ESLint enforce the lintable standards, re-run `/aisdlc-nodejs:nodejs-register`: it offers `eslint.aisdlc.mjs` for your ESLint configuration, and the baseline shows what existing code breaks. Commit the template and configuration change on their own.
 
 ### `aisdlc-nodejs` 0.4.x → 0.5.0
 
@@ -134,18 +148,18 @@ Nothing is required: manifests from 0.4.0 on stay valid. From now on, `/aisdlc:i
 
 ### `aisdlc-nodejs` 0.4.0 → 0.4.1
 
-Nothing is required. Re-run `/aisdlc-nodejs:register` to pick up the fixes: coverage then counts source files that no test loads (Jest's `collectCoverageFrom`), so the percentage can drop. A node:test setup gets a `test:coverage` command that creates the report folder on a fresh clone and fails below the thresholds. Commit the tooling changes on their own.
+Nothing is required. Re-run `/aisdlc-nodejs:nodejs-register` to pick up the fixes: coverage then counts source files that no test loads (Jest's `collectCoverageFrom`), so the percentage can drop. A node:test setup gets a `test:coverage` command that creates the report folder on a fresh clone and fails below the thresholds. Commit the tooling changes on their own.
 
 ### 0.7.x → 0.8.0 (`aisdlc`)
 
 `after_goal` now checks the stack's coverage report and pushes the goal branch before a goal completes. Before the next goal finishes:
 
-1. **Re-register the stack** (for Node.js, `/aisdlc-nodejs:register`, see below), so `.aisdlc/stacks/<stack>.json` declares `quality_gate.coverage_report`. Without it, the check fails. A project without a stack manifest needs nothing: the check passes with a note.
+1. **Re-register the stack** (for Node.js, `/aisdlc-nodejs:nodejs-register`, see below), so `.aisdlc/stacks/<stack>.json` declares `quality_gate.coverage_report`. Without it, the check fails. A project without a stack manifest needs nothing: the check passes with a note.
 2. **Decide about the push.** It pushes the goal's branch to `origin`, never the base branch: a goal built on the base branch fails the push, and `/aisdlc:implement` offers to finish anyway. To keep the old behavior, set `"after_goal": null` under `hooks` in `.aisdlc/config.json`. To keep only the check, set `"after_goal": {"run": "{aisdlc} coverage check {goal_id}"}`. Commit the config.
 
 ### `aisdlc-nodejs` 0.3.0 → 0.4.0
 
-Re-run `/aisdlc-nodejs:register`. It adds the `json-summary` reporter to Jest's `coverageReporters` (or LCOV for node:test) once you approve, checks that `test:coverage` writes the report, records it as `quality_gate.coverage_report` in `.aisdlc/stacks/nodejs.json`, and offers to ignore the coverage directory. Until then, `/aisdlc:implement` stops at the standards step. Commit the manifest and the tooling changes on their own.
+Re-run `/aisdlc-nodejs:nodejs-register`. It adds the `json-summary` reporter to Jest's `coverageReporters` (or LCOV for node:test) once you approve, checks that `test:coverage` writes the report, records it as `quality_gate.coverage_report` in `.aisdlc/stacks/nodejs.json`, and offers to ignore the coverage directory. Until then, `/aisdlc:implement` stops at the standards step. Commit the manifest and the tooling changes on their own.
 
 ### 0.6.x → 0.7.0 (`aisdlc`)
 
@@ -162,7 +176,7 @@ Goal files need no edits. The new `## Standards deviations` section is optional,
 The Node.js stack now requires Node.js 24 or later and defaults to ES modules.
 
 1. Upgrade to Node.js 24+ locally and in CI.
-2. Re-run `/aisdlc-nodejs:register`. It sets `engines.node` to `>=24` once you approve, asks whether to use ES modules or keep CommonJS, and writes the choice to `runtime.module_type` in `.aisdlc/stacks/nodejs.json`. Until then, `/aisdlc:implement` stops at the standards step, because the manifest has no `runtime`.
+2. Re-run `/aisdlc-nodejs:nodejs-register`. It sets `engines.node` to `>=24` once you approve, asks whether to use ES modules or keep CommonJS, and writes the choice to `runtime.module_type` in `.aisdlc/stacks/nodejs.json`. Until then, `/aisdlc:implement` stops at the standards step, because the manifest has no `runtime`.
 3. Keeping CommonJS is fine: pick it when asked. Moving an existing CommonJS codebase to ES modules is offered as its own goal.
 4. Commit the manifest, `package.json` and any version pin on their own.
 
@@ -170,13 +184,13 @@ In a JavaScript project, TypeScript tooling that was added only to check `.d.ts`
 
 ### `aisdlc-nodejs` 0.2.0 → 0.2.1
 
-Nothing is required. To bring an existing manifest in line with the tools you chose, re-run `/aisdlc-nodejs:register`: it writes the chosen test runner and enforced thresholds into `.aisdlc/stacks/nodejs.json`, and checks that the gate passes on the current code. Commit the manifest on its own.
+Nothing is required. To bring an existing manifest in line with the tools you chose, re-run `/aisdlc-nodejs:nodejs-register`: it writes the chosen test runner and enforced thresholds into `.aisdlc/stacks/nodejs.json`, and checks that the gate passes on the current code. Commit the manifest on its own.
 
 ### `aisdlc-nodejs` 0.1.0 → 0.2.0
 
 The Node.js after-task gate now requires two package scripts: `lint` and `test:coverage`. The latter must enforce at least 80% coverage for branches, functions, lines and statements (Jest is the default).
 
-1. Re-run `/aisdlc-nodejs:register` and select the lint/test tooling. It will ask before adding or changing third-party packages.
+1. Re-run `/aisdlc-nodejs:nodejs-register` and select the lint/test tooling. It will ask before adding or changing third-party packages.
 2. Add or update the two scripts and their configuration as prompted. Existing stricter coverage thresholds should stay unchanged.
 3. Commit the updated `.aisdlc/stacks/nodejs.json`, `package.json`, lockfile and tool configuration.
 

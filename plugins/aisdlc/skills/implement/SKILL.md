@@ -6,7 +6,7 @@ argument-hint: "<G-id> [--all]"
 
 # aisdlc: implement
 
-`$AISDLC` below means `node "${CLAUDE_PLUGIN_ROOT}/scripts/aisdlc.mjs"`. Run it from the project root. Where a path in this skill still starts with an unexpanded variable, that variable stands for this plugin's folder: two levels above the folder that holds this SKILL.md. Skills are named `<plugin>:<skill>` (`/aisdlc:govern`, `aisdlc-nodejs:standards`); in an agent without plugin namespaces, such as GitHub Copilot, use only the `<skill>` part, both to load a skill and when you tell the user what to run (`/aisdlc:govern` is `/govern`, `aisdlc-nodejs:standards` is `standards`).
+`$AISDLC` below means `node "${CLAUDE_PLUGIN_ROOT}/scripts/aisdlc.mjs"`. Run it from the project root. Where a path in this skill still starts with an unexpanded variable, that variable stands for this plugin's folder: two levels above the folder that holds this SKILL.md. Skills are named `<plugin>:<skill>` (`/aisdlc:govern`, `aisdlc-nodejs:nodejs-standards`); in an agent without plugin namespaces, such as GitHub Copilot, use only the `<skill>` part, both to load a skill and when you tell the user what to run (`/aisdlc:govern` is `/govern`, `aisdlc-nodejs:nodejs-standards` is `nodejs-standards`).
 
 **Don't assume.** If something this step needs is unclear, missing or under-documented, and neither the code nor the `.aisdlc/` files answer it, ask the user. Never fill a gap with a guess or a silent default. This holds in `--all` mode too: stop and ask.
 
@@ -41,7 +41,7 @@ Once `pre_implement` has run, every way this run ends (a finished task in single
       Save the result with `$AISDLC goal set <G-id> branch <name>`. Never force a branch the user didn't choose.
    4. **Start.** Run `$AISDLC state move <G-id> in-progress`.
 5. **Interrupted task.** If `progress.in_progress` from `goal show` is not empty, an earlier run stopped mid-task. For each such task, ask the user whether to resume it (continue from the current state of the code and go to step 2.3 for it) or reset it with `$AISDLC task set <G-id> <T-id> pending`.
-6. **Stack standards.** Run `$AISDLC detect-stack`. If `standards_skill` is set (for example `aisdlc-nodejs:standards`), invoke that skill now and follow it for all code in this run, except where the goal's `## Standards deviations` records a departure the user chose. If it isn't set, follow the conventions already in the repo.
+6. **Stack standards.** Run `$AISDLC detect-stack`. If `standards_skill` is set (for example `aisdlc-nodejs:nodejs-standards`), invoke that skill now and follow it for all code in this run, except where the goal's `## Standards deviations` records a departure the user chose. If no skill of that name is installed, the manifest may come from an older stack plugin release: tell the user to install the stack plugin or re-run its register skill, and stop. If it isn't set, follow the conventions already in the repo.
 7. **Mode.** Run the whole goal if `$ARGUMENTS` contains `--all` or `$AISDLC config get implement.mode` returns `"auto"`. Otherwise run **one task**, then stop.
 
 ## 2. Task loop

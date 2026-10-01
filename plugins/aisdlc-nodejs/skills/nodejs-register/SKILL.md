@@ -1,11 +1,11 @@
 ---
-name: register
-description: Register the Node.js stack with the aisdlc workflow in the current project. Checks for Node.js 24+, settles the module system (ES modules unless the user overrides), installs .aisdlc/stacks/nodejs.json, and configures the required ESLint and coverage quality gate for the project's package manager, including the coverage report that the after-goal check reads. Invoked by /aisdlc:init when the stack is nodejs, or directly with /aisdlc-nodejs:register.
+name: nodejs-register
+description: Register the Node.js stack with the aisdlc workflow in the current project. Checks for Node.js 24+, settles the module system (ES modules unless the user overrides), installs .aisdlc/stacks/nodejs.json, and configures the required ESLint and coverage quality gate for the project's package manager, including the coverage report that the after-goal check reads. Invoked by /aisdlc:init when the stack is nodejs, or directly with /aisdlc-nodejs:nodejs-register.
 ---
 
-# aisdlc-nodejs: register
+# aisdlc-nodejs: nodejs-register
 
-`$NODEJS` below means `node "${CLAUDE_PLUGIN_ROOT}/scripts/nodejs.mjs"`. Run it from the project root. It prints JSON. Where a path in this skill still starts with an unexpanded variable, that variable stands for this plugin's folder: two levels above the folder that holds this SKILL.md. Skills are named `<plugin>:<skill>` (`/aisdlc:govern`, `aisdlc-nodejs:standards`); in an agent without plugin namespaces, such as GitHub Copilot, use only the `<skill>` part, both to load a skill and when you tell the user what to run (`/aisdlc:govern` is `/govern`, `aisdlc-nodejs:standards` is `standards`).
+`$NODEJS` below means `node "${CLAUDE_PLUGIN_ROOT}/scripts/nodejs.mjs"`. Run it from the project root. It prints JSON. Where a path in this skill still starts with an unexpanded variable, that variable stands for this plugin's folder: two levels above the folder that holds this SKILL.md. Skills are named `<plugin>:<skill>` (`/aisdlc:govern`, `aisdlc-nodejs:nodejs-standards`); in an agent without plugin namespaces, such as GitHub Copilot, use only the `<skill>` part, both to load a skill and when you tell the user what to run (`/aisdlc:govern` is `/govern`, `aisdlc-nodejs:nodejs-standards` is `nodejs-standards`).
 
 Prerequisite: `.aisdlc/` must exist. If it doesn't, tell the user to run `/aisdlc:init` first and stop.
 

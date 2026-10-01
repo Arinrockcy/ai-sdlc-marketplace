@@ -2,6 +2,14 @@
 
 All notable changes to the `aisdlc-nodejs` plugin. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/).
 
+## [0.10.0] - 2026-10-01
+
+### Breaking
+- The `register` skill is now `nodejs-register` (`/aisdlc-nodejs:nodejs-register`), and `standards` is `nodejs-standards`. The manifest's `standards_skill` is `aisdlc-nodejs:nodejs-standards`, so `manifest check` now needs a manifest from 0.10.0 or later. GitHub Copilot doesn't namespace plugin skills and keeps only one of two with the same name, so with a second stack plugin installed one plugin's `register` and `standards` disappeared. See [Upgrading to 0.10.0](../../README.md#upgrading).
+
+### Changed
+- The ESLint template's header names `/aisdlc-nodejs:nodejs-register`. An unedited copy from 0.7.0 updates when you re-register.
+
 ## [0.9.0] - 2026-10-01
 
 ### Added

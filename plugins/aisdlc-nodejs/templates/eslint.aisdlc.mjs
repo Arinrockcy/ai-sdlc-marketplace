@@ -1,5 +1,5 @@
 // aisdlc-nodejs standards as ESLint flat-config objects, using core ESLint rules only (ESLint 9 or later).
-// Copied into the project by /aisdlc-nodejs:register. Append it to the project's own configuration:
+// Copied into the project by /aisdlc-nodejs:nodejs-register. Append it to the project's own configuration:
 //
 //   import aisdlcStandards from './eslint.aisdlc.mjs';
 //   export default [...projectConfig, ...aisdlcStandards({ sourceType: 'module' })];

@@ -1,7 +1,7 @@
 {
   "name": "nodejs",
-  "version": "0.9.0",
-  "standards_skill": "aisdlc-nodejs:standards",
+  "version": "0.10.0",
+  "standards_skill": "aisdlc-nodejs:nodejs-standards",
   "runtime": {
     "node": ">=24",
     "module_type": "module"

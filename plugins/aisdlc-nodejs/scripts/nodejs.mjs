@@ -20,12 +20,13 @@ const TEMPLATES = { eslint: 'eslint.aisdlc.mjs' };
 export const TEMPLATE_HISTORY = {
   eslint: {
     '5589d066fa55ae77feb5f68a6cac1c708274fe4b25cb1a29c751ca8835f133a7': '0.6.0',
+    '335c7159b7855569b622f5e4d56d8b75547abaae63047894c22845671b2c5e2a': '0.7.0',
   },
 };
 
 // Raise this with every release that changes what a manifest must contain. Older manifests must be re-registered;
 // newer ones within the same plugin version line stay valid, so a non-breaking release asks nothing of projects.
-export const OLDEST_COMPATIBLE_MANIFEST = '0.4.0';
+export const OLDEST_COMPATIBLE_MANIFEST = '0.10.0';
 
 export const MIN_NODE_MAJOR = 24;
 const PACKAGE_MANAGERS = ['npm', 'pnpm', 'yarn', 'bun'];
@@ -477,7 +478,7 @@ function applyScanGates(root, manifest, manager) {
   }
   const hook = manifest.hooks?.after_task;
   const commands = [].concat(hook?.run ?? []);
-  if (hook?.use || !commands.length || commands.some(isNotCommand)) fail('after_task must contain run commands before enabling scans. Re-run /aisdlc-nodejs:register.');
+  if (hook?.use || !commands.length || commands.some(isNotCommand)) fail('after_task must contain run commands before enabling scans. Re-run /aisdlc-nodejs:nodejs-register.');
   // Remove only exact commands owned by this integration; retain other project hooks in order.
   const retained = commands.filter(isNotConfiguredScanCommand.bind(null, scans));
   for (const [name, script] of Object.entries(SCAN_SCRIPTS)) {
@@ -524,7 +525,7 @@ export function checkManifest(root, pluginVersion = pluginManifest().version) {
   const result = { manifest: MANIFEST_FILE, installed: false, version: null, plugin_version: pluginVersion, oldest_compatible: OLDEST_COMPATIBLE_MANIFEST, current: false, problems: [], notes: [] };
   const file = path.join(root, MANIFEST_FILE);
   if (!fs.existsSync(file)) {
-    result.problems.push(`${MANIFEST_FILE} doesn't exist. Register the stack with /aisdlc-nodejs:register.`);
+    result.problems.push(`${MANIFEST_FILE} doesn't exist. Register the stack with /aisdlc-nodejs:nodejs-register.`);
     return result;
   }
   result.installed = true;
@@ -532,19 +533,19 @@ export function checkManifest(root, pluginVersion = pluginManifest().version) {
   try {
     manifest = JSON.parse(fs.readFileSync(file, 'utf8'));
   } catch (error) {
-    result.problems.push(`${MANIFEST_FILE} isn't valid JSON (${error.message}). Re-run /aisdlc-nodejs:register.`);
+    result.problems.push(`${MANIFEST_FILE} isn't valid JSON (${error.message}). Re-run /aisdlc-nodejs:nodejs-register.`);
     return result;
   }
   result.version = manifest.version ?? null;
-  if (manifest.name !== 'nodejs') result.problems.push(`${MANIFEST_FILE} names the stack "${manifest.name}", not "nodejs". Re-run /aisdlc-nodejs:register.`);
+  if (manifest.name !== 'nodejs') result.problems.push(`${MANIFEST_FILE} names the stack "${manifest.name}", not "nodejs". Re-run /aisdlc-nodejs:nodejs-register.`);
   if (!parseVersion(result.version)) {
-    result.problems.push(`${MANIFEST_FILE} has no valid version. Re-run /aisdlc-nodejs:register.`);
+    result.problems.push(`${MANIFEST_FILE} has no valid version. Re-run /aisdlc-nodejs:nodejs-register.`);
   } else if (compareVersions(result.version, OLDEST_COMPATIBLE_MANIFEST) < 0) {
-    result.problems.push(`${MANIFEST_FILE} was written by aisdlc-nodejs ${result.version}, and this plugin needs one from ${OLDEST_COMPATIBLE_MANIFEST} or later. Re-run /aisdlc-nodejs:register; the plugin's changelog lists what changed.`);
+    result.problems.push(`${MANIFEST_FILE} was written by aisdlc-nodejs ${result.version}, and this plugin needs one from ${OLDEST_COMPATIBLE_MANIFEST} or later. Re-run /aisdlc-nodejs:nodejs-register; the plugin's changelog lists what changed.`);
   } else if (compareVersions(result.version, pluginVersion) > 0) {
     result.problems.push(`${MANIFEST_FILE} was written by aisdlc-nodejs ${result.version}, newer than this plugin (${pluginVersion}). Update the aisdlc-nodejs plugin.`);
   } else if (compareVersions(result.version, pluginVersion) < 0) {
-    result.notes.push(`${MANIFEST_FILE} was written by aisdlc-nodejs ${result.version} and still works with ${pluginVersion}. Re-running /aisdlc-nodejs:register picks up the changes since then.`);
+    result.notes.push(`${MANIFEST_FILE} was written by aisdlc-nodejs ${result.version} and still works with ${pluginVersion}. Re-running /aisdlc-nodejs:nodejs-register picks up the changes since then.`);
   }
   result.current = result.problems.length === 0;
   return result;
@@ -611,7 +612,7 @@ function baseline(root, opts) {
   if (!status.current) fail(`The stack manifest isn't usable: ${status.problems.join(' ')}`);
   const manifest = JSON.parse(fs.readFileSync(path.join(root, MANIFEST_FILE), 'utf8'));
   const declared = manifest.quality_gate?.coverage_report;
-  if (!declared?.path || !REPORT_FORMATS[declared.format]) fail(`${MANIFEST_FILE} declares no usable quality_gate.coverage_report. Re-run /aisdlc-nodejs:register.`);
+  if (!declared?.path || !REPORT_FORMATS[declared.format]) fail(`${MANIFEST_FILE} declares no usable quality_gate.coverage_report. Re-run /aisdlc-nodejs:nodejs-register.`);
   const reportFile = path.join(root, declared.path);
   const cleaned = opts.clean ? cleanReport(root, declared.path) : null;
   const before = reportStamp(reportFile);

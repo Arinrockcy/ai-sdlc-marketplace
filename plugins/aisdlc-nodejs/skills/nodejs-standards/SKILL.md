@@ -1,13 +1,13 @@
 ---
-name: standards
+name: nodejs-standards
 description: "Enforce the aisdlc Node.js coding standard for JavaScript or optional TypeScript work: Node.js 24+, ES modules by default, class-oriented modules, named functions, purpose-grouped constants, external configuration, editor-only declaration files, security, process lifecycle, logging, package hygiene, dependency approval, ESLint, and coverage-gated tests. Loaded by /aisdlc:implement when the project stack is nodejs; also usable directly when writing Node.js code in an aisdlc project."
 ---
 
 # Node.js standards (aisdlc)
 
-`$NODEJS` below means `node "${CLAUDE_PLUGIN_ROOT}/scripts/nodejs.mjs"`. Run it from the project root. Where a path in this skill still starts with an unexpanded variable, that variable stands for this plugin's folder: two levels above the folder that holds this SKILL.md. Skills are named `<plugin>:<skill>` (`/aisdlc:govern`, `aisdlc-nodejs:standards`); in an agent without plugin namespaces, such as GitHub Copilot, use only the `<skill>` part, both to load a skill and when you tell the user what to run (`/aisdlc:govern` is `/govern`, `aisdlc-nodejs:standards` is `standards`).
+`$NODEJS` below means `node "${CLAUDE_PLUGIN_ROOT}/scripts/nodejs.mjs"`. Run it from the project root. Where a path in this skill still starts with an unexpanded variable, that variable stands for this plugin's folder: two levels above the folder that holds this SKILL.md. Skills are named `<plugin>:<skill>` (`/aisdlc:govern`, `aisdlc-nodejs:nodejs-standards`); in an agent without plugin namespaces, such as GitHub Copilot, use only the `<skill>` part, both to load a skill and when you tell the user what to run (`/aisdlc:govern` is `/govern`, `aisdlc-nodejs:nodejs-standards` is `nodejs-standards`).
 
-These are required Node.js plugin policies. Preserve stricter repository rules and established naming, but do not inherit a weaker convention that defeats a requirement below. Before writing code, run `$NODEJS manifest check` once per session. It compares the installed `.aisdlc/stacks/nodejs.json` with the oldest manifest version this plugin accepts. If it exits non-zero, show its `problems`, tell the user to re-run `/aisdlc-nodejs:register`, and stop. Mention any `notes` (a manifest from an older, still compatible release) without stopping. Then check these once per session:
+These are required Node.js plugin policies. Preserve stricter repository rules and established naming, but do not inherit a weaker convention that defeats a requirement below. Before writing code, run `$NODEJS manifest check` once per session. It compares the installed `.aisdlc/stacks/nodejs.json` with the oldest manifest version this plugin accepts. If it exits non-zero, show its `problems`, tell the user to re-run `/aisdlc-nodejs:nodejs-register`, and stop. Mention any `notes` (a manifest from an older, still compatible release) without stopping. Then check these once per session:
 - `.aisdlc/stacks/nodejs.json`: `runtime.node`, `runtime.module_type` and `quality_gate.coverage_report`
 - `package.json`: `type`, `engines`, `scripts`, `packageManager`
 - `tsconfig.json` or `jsconfig.json`: whether TypeScript is used, strictness, declaration output, module resolution, and path aliases
@@ -82,7 +82,7 @@ If these conflict (for example, a `type` that disagrees with `runtime.module_typ
 ## ESLint
 
 - ESLint is mandatory for JavaScript and TypeScript maintained by the task. Follow the repository's ESLint configuration, extending it when needed to enforce these standards.
-- When the project has `eslint.aisdlc.mjs` in its ESLint configuration (added by `/aisdlc-nodejs:register`), it reports the lintable part of these standards as errors: inline functions, `process.env` outside `config/`, built-ins without `node:`, CommonJS globals in ES modules, thrown literals, empty `catch` blocks, `console` calls, `eval` and its equivalents, `exec` from `node:child_process`, and `rejectUnauthorized: false`. Fix the code, not the template. Changing that file or its options is a project-wide exception and needs the user's approval.
+- When the project has `eslint.aisdlc.mjs` in its ESLint configuration (added by `/aisdlc-nodejs:nodejs-register`), it reports the lintable part of these standards as errors: inline functions, `process.env` outside `config/`, built-ins without `node:`, CommonJS globals in ES modules, thrown literals, empty `catch` blocks, `console` calls, `eval` and its equivalents, `exec` from `node:child_process`, and `rejectUnauthorized: false`. Fix the code, not the template. Changing that file or its options is a project-wide exception and needs the user's approval.
 - Set ESLint's `languageOptions.sourceType` to match the module system. Run ESLint over source, tests, and configuration (and over declarations only in TypeScript projects). The gate passes with zero errors. Do not use warning-only rules for required policies, broad ignore patterns, blanket disable comments, or `--no-eslintrc` to make it pass.
 - A narrow disable requires a code comment explaining the concrete incompatibility. Ask the user before adding or weakening a project-wide exception.
 
