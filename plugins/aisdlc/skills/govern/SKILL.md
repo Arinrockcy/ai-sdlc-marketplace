@@ -18,6 +18,8 @@ Each rule in `.aisdlc/governance.md` has:
 - a **stage**: `plan` rules are reviewed before implementation, `final` rules against the finished work
 - an optional **check**: an automatic check the script runs (`goal-defined`, `tasks-verifiable`, `dag-valid`, `adr-recorded`, `questions-resolved` or `criteria-met`)
 
+A rule that names a stack's standards skill means the one `$AISDLC detect-stack` returns as `standards_skill`, also where it uses the name from before aisdlc 0.10.0 (`aisdlc-<stack>:standards`).
+
 **Review with fresh eyes.** In Modes B and C, if your agent can hand work to a sub-agent or a fresh session, run the review there. Give it the goal ID, the steps of that mode, and the full command `$AISDLC` stands for, with the plugin folder written out as an absolute path (a sub-agent may not get this skill's text or its folder), but not your own reasoning about the plan. A review by the context that wrote the plan tends to confirm it. The reviewer can't ask the user, so it writes what it would ask under `## Questions for the user` in the review file. The session that started the review asks them once the gate is set (Mode B step 6).
 
 The script owns the rules table. Change it only through the `governance add` and `governance set` commands (Mode A), never by editing the table by hand.

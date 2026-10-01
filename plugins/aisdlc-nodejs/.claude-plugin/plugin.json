@@ -1,6 +1,6 @@
 {
   "name": "aisdlc-nodejs",
-  "version": "0.10.0",
+  "version": "0.10.1",
   "description": "Node.js stack plugin for aisdlc: Node.js 24+, coding standards, lint/coverage gates, SonarQube analysis, dependency vulnerability scans, and Express REST API/auth/JWT practices.",
   "author": {
     "name": "arin"

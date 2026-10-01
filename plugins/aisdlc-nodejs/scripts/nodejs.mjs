@@ -26,7 +26,7 @@ export const TEMPLATE_HISTORY = {
 
 // Raise this with every release that changes what a manifest must contain. Older manifests must be re-registered;
 // newer ones within the same plugin version line stay valid, so a non-breaking release asks nothing of projects.
-export const OLDEST_COMPATIBLE_MANIFEST = '0.10.0';
+export const OLDEST_COMPATIBLE_MANIFEST = '0.4.0';
 
 export const MIN_NODE_MAJOR = 24;
 const PACKAGE_MANAGERS = ['npm', 'pnpm', 'yarn', 'bun'];

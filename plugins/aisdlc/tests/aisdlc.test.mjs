@@ -254,6 +254,14 @@ test('cli: in a mixed repo, the one installed stack manifest picks the active st
   assert.deepEqual(run(['detect-stack']).json, { configured: 'auto', detected: ['nodejs', 'python'], active: 'nodejs', manifest_installed: true, standards_skill: null });
   assert.deepEqual(run(['hooks', 'resolve', 'after_task']).json.commands, ['npm test']);
 
+  // A manifest registered before stack skills were named after their stack still finds the renamed skill.
+  const manifest = path.join(dir, '.aisdlc/stacks/nodejs.json');
+  fs.writeFileSync(manifest, JSON.stringify({ name: 'nodejs', standards_skill: 'aisdlc-nodejs:standards' }));
+  assert.equal(run(['detect-stack']).json.standards_skill, 'aisdlc-nodejs:nodejs-standards');
+  assert.equal(JSON.parse(fs.readFileSync(manifest, 'utf8')).standards_skill, 'aisdlc-nodejs:standards');
+  fs.writeFileSync(manifest, JSON.stringify({ name: 'nodejs', standards_skill: 'aisdlc-nodejs:nodejs-standards' }));
+  assert.equal(run(['detect-stack']).json.standards_skill, 'aisdlc-nodejs:nodejs-standards');
+
   fs.writeFileSync(path.join(dir, '.aisdlc/stacks/python.json'), JSON.stringify({ name: 'python' }));
   assert.equal(run(['detect-stack']).json.active, null);
   run(['config', 'set', 'stack', 'python']);

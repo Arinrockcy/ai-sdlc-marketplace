@@ -402,6 +402,14 @@ function loadStackManifest(root, stack) {
   return fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, 'utf8')) : null;
 }
 
+// Until aisdlc 0.10.0 the contract named a stack's standards skill `standards`. GitHub Copilot keeps only one of two
+// plugin skills with the same name, so it is now `<stack>-standards`. A manifest registered before the rename still
+// names the old skill; read it as the new one, so projects keep working without registering the stack again.
+function standardsSkill(manifest, stack) {
+  const name = manifest?.standards_skill || null;
+  return name === `aisdlc-${stack}:standards` ? `aisdlc-${stack}:${stack}-standards` : name;
+}
+
 // ---------- hooks ----------
 
 function envHook(point) {
@@ -1158,7 +1166,8 @@ const commands = {
     const root = findRoot();
     const cfg = loadConfig(root);
     const stack = activeStack(root, cfg);
-    out({ configured: cfg.stack || 'auto', detected: detectStacks(root), active: stack, manifest_installed: !!loadStackManifest(root, stack), standards_skill: loadStackManifest(root, stack)?.standards_skill || null });
+    const manifest = loadStackManifest(root, stack);
+    out({ configured: cfg.stack || 'auto', detected: detectStacks(root), active: stack, manifest_installed: !!manifest, standards_skill: standardsSkill(manifest, stack) });
   },
 
   config([action, key, value]) {

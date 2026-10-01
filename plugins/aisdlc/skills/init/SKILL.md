@@ -24,7 +24,7 @@ Init is idempotent. It only creates what is missing and never overwrites existin
    - If it has several, ask the user which one should be the primary stack.
    - If it has none, ask the user to name the stack, or keep `auto`.
    Save the answer with `$AISDLC config set stack <name>`.
-   Then check whether a skill named `aisdlc-<stack>:<stack>-register` is available (`<stack>-register` without plugin namespaces):
+   Then check whether a skill named `aisdlc-<stack>:<stack>-register` is available (`<stack>-register` without plugin namespaces). A stack plugin written before aisdlc 0.10.0 calls it `aisdlc-<stack>:register`; use that one if it is the only one:
    - **Available:** invoke it. It installs `.aisdlc/stacks/<stack>.json` (standards skill and hook overrides). When it returns, check that the workflow uses what it installed, because the register skill can't run this script:
      1. Run `$AISDLC detect-stack`. `active` must be the chosen stack and `manifest_installed` true. If not, run `$AISDLC config set stack <name>` with the chosen stack and check again.
      2. Run `$AISDLC hooks resolve after_task`. Its `source` should be `stack`, with the manifest's commands. If `source` is `env`, tell the user that `AISDLC_HOOK_AFTER_TASK` in their environment replaces the stack's gate for as long as it is set. If it is `config`, show the override in `.aisdlc/config.json` and ask whether to keep it or remove it with `$AISDLC config set hooks.after_task '{"use":"stack"}'`. If `commands` is empty, say that no task gate will run.

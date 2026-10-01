@@ -2,6 +2,12 @@
 
 All notable changes to the `aisdlc` plugin. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/). Until 1.0.0, a minor version may include breaking changes; each one is listed under **Breaking** with its upgrade step.
 
+## [0.10.1] - 2026-10-01
+
+### Fixed
+- Projects registered before the stack skill rename keep working without registering the stack again. `detect-stack` reads a manifest's old `aisdlc-<stack>:standards` as `aisdlc-<stack>:<stack>-standards`, without changing the file, and `/aisdlc:govern` reads a rule that names the old skill the same way.
+- `/aisdlc:init` still finds a stack plugin's `aisdlc-<stack>:register` skill when the plugin hasn't renamed it yet.
+
 ## [0.10.0] - 2026-10-01
 
 ### Breaking

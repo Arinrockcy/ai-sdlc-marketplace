@@ -112,7 +112,7 @@ See [`plugins/aisdlc/docs/stack-plugin-contract.md`](plugins/aisdlc/docs/stack-p
 
 Each plugin keeps a changelog: [`aisdlc`](plugins/aisdlc/CHANGELOG.md), [`aisdlc-nodejs`](plugins/aisdlc-nodejs/CHANGELOG.md). Breaking changes are listed there with their upgrade step.
 
-### 0.9.x → 0.10.0 (both plugins)
+### 0.9.x → 0.10.x (both plugins)
 
 Stack plugin skills are now named after their stack, because GitHub Copilot drops one of two plugin skills that share a name:
 
@@ -121,10 +121,9 @@ Stack plugin skills are now named after their stack, because GitHub Copilot drop
 | `/aisdlc-nodejs:register` | `/aisdlc-nodejs:nodejs-register` |
 | `aisdlc-nodejs:standards` | `aisdlc-nodejs:nodejs-standards` |
 
-1. Update both plugins together. `/aisdlc:init` 0.10.0 looks for `<stack>-register`, so it doesn't find an older stack plugin's `register`.
-2. Re-run `/aisdlc-nodejs:nodejs-register` in each project. It rewrites `.aisdlc/stacks/nodejs.json` with the new `standards_skill`. Until then `manifest check` fails, and `/aisdlc:implement` stops because the old standards skill name isn't installed. Commit the manifest on its own, before a goal starts.
+Nothing is required for existing projects from 0.10.1 on. A manifest registered earlier still names `aisdlc-nodejs:standards`; `detect-stack` reads it as the renamed skill, so you don't need to register the stack again in each project. Update both plugins together, and use the new name when you run the register skill yourself.
 
-A third-party stack plugin renames its skills to `<stack>-register` and `<stack>-standards` and its `standards_skill` to match (see the [stack plugin contract](plugins/aisdlc/docs/stack-plugin-contract.md)).
+A third-party stack plugin renames its skills to `<stack>-register` and `<stack>-standards` and its `standards_skill` to match (see the [stack plugin contract](plugins/aisdlc/docs/stack-plugin-contract.md)). Until it does, `/aisdlc:init` still finds its `register` skill.
 
 ### 0.8.x → 0.9.0 (`aisdlc`)
 

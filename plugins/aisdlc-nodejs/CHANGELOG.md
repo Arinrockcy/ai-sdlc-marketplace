@@ -2,6 +2,11 @@
 
 All notable changes to the `aisdlc-nodejs` plugin. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/).
 
+## [0.10.1] - 2026-10-01
+
+### Fixed
+- Manifests registered before 0.10.0 are accepted again (`manifest check` needs 0.4.0 or later, as before the rename). With aisdlc 0.10.1, their old `standards_skill` resolves to `nodejs-standards`, so projects don't need to run `nodejs-register` again.
+
 ## [0.10.0] - 2026-10-01
 
 ### Breaking
