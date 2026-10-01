@@ -11,6 +11,7 @@ All notable changes to the `aisdlc-nodejs` plugin. The format follows [Keep a Ch
 - Project inspection reports Sonar scanner dependencies/configuration and both scan scripts. Regression tests cover gate ordering, missing scripts, persistence, and scanner failure propagation.
 
 ### Fixed
+- GitHub Copilot: `register`, `standards` and `express-rest-api` say to load a skill by its bare name (`standards`, not `aisdlc-nodejs:standards`), and to give the user unprefixed commands. Copilot's skill tool matches names exactly, so the prefixed name wasn't found.
 - Aligned `stack.json` with the plugin release version so newly registered manifests report the release that wrote them. Older compatible manifests continue to work.
 
 ## [0.8.0] - 2026-10-01

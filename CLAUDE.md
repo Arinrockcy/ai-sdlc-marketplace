@@ -8,8 +8,9 @@ A Claude Code plugin marketplace (`.claude-plugin/marketplace.json`) that ships 
 - `plugins/aisdlc`: the core plugin
 - `plugins/aisdlc-nodejs`: a reference stack plugin
 
-Skills must stay agent-neutral markdown, because GitHub Copilot loads the same plugins, and Codex and Cursor adapters are planned. Put Claude-specific details only in path variables (`${CLAUDE_PLUGIN_ROOT}`, `$ARGUMENTS`). Copilot leaves those variables as written and doesn't namespace skills (`/govern`, not `/aisdlc:govern`), so:
-- A skill that uses one of them, or a `/plugin:skill` name, keeps the preamble sentence that says what it stands for. `tests/skills.test.mjs` checks this.
+Skills must stay agent-neutral markdown, because GitHub Copilot loads the same plugins, and Codex and Cursor adapters are planned. Put Claude-specific details only in path variables (`${CLAUDE_PLUGIN_ROOT}`, `$ARGUMENTS`). Copilot leaves those variables as written (it shows the model the skill's folder instead) and doesn't namespace skills (`/govern`, not `/aisdlc:govern`; its skill tool loads `standards`, not `aisdlc-nodejs:standards`), so:
+- A skill that uses one of them, a `plugin:skill` name, or the `standards_skill` from `detect-stack` keeps the preamble sentence that says what it stands for. `tests/skills.test.mjs` checks this.
+- A step that hands work to a sub-agent passes the resolved `$AISDLC` command: the sub-agent doesn't see the skill's folder.
 - Frontmatter must parse as strict YAML: quote a value that contains `: `. Claude Code accepts it unquoted, but Copilot skips the skill.
 
 ## Commands

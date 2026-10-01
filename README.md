@@ -25,9 +25,9 @@ copilot plugin install aisdlc@aisdlc-marketplace
 copilot plugin install aisdlc-nodejs@aisdlc-marketplace   # optional, per stack
 ```
 
-In VS Code, add the repository to the `chat.plugins.marketplaces` setting, then install the plugins from the Extensions view.
+VS Code picks up plugins that Copilot CLI installed. To install them from VS Code instead, make sure `chat.plugins.enabled` is on, and add the repository to the `chat.plugins.marketplaces` setting, as `owner/repo`, a git URL, or a `file:///` URI for a local clone (a plain path isn't accepted). Then search `@agentPlugins` in the Extensions view and install both plugins.
 
-Copilot doesn't namespace plugin skills, so drop the prefix from the commands below: `/aisdlc:govern G-001` is `/govern G-001`, and `/aisdlc-nodejs:register` is `/register`. `/init` is Copilot's own command, so start with a prompt such as `Use the aisdlc init skill` instead. A project skill of the same name (for example in `.github/skills/`) hides the plugin's.
+Copilot doesn't namespace plugin skills, so drop the prefix from the commands below: `/aisdlc:govern G-001` is `/govern G-001`, and `/aisdlc-nodejs:register` is `/register`. `/init` is Copilot's own command, so start with a prompt such as `Use the aisdlc init skill` instead. A project skill of the same name (for example in `.github/skills/`) hides the plugin's, and when two installed plugins have skills of the same name, Copilot loads only one of them without a warning.
 
 The Node.js plugin also provides `/aisdlc-nodejs:express-rest-api` for designing, implementing, or reviewing Express endpoints, authentication, authorization, JWTs, sessions/tokens, and production API security.
 

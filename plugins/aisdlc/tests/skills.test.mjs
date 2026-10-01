@@ -95,7 +95,10 @@ test('skills: frontmatter parses as strict YAML and follows the Agent Skills spe
 });
 
 // Claude Code expands `${CLAUDE_PLUGIN_ROOT}` and `$ARGUMENTS` in skill text and namespaces skills as `/plugin:skill`.
-// GitHub Copilot does neither, so a skill that relies on one says what it stands for.
+// GitHub Copilot does neither, so a skill that relies on one says what it stands for. Its skill tool matches names
+// exactly, so a skill that loads another by its namespaced name (written out, or the `standards_skill` that
+// `detect-stack` returns) also says to drop the prefix.
+const BARE_SKILL_NAME = /(^|[^/\w-])aisdlc(-[a-z]+|-<[a-z]+>)?:[a-z<]/m;
 test('skills: explain Claude Code variables and skill names for agents that leave them as written', () => {
   const missing = [];
   for (const file of skillFiles()) {
@@ -103,7 +106,8 @@ test('skills: explain Claude Code variables and skill names for agents that leav
     const rel = path.relative(REPO, file);
     if (text.includes('${CLAUDE_PLUGIN_ROOT}') && !text.includes('still starts with an unexpanded variable, that variable stands for this plugin\'s folder: two levels above the folder that holds this SKILL.md')) missing.push(`${rel}: \${CLAUDE_PLUGIN_ROOT}`);
     if (text.includes('$ARGUMENTS') && !text.includes('(the text after the skill\'s name)') && !text.includes('after the skill\'s name: `$ARGUMENTS`')) missing.push(`${rel}: $ARGUMENTS`);
-    if (/\/aisdlc(-[a-z]+)?:[a-z]/.test(text) && !text.includes('in an agent without plugin namespaces, such as GitHub Copilot, call them `/<skill>`')) missing.push(`${rel}: /plugin:skill names`);
+    if (/\/aisdlc(-[a-z]+)?:[a-z]/.test(text) && !text.includes('in an agent without plugin namespaces, such as GitHub Copilot,')) missing.push(`${rel}: /plugin:skill names`);
+    if ((BARE_SKILL_NAME.test(text) || text.includes('standards_skill')) && !text.includes('use only the `<skill>` part, both to load a skill and when you tell the user what to run')) missing.push(`${rel}: plugin:skill names`);
   }
   assert.deepEqual(missing, []);
 });

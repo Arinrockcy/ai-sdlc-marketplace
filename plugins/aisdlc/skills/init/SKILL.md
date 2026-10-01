@@ -6,7 +6,7 @@ argument-hint: "[--base-branch <branch>]"
 
 # aisdlc: init
 
-`$AISDLC` below means `node "${CLAUDE_PLUGIN_ROOT}/scripts/aisdlc.mjs"`. Run every command from the project root. The script prints JSON. Where a path in this skill still starts with an unexpanded variable, that variable stands for this plugin's folder: two levels above the folder that holds this SKILL.md. Skills are written `/<plugin>:<skill>`; in an agent without plugin namespaces, such as GitHub Copilot, call them `/<skill>` (`/aisdlc:govern` is `/govern`).
+`$AISDLC` below means `node "${CLAUDE_PLUGIN_ROOT}/scripts/aisdlc.mjs"`. Run every command from the project root. The script prints JSON. Where a path in this skill still starts with an unexpanded variable, that variable stands for this plugin's folder: two levels above the folder that holds this SKILL.md. Skills are named `<plugin>:<skill>` (`/aisdlc:govern`, `aisdlc-nodejs:standards`); in an agent without plugin namespaces, such as GitHub Copilot, use only the `<skill>` part, both to load a skill and when you tell the user what to run (`/aisdlc:govern` is `/govern`, `aisdlc-nodejs:standards` is `standards`).
 
 **Don't assume.** If something this step needs is unclear, missing or under-documented, and neither the code nor the `.aisdlc/` files answer it, ask the user. Never fill a gap with a guess or a silent default. Detected values (stack, base branch, package manager) are suggestions: confirm them with the user.
 
@@ -24,7 +24,7 @@ Init is idempotent. It only creates what is missing and never overwrites existin
    - If it has several, ask the user which one should be the primary stack.
    - If it has none, ask the user to name the stack, or keep `auto`.
    Save the answer with `$AISDLC config set stack <name>`.
-   Then check whether a skill named `aisdlc-<stack>:register` is available:
+   Then check whether a skill named `aisdlc-<stack>:register` is available. Without plugin namespaces it is listed as `register`; use it only if its description names this stack, because another plugin's `register` skill has the same name:
    - **Available:** invoke it. It installs `.aisdlc/stacks/<stack>.json` (standards skill and hook overrides). When it returns, check that the workflow uses what it installed, because the register skill can't run this script:
      1. Run `$AISDLC detect-stack`. `active` must be the chosen stack and `manifest_installed` true. If not, run `$AISDLC config set stack <name>` with the chosen stack and check again.
      2. Run `$AISDLC hooks resolve after_task`. Its `source` should be `stack`, with the manifest's commands. If `source` is `env`, tell the user that `AISDLC_HOOK_AFTER_TASK` in their environment replaces the stack's gate for as long as it is set. If it is `config`, show the override in `.aisdlc/config.json` and ask whether to keep it or remove it with `$AISDLC config set hooks.after_task '{"use":"stack"}'`. If `commands` is empty, say that no task gate will run.

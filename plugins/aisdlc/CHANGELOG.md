@@ -2,6 +2,14 @@
 
 All notable changes to the `aisdlc` plugin. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/). Until 1.0.0, a minor version may include breaking changes; each one is listed under **Breaking** with its upgrade step.
 
+## [0.9.2] - 2026-10-01
+
+### Fixed
+- GitHub Copilot: skills load other skills by their bare name. Copilot's skill tool matches names exactly, so `aisdlc-<stack>:register` in `/aisdlc:init` and the `standards_skill` that `detect-stack` returns (`aisdlc-nodejs:standards`) weren't found. Each skill's preamble now says to drop the prefix, also in commands given to the user, and init uses a `register` skill only if its description names the chosen stack.
+- GitHub Copilot: `/aisdlc:govern` passes the review sub-agent the resolved `$AISDLC` command. A Copilot sub-agent doesn't see the skill's folder, so it couldn't run the script.
+- README: VS Code install steps name the `chat.plugins.enabled` setting, the accepted marketplace forms (a local clone needs a `file:///` URI), the `@agentPlugins` search, and that plugins installed by Copilot CLI already appear in VS Code.
+- The skills test also checks that a skill naming another skill as `plugin:skill`, or loading `standards_skill`, says to drop the prefix.
+
 ## [0.9.1] - 2026-10-01
 
 ### Added

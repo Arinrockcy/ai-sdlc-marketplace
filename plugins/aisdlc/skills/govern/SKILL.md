@@ -6,7 +6,7 @@ argument-hint: "[G-id] [--final]"
 
 # aisdlc: govern
 
-`$AISDLC` below means `node "${CLAUDE_PLUGIN_ROOT}/scripts/aisdlc.mjs"`. Run it from the project root. Where a path in this skill still starts with an unexpanded variable, that variable stands for this plugin's folder: two levels above the folder that holds this SKILL.md. Skills are written `/<plugin>:<skill>`; in an agent without plugin namespaces, such as GitHub Copilot, call them `/<skill>` (`/aisdlc:govern` is `/govern`).
+`$AISDLC` below means `node "${CLAUDE_PLUGIN_ROOT}/scripts/aisdlc.mjs"`. Run it from the project root. Where a path in this skill still starts with an unexpanded variable, that variable stands for this plugin's folder: two levels above the folder that holds this SKILL.md. Skills are named `<plugin>:<skill>` (`/aisdlc:govern`, `aisdlc-nodejs:standards`); in an agent without plugin namespaces, such as GitHub Copilot, use only the `<skill>` part, both to load a skill and when you tell the user what to run (`/aisdlc:govern` is `/govern`, `aisdlc-nodejs:standards` is `standards`).
 
 **Don't assume.** If something this step needs is unclear, missing or under-documented, and neither the code nor the `.aisdlc/` files answer it, ask the user. Never fill a gap with a guess or a silent default. If a rule's wording leaves unclear how it applies to this goal, ask the user how to read it and record that reading in the Notes column.
 
@@ -18,7 +18,7 @@ Each rule in `.aisdlc/governance.md` has:
 - a **stage**: `plan` rules are reviewed before implementation, `final` rules against the finished work
 - an optional **check**: an automatic check the script runs (`goal-defined`, `tasks-verifiable`, `dag-valid`, `adr-recorded`, `questions-resolved` or `criteria-met`)
 
-**Review with fresh eyes.** In Modes B and C, if your agent can hand work to a sub-agent or a fresh session, run the review there. Give it the goal ID and the steps of that mode, not your own reasoning about the plan. A review by the context that wrote the plan tends to confirm it. The reviewer can't ask the user, so it writes what it would ask under `## Questions for the user` in the review file. The session that started the review asks them once the gate is set (Mode B step 6).
+**Review with fresh eyes.** In Modes B and C, if your agent can hand work to a sub-agent or a fresh session, run the review there. Give it the goal ID, the steps of that mode, and the full command `$AISDLC` stands for, with the plugin folder written out as an absolute path (a sub-agent may not get this skill's text or its folder), but not your own reasoning about the plan. A review by the context that wrote the plan tends to confirm it. The reviewer can't ask the user, so it writes what it would ask under `## Questions for the user` in the review file. The session that started the review asks them once the gate is set (Mode B step 6).
 
 The script owns the rules table. Change it only through the `governance add` and `governance set` commands (Mode A), never by editing the table by hand.
 
