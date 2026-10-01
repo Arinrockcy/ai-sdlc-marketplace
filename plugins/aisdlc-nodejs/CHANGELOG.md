@@ -7,6 +7,15 @@ All notable changes to the `aisdlc-nodejs` plugin. The format follows [Keep a Ch
 ### Added
 - `express-rest-api` skill for production Express API design and review, including HTTP contracts, middleware/error boundaries, authentication and authorization, sessions and tokens, abuse resistance, operations, and security-focused tests.
 - Focused references for REST semantics, OAuth/OIDC and JWT or cookie-based authentication, object/tenant authorization, API keys and webhooks, Express proxy/CORS/parser hardening, observability, and graceful shutdown.
+- `scripts/nodejs.mjs`, a zero-dependency helper the skills call as `$NODEJS`:
+  - `inspect` reports the package manager (`packageManager`, then lockfiles, including `npm-shrinkwrap.json`), the Node.js version, `engines.node` and version pins, the module system and any CommonJS source, the gate scripts, tools and configuration files, whether `coverage/` is ignored, and what could bypass the gate (`stack` setting, config and environment overrides).
+  - `manifest write` writes `.aisdlc/stacks/nodejs.json` with the package manager's commands, the module type, the tools, the coverage report and the thresholds. It refuses a threshold below the 80% floor or one the report format can't measure, and lists the metrics it left out.
+  - `manifest check` compares the installed manifest's version with the oldest one this plugin accepts (0.4.0).
+  - `baseline [--clean]` runs the gate commands and checks that the report was written by this run, parses and meets the thresholds. `--clean` first deletes the report's folder, only when git ignores it, to start like a fresh clone.
+
+### Changed
+- `register` gets its facts from `inspect`, writes the manifest with `manifest write` before the baseline, and runs the baseline with `baseline --clean`, instead of following these steps by hand.
+- `standards` checks the manifest with `manifest check`, by version, instead of looking for the `runtime` and `coverage_report` fields. A manifest from an older but still compatible release keeps working, with a note that re-registering picks up the changes.
 
 ## [0.4.1] - 2026-09-30
 

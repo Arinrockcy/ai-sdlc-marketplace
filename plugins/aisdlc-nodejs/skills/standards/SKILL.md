@@ -5,8 +5,10 @@ description: Enforce the aisdlc Node.js coding standard for JavaScript or option
 
 # Node.js standards (aisdlc)
 
-These are required Node.js plugin policies. Preserve stricter repository rules and established naming, but do not inherit a weaker convention that defeats a requirement below. Before writing code, check these once per session:
-- `.aisdlc/stacks/nodejs.json`: `runtime.node`, `runtime.module_type` and `quality_gate.coverage_report`. If `runtime` or `coverage_report` is missing, the manifest predates these rules: tell the user to re-run `/aisdlc-nodejs:register` and stop.
+`$NODEJS` below means `node "${CLAUDE_PLUGIN_ROOT}/scripts/nodejs.mjs"`. Run it from the project root.
+
+These are required Node.js plugin policies. Preserve stricter repository rules and established naming, but do not inherit a weaker convention that defeats a requirement below. Before writing code, run `$NODEJS manifest check` once per session. It compares the installed `.aisdlc/stacks/nodejs.json` with the oldest manifest version this plugin accepts. If it exits non-zero, show its `problems`, tell the user to re-run `/aisdlc-nodejs:register`, and stop. Mention any `notes` (a manifest from an older, still compatible release) without stopping. Then check these once per session:
+- `.aisdlc/stacks/nodejs.json`: `runtime.node`, `runtime.module_type` and `quality_gate.coverage_report`
 - `package.json`: `type`, `engines`, `scripts`, `packageManager`
 - `tsconfig.json` or `jsconfig.json`: whether TypeScript is used, strictness, declaration output, module resolution, and path aliases
 - the ESLint, formatter, Jest, and coverage configuration

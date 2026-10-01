@@ -92,6 +92,10 @@ Each plugin keeps a changelog: [`aisdlc`](plugins/aisdlc/CHANGELOG.md), [`aisdlc
 
 This only affects a project with more than one stack marker (for example `package.json` and `pyproject.toml`), `stack` set to `auto` in `.aisdlc/config.json`, and exactly one manifest in `.aisdlc/stacks/`. Until now no stack was active there, so `after_task` ran nothing and `coverage check` passed with a note. Now that manifest's stack is active, so its task gate and coverage check run. Run `aisdlc.mjs detect-stack` to see which stack is active. To choose another one, set `stack` in `.aisdlc/config.json`.
 
+### `aisdlc-nodejs` 0.4.x → 0.5.0
+
+Nothing is required: manifests from 0.4.0 on stay valid. From now on, `/aisdlc:implement` asks you to re-register only after a release whose changelog lists the manifest under **Breaking**.
+
 ### `aisdlc-nodejs` 0.4.0 → 0.4.1
 
 Nothing is required. Re-run `/aisdlc-nodejs:register` to pick up the fixes: coverage then counts source files that no test loads (Jest's `collectCoverageFrom`), so the percentage can drop. A node:test setup gets a `test:coverage` command that creates the report folder on a fresh clone and fails below the thresholds. Commit the tooling changes on their own.

@@ -10,7 +10,10 @@ plugins/aisdlc-<stack>/
   stack.json                 # manifest (below)
   skills/register/SKILL.md   # installs the manifest into a project
   skills/standards/SKILL.md  # coding/testing standards loaded by /aisdlc:implement
+  scripts/                   # optional: the plugin's deterministic steps
 ```
+
+A stack plugin can't run the core script (`${CLAUDE_PLUGIN_ROOT}` points to the stack plugin), so deterministic work in its skills (detecting the package manager, writing the manifest, running the baseline) goes in its own zero-dependency script, with tests. `aisdlc-nodejs/scripts/nodejs.mjs` is the reference. The manifest's `version` records the plugin release that wrote it; the plugin compares it with the oldest version it still accepts, instead of checking for individual fields.
 
 ## `stack.json`
 

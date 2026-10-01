@@ -74,6 +74,7 @@ Skills call the script (written `$AISDLC` in the skill files) and should never h
 - a `stack.json` manifest, including `quality_gate.coverage_report`, the report its test command writes on every run
 - a `register` skill that copies the manifest into the project's `.aisdlc/stacks/`
 - a `standards` skill that `/aisdlc:implement` loads
+- optionally, a zero-dependency script for the plugin's deterministic steps, as `aisdlc-nodejs` has in `scripts/nodejs.mjs` (written `$NODEJS` in its skills). It reads the plugin's own `stack.json` and project-local files, never the core's. Its `OLDEST_COMPATIBLE_MANIFEST` names the oldest installed manifest the plugin still accepts: raise it with any release that changes what the manifest must contain.
 
 The core script never reads other plugins' directories, only project-local files. To add stack detection, edit `STACK_MARKERS`.
 
