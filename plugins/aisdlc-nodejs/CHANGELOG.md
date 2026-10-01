@@ -2,6 +2,16 @@
 
 All notable changes to the `aisdlc-nodejs` plugin. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/).
 
+## [0.6.0] - 2026-09-30
+
+### Added
+- `templates/eslint.aisdlc.mjs`, the lintable part of the standards as ESLint 9+ flat-config objects, using core rules only: inline arrow and anonymous functions, `process.env` outside `config/` and tests, built-ins without the `node:` prefix, CommonJS globals in ES modules, thrown literals, empty blocks, `console` calls, executor misuse and unused disable comments. Projects append `aisdlcStandards({ sourceType })` to their configuration, and add their own entries for the restriction rules through its options.
+- `$NODEJS template eslint` copies the template to the project root, leaves a current copy alone, and refuses to overwrite a copy that differs. `inspect` reports it as `eslint_template`.
+
+### Changed
+- `register` offers the ESLint template as the recommended default and shows how to append it to the project's configuration. It asks before turning off `no-console` for a CLI, and before moving an `.eslintrc` project to flat config.
+- `standards` tells the agent to fix code the template reports, not the template.
+
 ## [0.5.1] - 2026-09-30
 
 ### Added

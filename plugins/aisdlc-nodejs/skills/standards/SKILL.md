@@ -52,6 +52,7 @@ If these conflict (for example, a `type` that disagrees with `runtime.module_typ
 ## ESLint
 
 - ESLint is mandatory for JavaScript and TypeScript maintained by the task. Follow the repository's ESLint configuration, extending it when needed to enforce these standards.
+- When the project has `eslint.aisdlc.mjs` in its ESLint configuration (added by `/aisdlc-nodejs:register`), it reports the lintable part of these standards as errors: inline functions, `process.env` outside `config/`, built-ins without `node:`, CommonJS globals in ES modules, thrown literals, empty `catch` blocks and `console` calls. Fix the code, not the template. Changing that file or its options is a project-wide exception and needs the user's approval.
 - Set ESLint's `languageOptions.sourceType` to match the module system. Run ESLint over source, tests, and configuration (and over declarations only in TypeScript projects). The gate passes with zero errors. Do not use warning-only rules for required policies, broad ignore patterns, blanket disable comments, or `--no-eslintrc` to make it pass.
 - A narrow disable requires a code comment explaining the concrete incompatibility. Ask the user before adding or weakening a project-wide exception.
 

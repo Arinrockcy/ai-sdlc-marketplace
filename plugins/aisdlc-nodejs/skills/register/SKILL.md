@@ -9,7 +9,7 @@ description: Register the Node.js stack with the aisdlc workflow in the current 
 
 Prerequisite: `.aisdlc/` must exist. If it doesn't, tell the user to run `/aisdlc:init` first and stop.
 
-1. **Inspect the project.** Run `$NODEJS inspect`. It reports the facts the next steps decide on: `package_manager`, `workspaces`, `yarn_pnp`, `node`, `engines`, `version_pins`, `module`, `scripts`, `tools`, `config_files`, `coverage_dir_ignored`, `workflow` and `manifest`. Run it again after a change, rather than re-reading the files.
+1. **Inspect the project.** Run `$NODEJS inspect`. It reports the facts the next steps decide on: `package_manager`, `workspaces`, `yarn_pnp`, `node`, `engines`, `version_pins`, `module`, `scripts`, `tools`, `config_files`, `coverage_dir_ignored`, `eslint_template`, `workflow` and `manifest`. Run it again after a change, rather than re-reading the files.
 
 2. **Package manager.** Use `package_manager.name`. It comes from the `packageManager` field first, then from the lockfiles, and is npm when there is neither. If `name` is null (lockfiles for several managers, or a `packageManager` the plugin doesn't support), ask the user which manager the project uses. Show any `notes`, for example a lockfile that disagrees with `packageManager`.
 
@@ -49,6 +49,15 @@ Prerequisite: `.aisdlc/` must exist. If it doesn't, tell the user to run `/aisdl
    ```
 
    Existing stricter thresholds win. Do not reduce them to 80%.
+
+   **ESLint rules for the standards.** The plugin ships `eslint.aisdlc.mjs`, which turns the lintable part of the standards into errors using core ESLint rules only: inline callbacks, `process.env` outside `config/` and tests, built-ins without the `node:` prefix, CommonJS globals in ES modules, thrown literals, empty `catch` blocks, `console` calls and unused disable comments. It needs ESLint 9 or later with a flat config (`eslint.config.*`). Offer it, as the recommended default, and add it only once the user agrees:
+   - Run `$NODEJS template eslint`. It copies the template to the project root, leaves a current copy alone, and refuses to overwrite a copy that differs (`eslint_template` is `modified`). Show the user that difference, and replace the copy only with their approval.
+   - Append it to the project's configuration, with `sourceType` set to the module system from step 3. In an ES module config: `import aisdlcStandards from './eslint.aisdlc.mjs';` and `...aisdlcStandards({ sourceType: 'module' })` at the end of the exported array. In a CommonJS config: `const aisdlcStandards = require('./eslint.aisdlc.mjs').default;`. Without any ESLint configuration, create `eslint.config.mjs` with it, plus `@eslint/js`'s recommended rules if the user wants them (that's another package to approve).
+   - If the project already sets `no-restricted-syntax`, `no-restricted-imports`, `no-restricted-properties` or `no-restricted-globals`, pass its entries through the template's matching option (`restrictedSyntax`, `restrictedImports`, `restrictedProperties`, `restrictedGlobals`), because ESLint replaces a rule's options instead of merging them. Pass `files`, `configFiles` or `testFiles` when the project's layout differs from the defaults in the template.
+   - A project that prints to the console on purpose (a CLI) needs `no-console` turned off for those files, with a comment giving the reason. Ask before adding it.
+   - With `.eslintrc*` (ESLint 8 or earlier), the template doesn't load. Ask whether to move to flat config first, or leave these rules to review for now.
+
+   Existing code often breaks these rules. The baseline in step 8 shows how much; don't weaken a rule to make it pass.
 
    Make coverage count every source file, not just the ones the tests load:
    - **Jest:** set `collectCoverageFrom` to the source globs, for example `["src/**/*.{js,mjs,cjs,ts}", "!**/*.test.*", "!**/*.d.ts"]`, adapted to the project's folders.
@@ -93,4 +102,4 @@ Prerequisite: `.aisdlc/` must exist. If it doesn't, tell the user to run `/aisdl
 
    Do not offer `None` as a normal setup choice: disabling this required gate needs an explicit user override. When `/aisdlc:init` invoked this skill, it checks the resolved hook afterwards.
 
-10. **Report the result.** Show the Node.js version and module system, the two resolved `after_task` commands, the selected lint and test tools, the coverage report path and format, the coverage thresholds in the manifest (and any left out), which files coverage counts (and, for node:test, that untested modules aren't counted), the baseline result from step 8, how a monorepo is gated (step 2), and any missing setup. Tell the user to commit `.aisdlc/stacks/nodejs.json` and the tooling changes on their own, before a goal starts, so they don't end up in a goal's changes. Remind the user that `AISDLC_HOOK_AFTER_TASK="<cmd>"` (or `none`) is an explicit one-run override, not a change to the registered standard.
+10. **Report the result.** Show the Node.js version and module system, the two resolved `after_task` commands, the selected lint and test tools, whether the ESLint template is in the configuration, the coverage report path and format, the coverage thresholds in the manifest (and any left out), which files coverage counts (and, for node:test, that untested modules aren't counted), the baseline result from step 8, how a monorepo is gated (step 2), and any missing setup. Tell the user to commit `.aisdlc/stacks/nodejs.json` and the tooling changes on their own, before a goal starts, so they don't end up in a goal's changes. Remind the user that `AISDLC_HOOK_AFTER_TASK="<cmd>"` (or `none`) is an explicit one-run override, not a change to the registered standard.

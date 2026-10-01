@@ -12,6 +12,8 @@ import { parseArgs } from 'node:util';
 const SCRIPT_FILE = fileURLToPath(import.meta.url);
 const PLUGIN_ROOT = path.resolve(path.dirname(SCRIPT_FILE), '..');
 const MANIFEST_FILE = '.aisdlc/stacks/nodejs.json';
+// Templates `template <name>` copies into the project root.
+const TEMPLATES = { eslint: 'eslint.aisdlc.mjs' };
 
 // Raise this with every release that changes what a manifest must contain. Older manifests must be re-registered;
 // newer ones within the same plugin version line stay valid, so a non-breaking release asks nothing of projects.
@@ -313,6 +315,7 @@ export function inspectProject(root) {
     tools: installedTools(pkg),
     config_files: configFiles(root, pkg),
     coverage_dir_ignored: gitIgnores(root, 'coverage/'),
+    eslint_template: templateStatus(root, 'eslint'),
     workflow: workflowSettings(root),
     manifest: checkManifest(root),
   };
@@ -479,6 +482,25 @@ export function checkManifest(root, pluginVersion = pluginManifest().version) {
   return result;
 }
 
+// ---------- templates ----------
+
+// 'missing', 'current', or 'modified' when the project's copy differs from this plugin's template.
+function templateStatus(root, name) {
+  const target = path.join(root, TEMPLATES[name]);
+  if (!fs.existsSync(target)) return 'missing';
+  const source = fs.readFileSync(path.join(PLUGIN_ROOT, 'templates', TEMPLATES[name]), 'utf8');
+  return fs.readFileSync(target, 'utf8') === source ? 'current' : 'modified';
+}
+
+function copyTemplate(root, name) {
+  if (!Object.hasOwn(TEMPLATES, name)) fail(`Usage: template ${Object.keys(TEMPLATES).join('|')}`);
+  const file = TEMPLATES[name];
+  const status = templateStatus(root, name);
+  if (status === 'modified') fail(`${file} differs from this plugin's template (${path.join(PLUGIN_ROOT, 'templates', file)}). Show the user the difference; to replace it, delete ${file} with their approval and run this again.`);
+  if (status === 'missing') fs.copyFileSync(path.join(PLUGIN_ROOT, 'templates', file), path.join(root, file));
+  out({ template: name, file, status: status === 'missing' ? 'created' : 'unchanged' });
+}
+
 // ---------- baseline ----------
 
 function tail(text) {
@@ -556,7 +578,7 @@ const OPTIONS = {
   clean: { type: 'boolean' },
 };
 
-const USAGE = 'Usage: nodejs.mjs inspect | manifest write --package-manager npm|pnpm|yarn|bun --module-type module|commonjs --format json-summary|lcov --report <path> [--linter <name>] [--test-runner <name>] [--thresholds metric=percent,...] | manifest check | baseline [--clean]';
+const USAGE = 'Usage: nodejs.mjs inspect | manifest write --package-manager npm|pnpm|yarn|bun --module-type module|commonjs --format json-summary|lcov --report <path> [--linter <name>] [--test-runner <name>] [--thresholds metric=percent,...] | manifest check | baseline [--clean] | template eslint';
 
 const commands = {
   inspect(positionals) {
@@ -573,6 +595,10 @@ const commands = {
       return;
     }
     fail(USAGE);
+  },
+  template([name, ...rest]) {
+    if (!name || rest.length) fail(USAGE);
+    copyTemplate(process.cwd(), name);
   },
   baseline(positionals, opts) {
     if (positionals.length) fail(USAGE);
