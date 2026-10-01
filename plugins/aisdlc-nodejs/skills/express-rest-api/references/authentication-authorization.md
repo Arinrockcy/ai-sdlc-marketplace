@@ -15,11 +15,11 @@ Establish whether callers are a same-site server-rendered browser, browser SPA, 
 
 - Accept bearer tokens in the `Authorization` header, not query strings or URLs. TLS is mandatory. Do not log the header or echo the token.
 - Treat a JWT as a token format, not an authentication strategy. A decoded token is untrusted until cryptographic and claims validation succeeds.
-- Pin an allowlist of acceptable algorithms and token types. Verify the signature with a key trusted for that issuer and use, then validate exact `iss`, expected `aud`, `exp`, `nbf`, and any application-required subject, client, scope, or tenant claims. Apply a small documented clock tolerance; never disable time validation to fix clock drift.
-- Do not select a verification algorithm from untrusted token input, accept `none`, confuse asymmetric and symmetric keys, fetch arbitrary key URLs from token headers, or use one token kind in a context intended for another.
-- Cache trusted discovery/JWKS metadata with bounded refresh and rotation behavior. Unknown key IDs may trigger a controlled refresh, but must not cause unbounded outbound requests or fail open.
+- Define a mutually exclusive validation profile for every accepted issuer and token kind. An ID token proves an authentication event to its client; it is not an API access token. A refresh token is accepted only at the authorization service's refresh endpoint.
 - Keep access tokens short-lived and least-privileged. Restrict audience to the intended resource server. Where the threat model warrants it, use sender-constrained tokens. Rotate refresh tokens for public clients, detect reuse, and revoke the token family on reuse.
 - If immediate revocation is required, design for it explicitly with short lifetimes plus session/version checks, introspection, or a bounded denylist. Do not claim stateless JWTs provide immediate logout by themselves.
+
+For JWT algorithm policy, JOSE headers, claim validation, trusted JWKS lookup, issuance and rotation, storage, revocation, Express integration, and adversarial tests, read [JWT security](jwt-security.md).
 
 ## Browser sessions and cookies
 
@@ -55,7 +55,6 @@ When the application must own passwords rather than delegate them:
 ## Sources
 
 - [RFC 9700: OAuth 2.0 Security Best Current Practice](https://www.rfc-editor.org/rfc/rfc9700)
-- [RFC 8725: JSON Web Token Best Current Practices](https://www.rfc-editor.org/rfc/rfc8725)
 - [OWASP Authentication Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/Authentication_Cheat_Sheet.html)
 - [OWASP Authorization Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/Authorization_Cheat_Sheet.html)
 - [OWASP Session Management Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/Session_Management_Cheat_Sheet.html)

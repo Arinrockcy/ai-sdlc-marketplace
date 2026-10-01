@@ -51,6 +51,8 @@ If these conflict (for example, a `type` that disagrees with `runtime.module_typ
 
 ## Security
 
+- For requested or existing SonarQube analysis, use [Sonar](../sonar/SKILL.md); for dependency vulnerability scans or remediation, use [dependency vulnerabilities](../vulnerabilities/SKILL.md). Honor configured `quality_gate.scans` and CI security checks alongside lint/coverage. Never turn a failed or unavailable scanner into a passing verification. These integrations are opt-in for projects without them.
+
 - Run child processes with `execFile` or `spawn` and an argument array. Never pass input to `exec`, `execSync` or `shell: true`, where the shell interprets it.
 - Never evaluate code built at runtime: no `eval`, `new Function`, string arguments to `setTimeout` or `setInterval`, or `node:vm` on untrusted input (`vm` is not a security boundary).
 - Build queries with parameters or the query builder's bindings. Never concatenate input into SQL, shell commands, NoSQL filters or regular expressions.

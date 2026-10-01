@@ -245,7 +245,7 @@ function verifyInspect() {
   assert.equal(facts.engines.ok, false);
   assert.deepEqual(facts.version_pins.map(pinOk), [['.nvmrc', true], ['package.json volta.node', false]]);
   assert.deepEqual([facts.module.type, facts.module.commonjs_files, facts.module.commonjs_examples, facts.module.esm_files], ['module', 1, ['old.js'], 2]);
-  assert.deepEqual(facts.scripts, { lint: 'eslint .', 'test:coverage': null, test: null });
+  assert.deepEqual(facts.scripts, { lint: 'eslint .', 'test:coverage': null, test: null, sonar: null, 'security:audit': null });
   assert.deepEqual(facts.tools, { eslint: '^9', jest: '^30' });
   assert.deepEqual(facts.config_files, ['eslint.config.js', '.gitignore', 'package.json#jest']);
   assert.equal(facts.coverage_dir_ignored, true);

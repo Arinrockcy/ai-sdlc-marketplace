@@ -5,7 +5,7 @@ A stack-agnostic AI-SDLC workflow for Claude Code and GitHub Copilot. Its skills
 | Plugin | Purpose |
 |--------|---------|
 | `aisdlc` | Core workflow: init, create-goal, challenge, adr, govern, implement |
-| `aisdlc-nodejs` | Node.js stack: Node.js 24+, ES modules, coding standards, ESLint/coverage gates, and Express REST API/auth practices |
+| `aisdlc-nodejs` | Node.js stack: Node.js 24+, ES modules, coding standards, ESLint/coverage gates, SonarQube, vulnerability scans, and Express REST API/auth/JWT practices |
 
 ## Install
 
@@ -29,7 +29,17 @@ In VS Code, add the repository to the `chat.plugins.marketplaces` setting, then 
 
 Copilot doesn't namespace plugin skills, so drop the prefix from the commands below: `/aisdlc:govern G-001` is `/govern G-001`, and `/aisdlc-nodejs:register` is `/register`. `/init` is Copilot's own command, so start with a prompt such as `Use the aisdlc init skill` instead. A project skill of the same name (for example in `.github/skills/`) hides the plugin's.
 
-The Node.js plugin also provides `/aisdlc-nodejs:express-rest-api` for designing, implementing, or reviewing Express endpoints, authentication, authorization, sessions/tokens, and production API security.
+The Node.js plugin also provides `/aisdlc-nodejs:express-rest-api` for designing, implementing, or reviewing Express endpoints, authentication, authorization, JWTs, sessions/tokens, and production API security.
+
+Use `/aisdlc-nodejs:sonar` for SonarQube Server or Cloud configuration, LCOV coverage import, and quality-gate checks. Use `/aisdlc-nodejs:vulnerabilities` for dependency audits and remediation with npm, pnpm, Yarn, or Bun. Both preserve existing tools and policies and support CI-only checks or optional checks after each aisdlc task.
+
+For per-task enforcement, configure `sonar` and/or `security:audit` scripts in the target project's `package.json`, register the Node.js stack, and run the plugin helper from that project's root (replace `<plugin>` and choose its package manager):
+
+```sh
+node <plugin>/scripts/nodejs.mjs manifest scans --package-manager npm --sonar on --vulnerabilities on
+```
+
+This appends the dependency audit and Sonar analysis after lint/coverage. Missing scripts are refused, nonzero scan exits fail verification, and re-registration retains enabled scans. The Sonar script must wait for the remote quality gate; an upload alone is insufficient. Supply credentials through the environment or CI secrets. The skills explain scanner setup, audit severity semantics, and hook overrides that can shadow the manifest. Use `--sonar off` or `--vulnerabilities off` only when intentionally removing that local gate. No scanner packages are installed by the plugin itself.
 
 Requires Node.js 24+. Graphify is optional; `/aisdlc:init` offers to set it up.
 
@@ -105,6 +115,10 @@ Each plugin keeps a changelog: [`aisdlc`](plugins/aisdlc/CHANGELOG.md), [`aisdlc
 ### 0.8.x → 0.9.0 (`aisdlc`)
 
 This only affects a project with more than one stack marker (for example `package.json` and `pyproject.toml`), `stack` set to `auto` in `.aisdlc/config.json`, and exactly one manifest in `.aisdlc/stacks/`. Until now no stack was active there, so `after_task` ran nothing and `coverage check` passed with a note. Now that manifest's stack is active, so its task gate and coverage check run. Run `aisdlc.mjs detect-stack` to see which stack is active. To choose another one, set `stack` in `.aisdlc/config.json`.
+
+### `aisdlc-nodejs` 0.8.x → 0.9.0
+
+Nothing is required for existing projects. Sonar and vulnerability scans are opt-in through the new skills; configure their project scripts before enabling per-task gates. Existing lint and coverage thresholds remain in force.
 
 ### `aisdlc-nodejs` 0.6.x → 0.7.0
 

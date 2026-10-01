@@ -39,17 +39,18 @@ const LOCKFILES = [
   ['npm-shrinkwrap.json', 'npm'],
 ];
 const VERSION_PIN_FILES = ['.nvmrc', '.node-version'];
-const TOOL_PACKAGES = ['eslint', 'jest', '@jest/globals', 'vitest', '@vitest/coverage-v8', '@vitest/coverage-istanbul', 'c8', 'nyc', 'typescript'];
+const TOOL_PACKAGES = ['eslint', 'jest', '@jest/globals', 'vitest', '@vitest/coverage-v8', '@vitest/coverage-istanbul', 'c8', 'nyc', 'typescript', '@sonar/scan', 'sonarqube-scanner'];
 const CONFIG_FILES = [
   'eslint.config.js', 'eslint.config.mjs', 'eslint.config.cjs', 'eslint.config.ts', 'eslint.config.mts', 'eslint.config.cts',
   '.eslintrc', '.eslintrc.js', '.eslintrc.cjs', '.eslintrc.json', '.eslintrc.yml', '.eslintrc.yaml',
   'jest.config.js', 'jest.config.mjs', 'jest.config.cjs', 'jest.config.ts', 'jest.config.json',
   'vitest.config.js', 'vitest.config.mjs', 'vitest.config.ts', 'vitest.config.mts',
   '.c8rc', '.c8rc.json', '.nycrc', '.nycrc.json', '.nycrc.yml',
-  'tsconfig.json', 'jsconfig.json', '.gitignore',
+  'tsconfig.json', 'jsconfig.json', '.gitignore', 'sonar-project.properties',
 ];
 const PACKAGE_JSON_CONFIG_KEYS = ['jest', 'eslintConfig', 'c8', 'nyc'];
-const GATE_SCRIPTS = ['lint', 'test:coverage', 'test'];
+const GATE_SCRIPTS = ['lint', 'test:coverage', 'test', 'sonar', 'security:audit'];
+const SCAN_SCRIPTS = { vulnerabilities: 'security:audit', sonar: 'sonar' };
 
 // The module-system scan reads at most this many `.js` files, each up to this size.
 const SCAN_LIMITS = { files: 2000, bytes: 512 * 1024, examples: 5 };
@@ -455,9 +456,68 @@ function writeManifest(root, opts) {
     thresholds: opts.thresholds === undefined ? undefined : parseThresholds(opts.thresholds),
   });
   const file = path.join(root, MANIFEST_FILE);
+  const existing = readJsonIfExists(file);
+  if (existing?.quality_gate?.scans) {
+    manifest.quality_gate.scans = existing.quality_gate.scans;
+    applyScanGates(root, manifest, opts['package-manager']);
+  }
   fs.mkdirSync(path.dirname(file), { recursive: true });
   fs.writeFileSync(file, `${JSON.stringify(manifest, null, 2)}\n`);
   out({ written: MANIFEST_FILE, manifest, left_out: leftOut });
+}
+
+// Scan settings are opt-in; project scripts own scanner configuration and failure policy.
+// Keep these settings when re-registering so a tooling update cannot silently remove a gate.
+function applyScanGates(root, manifest, manager) {
+  const pkg = readJsonIfExists(path.join(root, 'package.json'));
+  const scans = manifest.quality_gate.scans;
+  if (!scans || typeof scans !== 'object' || Array.isArray(scans)) fail('quality_gate.scans must be an object.');
+  for (const [name, enabled] of Object.entries(scans)) {
+    if (!Object.hasOwn(SCAN_SCRIPTS, name) || typeof enabled !== 'boolean') fail(`Invalid scan setting "${name}"; expected sonar or vulnerabilities with a boolean value.`);
+  }
+  const hook = manifest.hooks?.after_task;
+  const commands = [].concat(hook?.run ?? []);
+  if (hook?.use || !commands.length || commands.some(isNotCommand)) fail('after_task must contain run commands before enabling scans. Re-run /aisdlc-nodejs:register.');
+  // Remove only exact commands owned by this integration; retain other project hooks in order.
+  const retained = commands.filter(isNotConfiguredScanCommand.bind(null, scans));
+  for (const [name, script] of Object.entries(SCAN_SCRIPTS)) {
+    if (!scans[name]) continue;
+    if (typeof pkg?.scripts?.[script] !== 'string' || !pkg.scripts[script].trim()) fail(`Configure package.json scripts["${script}"] before enabling ${name}.`);
+    retained.push(`${manager} run ${script}`);
+  }
+  hook.run = retained;
+}
+
+function isNotCommand(value) {
+  return typeof value !== 'string' || !value.trim();
+}
+
+function isNotConfiguredScanCommand(scans, command) {
+  for (const [name, script] of Object.entries(SCAN_SCRIPTS)) {
+    if (!Object.hasOwn(scans, name)) continue;
+    for (const manager of PACKAGE_MANAGERS) if (command === `${manager} run ${script}`) return false;
+  }
+  return true;
+}
+
+function writeScanSettings(root, opts) {
+  requireInitialized(root);
+  const manager = requireChoice('package-manager', opts['package-manager'], PACKAGE_MANAGERS);
+  if (opts.sonar === undefined && opts.vulnerabilities === undefined) fail('Usage: manifest scans requires --sonar on|off or --vulnerabilities on|off.');
+  const status = checkManifest(root);
+  if (!status.current) fail(`The stack manifest isn't usable: ${status.problems.join(' ')}`);
+  const file = path.join(root, MANIFEST_FILE);
+  const manifest = readJsonIfExists(file);
+  manifest.quality_gate ??= {};
+  manifest.quality_gate.scans ??= {};
+  if (typeof manifest.quality_gate.scans !== 'object' || Array.isArray(manifest.quality_gate.scans)) fail('quality_gate.scans must be an object.');
+  for (const name of Object.keys(SCAN_SCRIPTS)) {
+    if (opts[name] !== undefined) manifest.quality_gate.scans[name] = requireChoice(name, opts[name], ['on', 'off']) === 'on';
+  }
+  applyScanGates(root, manifest, manager);
+  manifest.version = pluginManifest().version;
+  fs.writeFileSync(file, `${JSON.stringify(manifest, null, 2)}\n`);
+  out({ written: MANIFEST_FILE, manifest });
 }
 
 export function checkManifest(root, pluginVersion = pluginManifest().version) {
@@ -590,10 +650,12 @@ const OPTIONS = {
   linter: { type: 'string' },
   'test-runner': { type: 'string' },
   thresholds: { type: 'string' },
+  sonar: { type: 'string' },
+  vulnerabilities: { type: 'string' },
   clean: { type: 'boolean' },
 };
 
-const USAGE = 'Usage: nodejs.mjs inspect | manifest write --package-manager npm|pnpm|yarn|bun --module-type module|commonjs --format json-summary|lcov --report <path> [--linter <name>] [--test-runner <name>] [--thresholds metric=percent,...] | manifest check | baseline [--clean] | template eslint';
+const USAGE = 'Usage: nodejs.mjs inspect | manifest write --package-manager npm|pnpm|yarn|bun --module-type module|commonjs --format json-summary|lcov --report <path> [--linter <name>] [--test-runner <name>] [--thresholds metric=percent,...] | manifest scans --package-manager npm|pnpm|yarn|bun [--sonar on|off] [--vulnerabilities on|off] | manifest check | baseline [--clean] | template eslint';
 
 const commands = {
   inspect(positionals) {
@@ -603,6 +665,7 @@ const commands = {
   manifest([action, ...rest], opts) {
     if (rest.length) fail(USAGE);
     if (action === 'write') return writeManifest(process.cwd(), opts);
+    if (action === 'scans') return writeScanSettings(process.cwd(), opts);
     if (action === 'check') {
       const result = checkManifest(process.cwd());
       out(result);
@@ -630,6 +693,10 @@ function main() {
     process.exit(1);
   }
   const [command, ...positionals] = parsed.positionals;
+  if ((parsed.values.sonar !== undefined || parsed.values.vulnerabilities !== undefined) && (command !== 'manifest' || positionals[0] !== 'scans')) {
+    process.stderr.write('nodejs: --sonar and --vulnerabilities are only supported by manifest scans.\n');
+    process.exit(1);
+  }
   if (!commands[command]) {
     process.stderr.write(`${USAGE}\n`);
     process.exit(command ? 1 : 0);

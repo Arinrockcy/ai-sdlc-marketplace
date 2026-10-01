@@ -1,6 +1,6 @@
 ---
 name: express-rest-api
-description: Design, implement, review, or secure production Express REST APIs in Node.js, including resource-oriented HTTP contracts, middleware and error handling, authentication, authorization, sessions or tokens, abuse controls, and API security testing. Use for Express API and auth work; do not use for non-HTTP Node.js services or other web frameworks.
+description: Design, implement, review, or secure production Express REST APIs in Node.js, including resource-oriented HTTP contracts, middleware and error handling, authentication, authorization, JWTs, sessions or tokens, abuse controls, and API security testing. Use for Express API and auth work; do not use for non-HTTP Node.js services or other web frameworks.
 ---
 
 # Express REST API
@@ -24,9 +24,10 @@ Do not guess who calls the API or which proxy headers are trustworthy. If the an
 
 - For routes, methods, status codes, representations, pagination, concurrency, idempotency, errors, and compatibility, read [REST API design](references/rest-api.md).
 - For login, OAuth/OIDC, bearer tokens, JWTs, cookies, sessions, API keys, authorization, or webhooks, read [authentication and authorization](references/authentication-authorization.md).
+- For issuing, validating, rotating, revoking, storing, or testing JWTs, also read [JWT security](references/jwt-security.md). Use it whenever a JWT appears in the design or implementation; do not treat the general authentication summary as sufficient.
 - For middleware ordering, Express configuration, validation, abuse resistance, observability, shutdown, and verification, read [Express security and operations](references/express-security-operations.md).
 
-Read every reference that applies to the task; ordinary endpoint work often needs the REST and Express references, while authenticated endpoint work needs all three.
+Read every reference that applies to the task. Ordinary endpoint work often needs the REST and Express references; authenticated endpoint work also needs the authentication reference; JWT work additionally needs the JWT reference.
 
 ## Required design outcomes
 
@@ -44,7 +45,7 @@ Read every reference that applies to the task; ordinary endpoint work often need
 - Order middleware deliberately: request context and safe logging; proxy/security/CORS policy; bounded parsers; authentication; route-specific validation and authorization; routes; not-found handling; final error handling. Raw-body signature verification is a special case and must run before a parser consumes the bytes.
 - Configure `trust proxy` from the actual proxy topology. Do not set it broadly just to make secure cookies or client IPs appear to work.
 - Do not add auth, validation, CORS, session, rate-limit, or security-header packages without the dependency choice required by `aisdlc-nodejs:standards`. Do not implement cryptography or token parsing from scratch.
-- Do not mutate state from `GET` or `HEAD`, put credentials in URLs, use CORS as authorization, trust decoded-but-unverified JWT claims, or accept a tenant/user identifier from input as proof of identity.
+- Do not mutate state from `GET` or `HEAD`, put credentials in URLs, use CORS as authorization, trust decoded-but-unverified JWT claims, accept an ID or refresh token as an API access token, or accept a tenant/user identifier from input as proof of identity.
 - Keep credentials and raw tokens out of source, URLs, error responses, telemetry, and logs. Redact authorization, cookie, API-key, reset-token, and secret fields recursively.
 
 ## Verification
@@ -54,7 +55,7 @@ Add or update tests proportional to the risk. At minimum cover:
 - the success contract and method/status/header semantics;
 - malformed, missing, oversized, and unknown input;
 - unauthenticated, insufficient-scope/role, wrong-owner, and cross-tenant access;
-- expired, not-yet-valid, wrong-issuer/audience, malformed, revoked, and rotated credentials when applicable;
+- expired, not-yet-valid, wrong-issuer/audience/type, malformed, revoked, substituted, and rotated credentials when applicable;
 - duplicate/retried writes, concurrent updates, pagination boundaries, and downstream failures when applicable;
 - redacted errors/logging, rate-limit behavior, proxy assumptions, CORS/CSRF behavior, and cleanup of open resources where relevant.
 

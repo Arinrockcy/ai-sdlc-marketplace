@@ -1,6 +1,6 @@
 {
   "name": "nodejs",
-  "version": "0.7.2",
+  "version": "0.9.0",
   "standards_skill": "aisdlc-nodejs:standards",
   "runtime": {
     "node": ">=24",

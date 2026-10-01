@@ -2,6 +2,23 @@
 
 All notable changes to the `aisdlc-nodejs` plugin. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/).
 
+## [0.9.0] - 2026-10-01
+
+### Added
+- `sonar` skill for SonarQube Server/Cloud setup, LCOV import, credential handling, CI quality gates, and finding remediation.
+- `vulnerabilities` skill for npm, pnpm, Yarn, and Bun audits, dependency remediation, advisory triage, and explicit exception handling.
+- Opt-in `manifest scans --package-manager <manager> --sonar on|off --vulnerabilities on|off` wiring for project `sonar` and `security:audit` scripts. Enabled scans run after coverage, fail task verification on nonzero exit, and survive stack re-registration.
+- Project inspection reports Sonar scanner dependencies/configuration and both scan scripts. Regression tests cover gate ordering, missing scripts, persistence, and scanner failure propagation.
+
+### Fixed
+- Aligned `stack.json` with the plugin release version so newly registered manifests report the release that wrote them. Older compatible manifests continue to work.
+
+## [0.8.0] - 2026-10-01
+
+### Added
+- Dedicated JWT best-practices guidance for mutually exclusive token profiles, JOSE algorithm and header policy, claim validation, trusted JWKS lookup, issuance, rotation, revocation, browser storage, Express middleware integration, and adversarial tests.
+- Explicit protection against ID/access/refresh-token substitution, algorithm and key-type confusion, attacker-directed key lookup, unbounded unknown-`kid` refresh, and treating a valid token as sufficient authorization.
+
 ## [0.7.2] - 2026-10-01
 
 ### Added
