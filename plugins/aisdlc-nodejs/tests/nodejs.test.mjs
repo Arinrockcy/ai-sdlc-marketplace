@@ -6,7 +6,7 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import {
-  OLDEST_COMPATIBLE_MANIFEST, compareVersions, rangeMinMajor, detectPackageManager, resolveThresholds, enginesCheck,
+  OLDEST_COMPATIBLE_MANIFEST, compareVersions, rangeMinMajor, detectPackageManager, detectWorkspaces, resolveThresholds, enginesCheck,
 } from '../scripts/nodejs.mjs';
 
 const PLUGIN = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -100,6 +100,27 @@ function verifyPackageManager() {
     assert.equal(detected.ambiguous ?? false, testCase.ambiguous ?? false, label);
     if (testCase.note) assert.match(detected.notes.join('\n'), testCase.note, label);
   }
+}
+
+const PNPM_WORKSPACE = `# monorepo
+packages:
+  - 'packages/*'
+  - "apps/*" # deployables
+
+  - tools
+catalog:
+  react: ^19
+`;
+
+function verifyWorkspaces() {
+  const dir = project({ git: false });
+  assert.equal(detectWorkspaces(dir, {}), null);
+  assert.deepEqual(detectWorkspaces(dir, { workspaces: ['packages/*'] }), { source: 'package.json', patterns: ['packages/*'] });
+  assert.deepEqual(detectWorkspaces(dir, { workspaces: { packages: ['libs/*'], nohoist: ['**/x'] } }), { source: 'package.json', patterns: ['libs/*'] });
+  fs.writeFileSync(path.join(dir, 'pnpm-workspace.yaml'), PNPM_WORKSPACE);
+  assert.deepEqual(detectWorkspaces(dir, {}), { source: 'pnpm-workspace.yaml', patterns: ['packages/*', 'apps/*', 'tools'] });
+  fs.writeFileSync(path.join(dir, 'pnpm-workspace.yaml'), 'catalog:\n  react: ^19\n');
+  assert.equal(detectWorkspaces(dir, {}), null);
 }
 
 function verifyThresholds() {
@@ -219,6 +240,8 @@ function verifyInspect() {
   assert.equal(result.code, 0, result.stderr);
   const facts = result.json;
   assert.equal(facts.package_manager.name, 'pnpm');
+  assert.equal(facts.workspaces, null);
+  assert.equal(facts.yarn_pnp, false);
   assert.equal(facts.engines.ok, false);
   assert.deepEqual(facts.version_pins.map(pinOk), [['.nvmrc', true], ['package.json volta.node', false]]);
   assert.deepEqual([facts.module.type, facts.module.commonjs_files, facts.module.commonjs_examples, facts.module.esm_files], ['module', 1, ['old.js'], 2]);
@@ -284,6 +307,7 @@ function verifySkillInvocations() {
 
 test('nodejs script: semver ranges resolve to the lowest Node major they admit', verifyRangeMinMajor);
 test('nodejs script: package manager comes from packageManager, then lockfiles, then npm', verifyPackageManager);
+test('nodejs script: workspaces come from package.json or pnpm-workspace.yaml', verifyWorkspaces);
 test('nodejs script: thresholds keep the floor and only metrics the report measures', verifyThresholds);
 test('nodejs script: manifest write adapts commands, runtime and quality gate', verifyManifestWrite);
 test('nodejs script: manifest check compares the installed version with the oldest compatible one', verifyManifestCheck);

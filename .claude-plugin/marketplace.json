@@ -16,7 +16,7 @@
       "name": "aisdlc-nodejs",
       "source": "./plugins/aisdlc-nodejs",
       "description": "Node.js stack plugin for aisdlc: Node.js 24+, ES modules, coding standards, quality gates, and Express REST API and authentication practices.",
-      "version": "0.5.0",
+      "version": "0.5.1",
       "category": "development"
     }
   ]

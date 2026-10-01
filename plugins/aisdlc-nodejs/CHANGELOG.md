@@ -2,6 +2,17 @@
 
 All notable changes to the `aisdlc-nodejs` plugin. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/).
 
+## [0.5.1] - 2026-09-30
+
+### Added
+- `inspect` reports `workspaces` (from `package.json` or `pnpm-workspace.yaml`) and `yarn_pnp`.
+
+### Changed
+- `register` asks how to gate a monorepo: one gate for the whole repository with a merged coverage report (recommended), or one package only. Before, it assumed a single package.
+- `register` runs Jest with ES modules through `yarn node … $(yarn bin jest)` under Yarn Plug'n'Play, where `node_modules/jest` doesn't exist, and advises against `NODE_OPTIONS=…` in scripts because it fails in Windows shells.
+- `register` names the ES module trade-off between Jest (experimental flag, its own mocking API) and Vitest or node:test (native) when it offers test runners. Jest stays the default.
+- `register` makes the ignored coverage folder and the manifest's report path follow a custom coverage directory (Jest's `coverageDirectory`, Vitest's `coverage.reportsDirectory`).
+
 ## [0.5.0] - 2026-09-30
 
 ### Added

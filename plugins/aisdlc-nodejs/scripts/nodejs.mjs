@@ -226,6 +226,33 @@ function walkJsFiles(root) {
   return found.sort();
 }
 
+// Workspace package globs from package.json `workspaces` (an array or `{ packages }`) or pnpm-workspace.yaml.
+export function detectWorkspaces(root, pkg) {
+  const fromPackage = Array.isArray(pkg?.workspaces) ? pkg.workspaces : pkg?.workspaces?.packages;
+  if (Array.isArray(fromPackage) && fromPackage.length) return { source: 'package.json', patterns: fromPackage };
+  const pnpmFile = path.join(root, 'pnpm-workspace.yaml');
+  if (!fs.existsSync(pnpmFile)) return null;
+  const patterns = pnpmWorkspacePackages(fs.readFileSync(pnpmFile, 'utf8'));
+  return patterns.length ? { source: 'pnpm-workspace.yaml', patterns } : null;
+}
+
+// The `packages:` list of pnpm-workspace.yaml, read line by line: the file is flat enough not to need a YAML parser.
+function pnpmWorkspacePackages(text) {
+  const patterns = [];
+  let inPackages = false;
+  for (const line of text.split('\n')) {
+    if (/^packages:\s*$/.test(line)) {
+      inPackages = true;
+      continue;
+    }
+    if (!inPackages || /^\s*(#.*)?$/.test(line)) continue;
+    const item = /^\s+-\s*(['"]?)(.+?)\1\s*(#.*)?$/.exec(line);
+    if (!item) break;
+    patterns.push(item[2]);
+  }
+  return patterns;
+}
+
 function installedTools(pkg) {
   const tools = {};
   for (const name of TOOL_PACKAGES) {
@@ -276,6 +303,8 @@ export function inspectProject(root) {
     root,
     package_json: pkg !== null,
     package_manager: detectPackageManager(root, pkg),
+    workspaces: detectWorkspaces(root, pkg),
+    yarn_pnp: fs.existsSync(path.join(root, '.pnp.cjs')) || fs.existsSync(path.join(root, '.pnp.js')),
     node: nodeRuntime(process.versions.node),
     engines: enginesCheck(pkg?.engines?.node),
     version_pins: versionPins(root, pkg),

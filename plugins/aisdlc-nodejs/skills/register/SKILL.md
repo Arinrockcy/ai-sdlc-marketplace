@@ -9,9 +9,15 @@ description: Register the Node.js stack with the aisdlc workflow in the current 
 
 Prerequisite: `.aisdlc/` must exist. If it doesn't, tell the user to run `/aisdlc:init` first and stop.
 
-1. **Inspect the project.** Run `$NODEJS inspect`. It reports the facts the next steps decide on: `package_manager`, `node`, `engines`, `version_pins`, `module`, `scripts`, `tools`, `config_files`, `coverage_dir_ignored`, `workflow` and `manifest`. Run it again after a change, rather than re-reading the files.
+1. **Inspect the project.** Run `$NODEJS inspect`. It reports the facts the next steps decide on: `package_manager`, `workspaces`, `yarn_pnp`, `node`, `engines`, `version_pins`, `module`, `scripts`, `tools`, `config_files`, `coverage_dir_ignored`, `workflow` and `manifest`. Run it again after a change, rather than re-reading the files.
 
 2. **Package manager.** Use `package_manager.name`. It comes from the `packageManager` field first, then from the lockfiles, and is npm when there is neither. If `name` is null (lockfiles for several managers, or a `packageManager` the plugin doesn't support), ask the user which manager the project uses. Show any `notes`, for example a lockfile that disagrees with `packageManager`.
+
+   **Workspaces.** If `workspaces` is set, the project is a monorepo. The hooks run from the project root, and the manifest names a single coverage report, so ask the user how to gate it, with the first option as the recommended default:
+   - **One gate for the whole repository:** root `lint` and `test:coverage` scripts that cover every package and write one merged report, for example Jest's `projects` or Vitest's `projects`, with coverage collected at the root. Thresholds then apply to the repository as a whole.
+   - **One package only:** the root scripts run that package's commands (for example `npm run lint -w <package>`, `pnpm --filter <package> run test:coverage`), and the report path points inside it (`packages/<package>/coverage/...`). The other packages get no gate.
+
+   Record the choice for the report in step 10. Don't pick one for the user.
 
 3. **Runtime and module system.**
    - **Node.js 24+ is required.** If `node.ok` is false, tell the user this stack needs Node.js 24 or later and stop until they upgrade. If `engines.ok` or a `version_pins` entry's `ok` is false, show the change to `>=24` (or `24` for a pin) and apply it once the user approves. When `ok` is null, the script couldn't read the range or pin (for example `lts/*`): show it and ask the user whether it resolves to Node.js 24 or later.
@@ -26,7 +32,7 @@ Prerequisite: `.aisdlc/` must exist. If it doesn't, tell the user to run `/aisdl
    - The default test runner is Jest. The `test:coverage` script must run the suite with coverage enabled and enforce global minimums of 80% for branches, functions, lines, and statements. The thresholds may live in the Jest configuration or the command, but the command must fail below any threshold.
    - Coverage must count every maintained source file, including files no test imports. By default, runners measure only the files the tests load, so a new module without any test leaves the percentage unchanged. Check for Jest's `collectCoverageFrom` (or Vitest's `coverage.include`, or c8/nyc `--all` with `--include`) covering the source folders and leaving out tests, fixtures and generated files.
    - Every `test:coverage` run must also write a coverage report file, which the core `after_goal` hook checks before a goal completes. Supported formats: Istanbul's `json-summary` (`coverage/coverage-summary.json`) or an LCOV file. Check the runner's reporter configuration (Jest's `coverageReporters` and `coverageDirectory`) for one of them.
-   - The coverage output directory must be ignored by git (`.gitignore`), so reports never show up in a goal's changes. `coverage_dir_ignored` says whether `coverage/` is.
+   - The coverage output directory must be ignored by git (`.gitignore`), so reports never show up in a goal's changes. `coverage_dir_ignored` says whether `coverage/` is. When the runner writes elsewhere (Jest's `coverageDirectory`, Vitest's `coverage.reportsDirectory`, a workspace package's folder), that folder is the one to ignore, and the report path in step 7 follows it.
    - If either script or tool is absent, do not install or select a dependency silently. Continue to step 5.
 
 5. **Ask before changing third-party tooling.** Present concrete choices, with the detected setup first:
@@ -34,7 +40,7 @@ Prerequisite: `.aisdlc/` must exist. If it doesn't, tell the user to run `/aisdl
    - **Use the project's alternative:** accept the lint or test/coverage library the user names. Preserve its conventions and require an equivalent zero-error lint gate plus 80% branches/functions/lines/statements coverage.
    - **User-owned implementation:** use or build the user's replacement only after they choose it. Its own module must have 100% unit coverage for branches, functions, lines, and statements, including negative cases. Add a deterministic performance test or benchmark when performance is one of the reasons for replacing the library.
 
-   Explain briefly what each option handles and its trade-offs. Never install packages, rewrite configuration, or replace the user's selected library before they choose. ESLint remains required unless the user explicitly overrides this plugin policy.
+   Explain briefly what each option handles and its trade-offs. With ES modules, include this one: Jest runs them only behind Node's experimental `--experimental-vm-modules` flag, with its own mocking API (`jest.unstable_mockModule`), while Vitest and node:test run them natively. Jest stays the default unless the user picks another. Never install packages, rewrite configuration, or replace the user's selected library before they choose. ESLint remains required unless the user explicitly overrides this plugin policy.
 
 6. **Configure scripts with approval.** After the user selects the tools, add or update `lint` and `test:coverage` only as authorized. Use the selected package manager so its lockfile is updated; never edit a lockfile by hand. If Jest is selected, configure `coverageThreshold.global` to at least:
 
@@ -61,7 +67,7 @@ Prerequisite: `.aisdlc/` must exist. If it doesn't, tell the user to run `/aisdl
 
      Escape the inner double quotes when this goes in `package.json`.
 
-   If `.gitignore` doesn't cover the coverage directory, show the line to add and add it once the user approves. With ES modules, Jest needs Node's `--experimental-vm-modules` flag, so run it as, for example, `node --experimental-vm-modules node_modules/jest/bin/jest.js --coverage`. Keep `test` available for fast local runs if the project already distinguishes it from the coverage gate.
+   If `.gitignore` doesn't cover the coverage directory, show the line to add and add it once the user approves. With ES modules, Jest needs Node's `--experimental-vm-modules` flag, so run it as, for example, `node --experimental-vm-modules node_modules/jest/bin/jest.js --coverage`. Under Yarn Plug'n'Play (`yarn_pnp` is true) there is no `node_modules/jest`: use `yarn node --experimental-vm-modules $(yarn bin jest) --coverage` instead. Don't use `NODE_OPTIONS=... jest`, which fails in Windows shells unless another dependency sets the variable. Keep `test` available for fast local runs if the project already distinguishes it from the coverage gate.
 
 7. **Write the stack manifest.** Run:
 
@@ -87,4 +93,4 @@ Prerequisite: `.aisdlc/` must exist. If it doesn't, tell the user to run `/aisdl
 
    Do not offer `None` as a normal setup choice: disabling this required gate needs an explicit user override. When `/aisdlc:init` invoked this skill, it checks the resolved hook afterwards.
 
-10. **Report the result.** Show the Node.js version and module system, the two resolved `after_task` commands, the selected lint and test tools, the coverage report path and format, the coverage thresholds in the manifest (and any left out), which files coverage counts (and, for node:test, that untested modules aren't counted), the baseline result from step 8, and any missing setup. Tell the user to commit `.aisdlc/stacks/nodejs.json` and the tooling changes on their own, before a goal starts, so they don't end up in a goal's changes. Remind the user that `AISDLC_HOOK_AFTER_TASK="<cmd>"` (or `none`) is an explicit one-run override, not a change to the registered standard.
+10. **Report the result.** Show the Node.js version and module system, the two resolved `after_task` commands, the selected lint and test tools, the coverage report path and format, the coverage thresholds in the manifest (and any left out), which files coverage counts (and, for node:test, that untested modules aren't counted), the baseline result from step 8, how a monorepo is gated (step 2), and any missing setup. Tell the user to commit `.aisdlc/stacks/nodejs.json` and the tooling changes on their own, before a goal starts, so they don't end up in a goal's changes. Remind the user that `AISDLC_HOOK_AFTER_TASK="<cmd>"` (or `none`) is an explicit one-run override, not a change to the registered standard.
