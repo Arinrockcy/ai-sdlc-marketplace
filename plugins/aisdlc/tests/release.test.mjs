@@ -16,3 +16,8 @@ test('release: every plugin version matches the marketplace and heads its change
     assert.equal(latest, entry.version, `${entry.name}: CHANGELOG.md's latest entry is not ${entry.version}`);
   }
 });
+
+// VS Code reads a marketplace only from .github/plugin/; Claude Code and Copilot CLI read .claude-plugin/.
+test('release: the VS Code marketplace is a copy of the Claude Code one', () => {
+  assert.deepEqual(json('.github/plugin/marketplace.json'), json('.claude-plugin/marketplace.json'), 'copy .claude-plugin/marketplace.json to .github/plugin/marketplace.json');
+});

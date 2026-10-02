@@ -25,7 +25,7 @@ copilot plugin install aisdlc@aisdlc-marketplace
 copilot plugin install aisdlc-nodejs@aisdlc-marketplace   # optional, per stack
 ```
 
-VS Code picks up plugins that Copilot CLI installed. To install them from VS Code instead, make sure `chat.plugins.enabled` is on, and add the repository to the `chat.plugins.marketplaces` setting, as `owner/repo`, a git URL, or a `file:///` URI for a local clone (a plain path isn't accepted). Then search `@agentPlugins` in the Extensions view and install both plugins.
+VS Code picks up plugins that Copilot CLI installed. To install them from VS Code instead (it reads this repository's `.github/plugin/marketplace.json`), make sure `chat.plugins.enabled` is on, and add the repository to the `chat.plugins.marketplaces` setting, as `owner/repo`, a git URL, or a `file:///` URI for a local clone (a plain path isn't accepted). Then search `@agentPlugins` in the Extensions view and install both plugins.
 
 Install the plugin for each language the project uses. The workflow detects the project's languages from their marker files (each stack plugin declares its own) and registers every installed plugin by itself: `/aisdlc:init` does it at setup, and `/aisdlc:create-goal` and `/aisdlc:implement` pick up a plugin installed later. A repository with several languages gets each one's standards and task gate.
 
@@ -267,4 +267,4 @@ npm run bench       # token cost of registry files and command output at 10/100/
 npm run validate    # claude plugin validate (marketplace and both plugins)
 ```
 
-When a change alters a plugin's behavior, add an entry under that plugin's `CHANGELOG.md` and bump its version in both its `plugin.json` and `.claude-plugin/marketplace.json`. Breaking changes (anything that makes existing `.aisdlc/` state refuse, fail or mean something else) go under **Breaking**, with an upgrade step in the README. `npm test` checks that the versions and changelogs agree.
+When a change alters a plugin's behavior, add an entry under that plugin's `CHANGELOG.md` and bump its version in both its `plugin.json` and `.claude-plugin/marketplace.json`, then copy that file to `.github/plugin/marketplace.json` (VS Code's marketplace). Breaking changes (anything that makes existing `.aisdlc/` state refuse, fail or mean something else) go under **Breaking**, with an upgrade step in the README. `npm test` checks that the versions and changelogs agree.

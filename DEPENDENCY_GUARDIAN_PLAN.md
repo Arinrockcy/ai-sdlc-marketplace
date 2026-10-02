@@ -2,16 +2,16 @@
 
 ## Summary
 
-Create a standalone Claude Code plugin named `dependency-guardian` in this marketplace. It will:
+Create a standalone plugin named `dependency-guardian` in this marketplace. It will:
 
 - Detect vulnerable, deprecated, outdated, or explicitly discouraged npm packages.
 - Block unsafe agent-issued installs before they modify the project.
-- Support manual and automatic invocation through `/dependency-guardian:audit`.
+- Support manual and automatic invocation through `/dependency-guardian:dependency-audit`.
 - Provide a dependency-free scanner that can be committed into adopting repositories and run in CI.
 - Suggest alternatives and apply fixes only after explicit approval.
 - Use an ecosystem-adapter design so Maven, Gradle, and other package managers can be added later.
 
-V1 is Claude-first. The skill instructions and scanner output remain agent-neutral so later Codex and other Agent Skills adapters can reuse them. Claude skills support both direct slash-command and automatic invocation, while `PreToolUse` hooks provide deterministic blocking. ([Claude skills](https://code.claude.com/docs/en/skills), [Claude hooks](https://code.claude.com/docs/en/hooks))
+V1 supports Claude Code and GitHub Copilot from one set of files, as the other plugins do. The skill, hooks and scanner are shared, and nothing is written twice for each agent. Skills are invoked directly or picked automatically. `PreToolUse` hooks provide deterministic blocking: Copilot CLI and VS Code read a plugin's `hooks/hooks.json` in Claude Code's format, so one file serves both. The skill instructions and scanner output remain agent-neutral so later Codex and Cursor adapters can reuse them. ([Claude skills](https://code.claude.com/docs/en/skills), [Claude hooks](https://code.claude.com/docs/en/hooks), [Copilot hooks](https://docs.github.com/en/copilot/reference/hooks-configuration), [Copilot CLI plugins](https://docs.github.com/en/copilot/reference/copilot-cli-reference/cli-plugin-reference), [VS Code hooks](https://code.visualstudio.com/docs/copilot/customization/hooks))
 
 ## Implementation Changes
 
@@ -19,18 +19,18 @@ V1 is Claude-first. The skill instructions and scanner output remain agent-neutr
 
 Add `plugins/dependency-guardian/` with:
 
-- Claude plugin manifest, version `0.1.0`.
-- One `audit` skill, automatically discoverable and callable as `/dependency-guardian:audit`.
-- Claude `PreToolUse` and `PostToolUse` hooks.
+- `.claude-plugin/plugin.json`, version `0.1.0`. Copilot reads the same manifest.
+- One `dependency-audit` skill, automatically discoverable. It isn't named `audit`, because Copilot doesn't namespace plugin skills and keeps only one of two that share a name. It keeps the preamble the other plugins' skills use, which says what `${CLAUDE_PLUGIN_ROOT}` and `$ARGUMENTS` stand for and to drop the `<plugin>:` prefix where the agent doesn't namespace skills.
+- `PreToolUse` and `PostToolUse` hooks in `hooks/hooks.json`, which both agents load.
 - A dependency-free Node.js 24+ scanner.
 - A versioned npm policy catalog, tests, and changelog.
-- Marketplace entry and README installation/usage documentation.
+- A marketplace entry, and the plugin added to the README's install commands, which already cover both agents.
 
 The skill supports:
 
-- `/dependency-guardian:audit` — read-only full scan.
-- `/dependency-guardian:audit setup` — with approval, vendor the scanner and policy catalog into the current repository and add an `npm run deps:check` script.
-- `/dependency-guardian:audit fix` — prepare remediation, request approval, apply the approved changes, run project tests, and rescan.
+- `/dependency-guardian:dependency-audit` — read-only full scan.
+- `/dependency-guardian:dependency-audit setup` — with approval, vendor the scanner and policy catalog into the current repository and add an `npm run deps:check` script.
+- `/dependency-guardian:dependency-audit fix` — prepare remediation, request approval, apply the approved changes, run project tests, and rescan.
 
 Keep setup and remediation mutations approval-gated. Automatic invocation may inspect and recommend but must not silently install, uninstall, or upgrade packages.
 
@@ -42,7 +42,10 @@ The vendored scanner exposes:
 node .dependency-guardian/guardian.mjs scan [--ci] [--json] [--workspace <name>] [--signatures]
 node .dependency-guardian/guardian.mjs preflight -- <npm-subcommand-and-arguments>
 node .dependency-guardian/guardian.mjs validate-policy
+node .dependency-guardian/guardian.mjs hook pre|post
 ```
+
+`hook` reads an agent's hook input on stdin and answers it (see [Agent hooks](#agent-hooks)). The plugin's `hooks/hooks.json` runs the plugin's own copy as `node "${CLAUDE_PLUGIN_ROOT}/scripts/guardian.mjs" hook pre|post`. Copilot also sets `${CLAUDE_PLUGIN_ROOT}` for plugin hooks.
 
 Exit codes:
 
@@ -111,7 +114,7 @@ Catalog entries include a stable rule ID, package matcher, direct/transitive act
 
 ### Pre-install enforcement
 
-The Claude `PreToolUse` hook inspects Bash calls involving:
+The `PreToolUse` hook inspects shell commands involving:
 
 - `npm install`, `npm i`, or `npm add`
 - `npm update`
@@ -132,7 +135,20 @@ Existing findings do not prevent a remediation command that reduces them and int
 
 Dynamic package names, command substitutions, or unsupported sources fail closed with a message explaining how to rerun using a literal package specification or a timed waiver. Temporary data must always be cleaned up, and preflight must never run dependency lifecycle scripts.
 
-A `PostToolUse` hook rescans after successful npm mutations and returns findings to Claude. It is a verification layer, not the primary guard, because post-tool hooks cannot undo an installation.
+A `PostToolUse` hook rescans after successful npm mutations and returns findings to the agent. It is a verification layer, not the primary guard, because post-tool hooks cannot undo an installation.
+
+### Agent hooks
+
+One `hooks/hooks.json` in Claude Code's format (`PreToolUse` and `PostToolUse`, each with a nested `hooks` array) runs `guardian.mjs hook`. Every agent-specific detail lives in `hook`, so the policy and preflight code see one normalized `{ event, command }`:
+
+- **Input.** Read the command from `tool_input.command`, which Claude Code and Copilot's `PreToolUse` format send. Also accept `toolArgs.command`, which Copilot's own `preToolUse` format sends, so a repository hook file may use either.
+- **Which tools.** Act only on shell tools: `Bash` in Claude Code, `bash` and `powershell` in Copilot CLI, and VS Code's terminal tool. Read VS Code's tool name from its agent debug log while implementing, then record it in the code and the tests. Every other tool passes through. Filter in `hook` itself, because VS Code ignores matchers.
+- **Output.** Answer with `hookSpecificOutput.permissionDecision` (`allow`, `deny` or `ask`) and its reason. On a deny, also exit `2` with the reason on stderr, because every supported agent blocks the call on that exit code. The Copilot cloud agent treats `ask` as `deny`, which fails closed.
+- **Timeout.** Set an explicit hook timeout. Have preflight stop at its own deadline before that timeout and deny the command: Copilot lets the command through when a hook times out.
+
+### Repository hook
+
+`audit setup` asks separately whether to add `.github/hooks/dependency-guardian.json`, which runs the vendored `guardian.mjs hook`. The Copilot cloud agent reads only repository hooks, and Copilot CLI and VS Code also run this file without the plugin installed. With both the file and the plugin, Copilot runs the guard twice. That's safe, because both runs reach the same decision, but it takes longer.
 
 ### CI and cross-agent portability
 
@@ -144,7 +160,7 @@ A `PostToolUse` hook rescans after successful npm mutations and returns findings
 - Preserves existing configuration on upgrades and replaces only versioned managed files.
 - Reports, but does not automatically edit, the project’s CI-provider configuration.
 
-Teams add `npm run deps:check` to their pipeline. This catches unsafe packages installed manually or by agents without Claude hooks and gives other agents a stable command to run.
+Teams add `npm run deps:check` to their pipeline. This catches unsafe packages installed manually or by agents without the guardian's hooks and gives other agents a stable command to run.
 
 ### Configuration and waivers
 
@@ -172,7 +188,7 @@ A waiver applies only to the named rule and package. Missing, malformed, or expi
 
 ### Approved remediation workflow
 
-For `/dependency-guardian:audit fix`:
+For `/dependency-guardian:dependency-audit fix`:
 
 1. Produce a read-only remediation plan first.
 2. Group changes into:
@@ -199,6 +215,9 @@ For `/dependency-guardian:audit fix`:
 
 ### Copy and adapt
 
+- The preamble of `aisdlc-nodejs`'s skills (for example `skills/sonar/SKILL.md`): copy it into the `dependency-audit` skill.
+- `plugins/aisdlc/tests/skills.test.mjs` checks every plugin's skills for strict YAML frontmatter and for the preamble about `${CLAUDE_PLUGIN_ROOT}` and `$ARGUMENTS`. Its check for `/plugin:skill` names only matches `aisdlc` prefixes. Widen it to the plugin names in `marketplace.json`, so it also covers `/dependency-guardian:`.
+
 From `plugins/aisdlc/scripts/aisdlc.mjs`:
 
 - `MIN_NODE_MAJOR` and `nodeVersionError`: the Node.js 24+ check. Copy as is.
@@ -215,11 +234,11 @@ From `plugins/aisdlc/tests/aisdlc.test.mjs`:
 ### Not reusable
 
 - `parseDoc` and `formatDoc` parse flat markdown frontmatter. The guardian's configuration is JSON.
-- `resolveHook` and `defaults/hooks.json` are aisdlc workflow hooks, which are shell commands run at workflow steps. They are not Claude Code hooks. The order `resolveHook` uses (environment variable, then project config, then built-in default) is still a reasonable precedence for guardian configuration.
+- `resolveHook` and `defaults/hooks.json` are aisdlc workflow hooks, which are shell commands run at workflow steps. They are not agent hooks. The order `resolveHook` uses (environment variable, then project config, then built-in default) is still a reasonable precedence for guardian configuration.
 
 ### Build from scratch
 
-The repository has no Claude Code `PreToolUse` or `PostToolUse` hooks yet. The plugin's hook registration, the parsing of the hook's JSON input on stdin, and its allow, deny and ask responses are all new, with nothing in this repository to copy.
+The repository has no agent `PreToolUse` or `PostToolUse` hooks yet. The plugin's hook registration, the repository hook file, the normalization of each agent's JSON input on stdin, and the allow, deny and ask responses are all new, with nothing in this repository to copy.
 
 ## Test Plan
 
@@ -233,17 +252,19 @@ The repository has no Claude Code `PreToolUse` or `PostToolUse` hooks yet. The p
 - Verify baseline comparison allows vulnerability-reducing fixes but blocks new or worsened findings.
 - Test single-package repositories and npm workspaces.
 - Test setup idempotency, managed-file upgrades, config preservation, and package-script conflicts.
-- Test hook JSON responses: deny, allow, request confirmation, and operational failure.
+- Test hook JSON responses: deny, allow, request confirmation, and operational failure. Feed each one Claude Code's input, Copilot's `PreToolUse` and `preToolUse` inputs, and VS Code's terminal-tool input. A non-shell tool must pass through, and a preflight that reaches its deadline must deny.
+- Test that `hooks/hooks.json` and the repository hook template run `guardian.mjs hook`.
 - Verify CI text/JSON output and exit codes.
 - Run existing repository tests plus Claude plugin and marketplace validation.
+- Check by hand in Copilot CLI: the skill loads as `/dependency-audit`, and the plugin hook denies `npm install moment`.
 - Keep network-based registry smoke tests optional or scheduled; regular tests use deterministic npm fixtures/fakes.
 
 Acceptance requires:
 
-- `npm install moment` issued by Claude is denied before project files change and includes useful alternatives.
+- `npm install moment` issued by Claude Code or Copilot CLI is denied before project files change and includes useful alternatives.
 - A candidate dependency tree introducing a moderate-or-higher vulnerability is denied.
-- `/dependency-guardian:audit` works manually and is selected automatically for npm dependency maintenance requests.
-- `npm run deps:check` catches equivalent changes made outside Claude.
+- `/dependency-guardian:dependency-audit` works manually and is selected automatically for npm dependency maintenance requests.
+- `npm run deps:check` catches equivalent changes made outside a guarded agent.
 - No dependency mutation occurs through the skill without explicit approval.
 - A valid timed waiver is visible in reports and stops working at expiration.
 
@@ -251,8 +272,9 @@ Acceptance requires:
 
 - Ownership with `aisdlc-nodejs`: its standards decide whether a project takes on a dependency (the need, the user's choice, an ADR for an architectural one). The guardian decides whether a given package version is safe to install. The standards already tell the agent to run the guardian's checks on an approved install, and never to work around a block.
 - V1 supports npm projects and npm workspaces only; pnpm, Yarn, Bun, Maven, Gradle, license compliance, typosquatting detection, and external vulnerability services are deferred.
-- V1 ships Claude packaging only. The scanner, JSON contract, and skill wording remain reusable for later Codex and other agent adapters.
+- V1 ships one package for Claude Code and GitHub Copilot. The scanner, JSON contract, and skill wording remain reusable for later Codex and Cursor adapters.
+- VS Code's agent hooks are in preview and may change. The committed CI scanner backs them up.
 - Registry access is required for complete strict scans. Registry or audit failures fail closed in CI and pre-install checks; an explicit offline scan may run local catalog checks but cannot report a strict pass.
-- Manual terminal commands cannot be intercepted by a Claude plugin; the committed CI scanner is the enforcement backstop.
+- Manual terminal commands cannot be intercepted by an agent plugin; the committed CI scanner is the enforcement backstop.
 - The repository remains dependency-free and uses its existing version/changelog release discipline.
 - Initial team rollout runs the scanner in report review first, records necessary timed waivers, then enables the required CI gate.
