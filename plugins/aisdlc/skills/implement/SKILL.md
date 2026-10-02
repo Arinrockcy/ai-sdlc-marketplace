@@ -29,19 +29,20 @@ Once `pre_implement` has run, every way this run ends (a finished task in single
    Otherwise list each blocked task with its `reason`. Ask the user which blockers are resolved. For each resolved one, run `$AISDLC task set <G-id> <T-id> pending`, then run `$AISDLC state move <G-id> in-progress`.
    If none are resolved, ask whether to leave the goal blocked or cancel it. To cancel, ask the user why and pass their answer in their own words: `$AISDLC state move <G-id> cancelled --reason "<why>"`. Never write a reason for them. Either way, run `post_implement` and stop.
 4. **First run** (status `pending`):
-   1. **Auto-commit.** If `auto_commit` is empty, ask the user whether to commit automatically after each passing task. Save the answer with `$AISDLC goal set <G-id> auto_commit true|false`.
-   2. **Before-goal hook.** Run `$AISDLC goal preflight <G-id>`. It shows what the hook will run (`before_goal`; by default it fetches, checks out and pulls the base branch). When the hook switches branches, `warnings` says whether another goal is in progress or whether the checkout would leave this goal's planning files behind. If there are warnings, show them and ask whether to continue or stop. Don't refuse: the user may work in separate worktrees.
+   1. **New stacks.** Run `$AISDLC detect-stack`. If `to_register` lists stacks, a stack plugin was installed after the plan was governed. Invoke each entry's `register_skill` (without plugin namespaces, the part after the `:`) now, before the goal starts, and skip one whose skill the agent doesn't have. The plan review didn't load that stack's standards, so tell the user and ask whether to continue or to run `/aisdlc:govern <G-id>` again first; if they choose governance, run `post_implement` and stop.
+   2. **Auto-commit.** If `auto_commit` is empty, ask the user whether to commit automatically after each passing task. Save the answer with `$AISDLC goal set <G-id> auto_commit true|false`.
+   3. **Before-goal hook.** Run `$AISDLC goal preflight <G-id>`. It shows what the hook will run (`before_goal`; by default it fetches, checks out and pulls the base branch). When the hook switches branches, `warnings` says whether another goal is in progress or whether the checkout would leave this goal's planning files behind. If there are warnings, show them and ask whether to continue or stop. Don't refuse: the user may work in separate worktrees.
 
       Then run `$AISDLC hooks run before_goal --goal <G-id>`. If it fails, show the output and ask the user whether to retry, continue anyway or stop.
       Then run `$AISDLC goal show <G-id>` again. If the goal is no longer found, its planning files were committed on a different branch than the one the hook switched to. Tell the user to bring `.aisdlc/` onto this branch (or disable the hook), and stop.
-   3. **Branch.** If `branch` is empty, ask the user to pick one:
+   4. **Branch.** If `branch` is empty, ask the user to pick one:
       - create the goal branch `suggested_branch` from `goal show` (`git checkout -b <suggested_branch>`)
       - stay on the current branch (on the base branch, the after-goal hook won't push: aisdlc never pushes the base branch)
       - use a branch name they provide
       Save the result with `$AISDLC goal set <G-id> branch <name>`. Never force a branch the user didn't choose.
-   4. **Start.** Run `$AISDLC state move <G-id> in-progress`.
+   5. **Start.** Run `$AISDLC state move <G-id> in-progress`.
 5. **Interrupted task.** If `progress.in_progress` from `goal show` is not empty, an earlier run stopped mid-task. For each such task, ask the user whether to resume it (continue from the current state of the code and go to step 2.3 for it) or reset it with `$AISDLC task set <G-id> <T-id> pending`.
-6. **Stack standards.** Run `$AISDLC detect-stack`. If `standards_skill` is set (for example `aisdlc-nodejs:nodejs-standards`), invoke that skill now and follow it for all code in this run, except where the goal's `## Standards deviations` records a departure the user chose. If no skill of that name is installed, tell the user that the stack plugin `aisdlc-<stack>` is missing or older than this workflow expects, and stop. If it isn't set, follow the conventions already in the repo.
+6. **Stack standards.** Run `$AISDLC detect-stack`. Invoke every skill in `standards_skills` (for example `aisdlc-nodejs:nodejs-standards`) now, and follow each for the code of its stack in this run, except where the goal's `## Standards deviations` records a departure the user chose. If one isn't installed, tell the user that its stack plugin is missing or older than this workflow expects, and stop. If the list is empty, follow the conventions already in the repo. If the goal is already in progress and `to_register` lists stacks, a stack plugin was installed mid-goal: ask the user whether to register it now, so its gate applies to the remaining tasks, or after the goal.
 7. **Mode.** Run the whole goal if `$ARGUMENTS` contains `--all` or `$AISDLC config get implement.mode` returns `"auto"`. Otherwise run **one task**, then stop.
 
 ## 2. Task loop

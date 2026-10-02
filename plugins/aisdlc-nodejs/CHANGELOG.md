@@ -2,6 +2,11 @@
 
 All notable changes to the `aisdlc-nodejs` plugin. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/).
 
+## [0.11.0] - 2026-10-02
+
+### Added
+- `stack.json` declares `markers` (`package.json`), so aisdlc 0.11.0 and later detect Node.js projects from the plugin itself. Installed manifests don't need re-registering.
+
 ## [0.10.1] - 2026-10-01
 
 ### Fixed

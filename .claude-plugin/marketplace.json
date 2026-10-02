@@ -9,14 +9,14 @@
       "name": "aisdlc",
       "source": "./plugins/aisdlc",
       "description": "Core AI-SDLC workflow: init, create-goal, challenge, adr, govern, implement.",
-      "version": "0.10.1",
+      "version": "0.11.0",
       "category": "development"
     },
     {
       "name": "aisdlc-nodejs",
       "source": "./plugins/aisdlc-nodejs",
       "description": "Node.js stack plugin for aisdlc: Node.js 24+, coding standards, lint/coverage gates, SonarQube analysis, dependency vulnerability scans, and Express REST API/auth/JWT practices.",
-      "version": "0.10.1",
+      "version": "0.11.0",
       "category": "development"
     }
   ]

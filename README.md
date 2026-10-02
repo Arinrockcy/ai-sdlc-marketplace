@@ -27,6 +27,8 @@ copilot plugin install aisdlc-nodejs@aisdlc-marketplace   # optional, per stack
 
 VS Code picks up plugins that Copilot CLI installed. To install them from VS Code instead, make sure `chat.plugins.enabled` is on, and add the repository to the `chat.plugins.marketplaces` setting, as `owner/repo`, a git URL, or a `file:///` URI for a local clone (a plain path isn't accepted). Then search `@agentPlugins` in the Extensions view and install both plugins.
 
+Install the plugin for each language the project uses. The workflow detects the project's languages from their marker files (each stack plugin declares its own) and registers every installed plugin by itself: `/aisdlc:init` does it at setup, and `/aisdlc:create-goal` and `/aisdlc:implement` pick up a plugin installed later. A repository with several languages gets each one's standards and task gate.
+
 Copilot doesn't namespace plugin skills, so drop the prefix from the commands below: `/aisdlc:govern G-001` is `/govern G-001`, and `/aisdlc-nodejs:nodejs-register` is `/nodejs-register`. `/init` is Copilot's own command, so start with a prompt such as `Use the aisdlc init skill` instead. A project skill of the same name (for example in `.github/skills/`) hides the plugin's, and when two installed plugins have skills of the same name, Copilot loads only one of them without a warning.
 
 The Node.js plugin also provides `/aisdlc-nodejs:express-rest-api` for designing, implementing, or reviewing Express endpoints, authentication, authorization, JWTs, sessions/tokens, and production API security.
@@ -111,6 +113,17 @@ See [`plugins/aisdlc/docs/stack-plugin-contract.md`](plugins/aisdlc/docs/stack-p
 ## Upgrading
 
 Each plugin keeps a changelog: [`aisdlc`](plugins/aisdlc/CHANGELOG.md), [`aisdlc-nodejs`](plugins/aisdlc-nodejs/CHANGELOG.md). Breaking changes are listed there with their upgrade step.
+
+### 0.10.x → 0.11.0 (both plugins)
+
+Every detected stack with a manifest in `.aisdlc/stacks/` is now active, together with the stacks `stack` in `.aisdlc/config.json` names. Before, only one stack was active: the configured one, or in `auto` the single detected or single registered one.
+
+- A repository with one stack: nothing changes.
+- A repository with several stacks that has registered more than one: all registered stacks now apply. Their task gates run one after another, and `coverage check` checks each report. To keep a stack out, delete its manifest from `.aisdlc/stacks/` and commit that.
+- `stack` can stay as it is. To let a stack plugin installed later be picked up, nothing needs to change: registering a stack activates it.
+- Scripts that read the script's JSON: `detect-stack` returns `active` as a list and `standards_skills` instead of `standards_skill`; `hooks resolve` returns `stacks` instead of `stack`; `coverage check` lists each stack's report under `reports`.
+
+Update both plugins together: `aisdlc-nodejs` 0.11.0 declares its own markers, and `aisdlc` 0.11.0 reads them.
 
 ### 0.9.x → 0.10.x (both plugins)
 

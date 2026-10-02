@@ -5,14 +5,16 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { analyzeDag, goalProgress, resolveHook, parseDoc, formatDoc, testCounts, nodeVersionError } from '../scripts/aisdlc.mjs';
+import { analyzeDag, goalProgress, resolveHook, mergeStackHooks, parseDoc, formatDoc, testCounts, nodeVersionError } from '../scripts/aisdlc.mjs';
 
 const SCRIPT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../scripts/aisdlc.mjs');
 
+// Stack plugins installed on this machine would change what detect-stack reports, so the search finds none unless a
+// test names the plugins it sets up.
 function project() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'aisdlc-'));
   const run = (args, env = {}) => {
-    const r = spawnSync(process.execPath, [SCRIPT, ...args], { cwd: dir, encoding: 'utf8', env: { ...process.env, ...env } });
+    const r = spawnSync(process.execPath, [SCRIPT, ...args], { cwd: dir, encoding: 'utf8', env: { ...process.env, AISDLC_STACK_PLUGINS: '', ...env } });
     let json;
     try { json = JSON.parse(r.stdout); } catch { json = undefined; }
     return { code: r.status, stdout: r.stdout, stderr: r.stderr, json };
@@ -130,6 +132,19 @@ test('hooks: circular use: references do not loop', () => {
   assert.deepEqual(resolveHook('x', layers).commands, []);
 });
 
+test('hooks: several stacks run their commands in turn', () => {
+  const defaults = { after_task: { use: 'stack' }, before_goal: { run: 'git pull' } };
+  const node = { hooks: { after_task: { run: ['npm run lint', 'npm test'] }, before_goal: { use: 'default' }, on_block: null } };
+  const python = { hooks: { after_task: { run: 'npm test' }, before_goal: { run: 'uv sync' }, on_block: null } };
+  assert.deepEqual(mergeStackHooks([node, python], defaults), {
+    after_task: { run: ['npm run lint', 'npm test'] },
+    before_goal: { run: ['git pull', 'uv sync'] },
+    on_block: null,
+  });
+  assert.deepEqual(mergeStackHooks([node, null], defaults), node.hooks, 'one stack keeps its values as written');
+  assert.deepEqual(mergeStackHooks([], defaults), {});
+});
+
 test('cli: full gated flow from init to completed', () => {
   const { dir, run } = project();
   fs.writeFileSync(path.join(dir, 'package.json'), '{}');
@@ -243,29 +258,116 @@ test('cli: hooks resolve uses stack manifest, config and env, with variables', (
   assert.equal(run(['hooks', 'run', 'on_block']).code, 3);
 });
 
-test('cli: in a mixed repo, the one installed stack manifest picks the active stack', () => {
+test('cli: every detected stack with an installed manifest is active, with its hooks and standards', () => {
   const { run, dir } = project();
+  const write = (file, data) => fs.writeFileSync(path.join(dir, file), JSON.stringify(data));
   fs.writeFileSync(path.join(dir, 'package.json'), '{}');
   fs.writeFileSync(path.join(dir, 'pyproject.toml'), '');
   run(['init']);
-  assert.equal(run(['detect-stack']).json.active, null);
+  assert.deepEqual(run(['detect-stack']).json, { configured: 'auto', detected: ['nodejs', 'python'], active: [], standards_skills: [], to_register: [], without_plugin: ['nodejs', 'python'], stacks: [
+    { stack: 'nodejs', detected: true, active: false, manifest_installed: false, standards_skill: null, plugin: null, plugin_version: null, register_skill: null },
+    { stack: 'python', detected: true, active: false, manifest_installed: false, standards_skill: null, plugin: null, plugin_version: null, register_skill: null },
+  ] });
 
-  fs.writeFileSync(path.join(dir, '.aisdlc/stacks/nodejs.json'), JSON.stringify({ name: 'nodejs', hooks: { after_task: { run: 'npm test' } } }));
-  assert.deepEqual(run(['detect-stack']).json, { configured: 'auto', detected: ['nodejs', 'python'], active: 'nodejs', manifest_installed: true, standards_skill: null });
+  write('.aisdlc/stacks/nodejs.json', { name: 'nodejs', standards_skill: 'aisdlc-nodejs:nodejs-standards', hooks: { after_task: { run: 'npm test' } } });
+  let report = run(['detect-stack']).json;
+  assert.deepEqual([report.active, report.standards_skills, report.without_plugin], [['nodejs'], ['aisdlc-nodejs:nodejs-standards'], ['python']]);
   assert.deepEqual(run(['hooks', 'resolve', 'after_task']).json.commands, ['npm test']);
+
+  // A second registered stack joins the first: its standards load and its commands run after the first stack's.
+  write('.aisdlc/stacks/python.json', { name: 'python', standards_skill: 'aisdlc-python:python-standards', hooks: { after_task: { run: ['pytest', 'npm test'] }, before_task: null } });
+  report = run(['detect-stack']).json;
+  assert.deepEqual([report.active, report.standards_skills, report.without_plugin], [['nodejs', 'python'], ['aisdlc-nodejs:nodejs-standards', 'aisdlc-python:python-standards'], []]);
+  assert.deepEqual(run(['hooks', 'resolve', 'after_task']).json, { point: 'after_task', stacks: ['nodejs', 'python'], source: 'stack', commands: ['npm test', 'pytest'] });
+  assert.deepEqual(run(['hooks', 'resolve', 'before_task']).json.commands, []);
 
   // A manifest registered before stack skills were named after their stack still finds the renamed skill.
   const manifest = path.join(dir, '.aisdlc/stacks/nodejs.json');
-  fs.writeFileSync(manifest, JSON.stringify({ name: 'nodejs', standards_skill: 'aisdlc-nodejs:standards' }));
-  assert.equal(run(['detect-stack']).json.standards_skill, 'aisdlc-nodejs:nodejs-standards');
+  write('.aisdlc/stacks/nodejs.json', { name: 'nodejs', standards_skill: 'aisdlc-nodejs:standards' });
+  assert.equal(run(['detect-stack']).json.standards_skills[0], 'aisdlc-nodejs:nodejs-standards');
   assert.equal(JSON.parse(fs.readFileSync(manifest, 'utf8')).standards_skill, 'aisdlc-nodejs:standards');
-  fs.writeFileSync(manifest, JSON.stringify({ name: 'nodejs', standards_skill: 'aisdlc-nodejs:nodejs-standards' }));
-  assert.equal(run(['detect-stack']).json.standards_skill, 'aisdlc-nodejs:nodejs-standards');
 
-  fs.writeFileSync(path.join(dir, '.aisdlc/stacks/python.json'), JSON.stringify({ name: 'python' }));
-  assert.equal(run(['detect-stack']).json.active, null);
-  run(['config', 'set', 'stack', 'python']);
-  assert.equal(run(['detect-stack']).json.active, 'python');
+  // A configured stack applies even without its marker; registered ones still join it.
+  run(['config', 'set', 'stack', 'go']);
+  assert.deepEqual(run(['detect-stack']).json.active, ['go', 'nodejs', 'python']);
+  run(['config', 'set', 'stack', '["python","go"]']);
+  assert.deepEqual(run(['detect-stack']).json.active, ['python', 'go', 'nodejs']);
+});
+
+test('cli: with nothing registered, a single detected stack is active', () => {
+  const { run, dir } = project();
+  fs.writeFileSync(path.join(dir, 'App.csproj'), '');
+  run(['init']);
+  assert.deepEqual(run(['detect-stack']).json.active, ['dotnet']);
+  run(['goal', 'new', 'A']);
+  assert.deepEqual(run(['coverage', 'check', 'G-001']).json.notes, ['No .aisdlc/stacks/dotnet.json is installed, so no coverage report is declared.']);
+});
+
+test('cli: stack plugins declare their markers and register skill, and unregistered stacks are reported', () => {
+  const { run, dir } = project();
+  const plugins = fs.mkdtempSync(path.join(os.tmpdir(), 'aisdlc-plugins-'));
+  const plugin = (folder, meta, stack, skills) => {
+    const root = path.join(plugins, folder);
+    fs.mkdirSync(path.join(root, '.claude-plugin'), { recursive: true });
+    if (meta) fs.writeFileSync(path.join(root, '.claude-plugin', 'plugin.json'), JSON.stringify(meta));
+    fs.writeFileSync(path.join(root, 'stack.json'), JSON.stringify(stack));
+    for (const s of skills) { fs.mkdirSync(path.join(root, 'skills', s), { recursive: true }); fs.writeFileSync(path.join(root, 'skills', s, 'SKILL.md'), ''); }
+    return root;
+  };
+  const elixir = plugin('ex', { name: 'aisdlc-elixir', version: '1.2.0' }, { name: 'elixir', markers: ['mix.exs', '*.exs'] }, ['elixir-register', 'elixir-standards']);
+  const python = plugin('py', { name: 'aisdlc-python' }, { name: 'python' }, ['register']);
+  const other = plugin('other', null, { name: 'elixir', markers: ['other.txt'] }, []);
+  const broken = path.join(plugins, 'broken');
+  fs.mkdirSync(broken);
+  fs.writeFileSync(path.join(broken, 'stack.json'), '{');
+  const env = { AISDLC_STACK_PLUGINS: [elixir, python, other, broken, path.join(plugins, 'missing')].join(path.delimiter) };
+
+  fs.writeFileSync(path.join(dir, 'config.exs'), '');
+  fs.writeFileSync(path.join(dir, 'requirements.txt'), '');
+  fs.writeFileSync(path.join(dir, 'other.txt'), '');
+  run(['init'], env);
+  const report = run(['detect-stack'], env).json;
+  assert.deepEqual(report.detected, ['python', 'elixir'], 'the first plugin for a stack declares its markers');
+  assert.deepEqual(report.to_register, [
+    { stack: 'python', plugin: 'aisdlc-python', register_skill: 'aisdlc-python:register' },
+    { stack: 'elixir', plugin: 'aisdlc-elixir', register_skill: 'aisdlc-elixir:elixir-register' },
+  ]);
+  assert.equal(report.stacks[1].plugin_version, '1.2.0');
+
+  fs.writeFileSync(path.join(dir, '.aisdlc/stacks/elixir.json'), JSON.stringify({ name: 'elixir' }));
+  assert.deepEqual(run(['detect-stack'], env).json.to_register.map((s) => s.stack), ['python']);
+  assert.deepEqual(run(['detect-stack'], env).json.active, ['elixir']);
+});
+
+test('cli: stack plugins are found where Claude Code and GitHub Copilot install them', () => {
+  const { run, dir } = project();
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'aisdlc-home-'));
+  const stackPlugin = (root, name, stack, marker) => {
+    fs.mkdirSync(path.join(root, '.claude-plugin'), { recursive: true });
+    fs.writeFileSync(path.join(root, '.claude-plugin', 'plugin.json'), JSON.stringify({ name }));
+    fs.writeFileSync(path.join(root, 'stack.json'), JSON.stringify({ name: stack, markers: [marker] }));
+  };
+  // Claude Code keeps old versions in its cache; only the installed one counts.
+  const cache = path.join(home, 'claude', 'plugins', 'cache', 'm', 'aisdlc-zig');
+  stackPlugin(path.join(cache, 'old'), 'aisdlc-zig', 'zig-old', 'old.zig');
+  stackPlugin(path.join(cache, 'new'), 'aisdlc-zig', 'zig', 'build.zig');
+  fs.writeFileSync(path.join(home, 'claude', 'plugins', 'installed_plugins.json'), JSON.stringify({ version: 2, plugins: { 'aisdlc-zig@m': [{ scope: 'user', installPath: path.join(cache, 'new') }] } }));
+  // Copilot CLI: config.json entries (a disabled one is skipped) and installed-plugins/<marketplace>/<plugin>/.
+  const copilot = path.join(home, 'copilot');
+  stackPlugin(path.join(copilot, 'installed-plugins', 'm', 'aisdlc-nim'), 'aisdlc-nim', 'nim', 'app.nimble');
+  stackPlugin(path.join(home, 'elsewhere', 'aisdlc-odin'), 'aisdlc-odin', 'odin', 'main.odin');
+  stackPlugin(path.join(home, 'elsewhere', 'aisdlc-off'), 'aisdlc-off', 'off', 'off.txt');
+  fs.writeFileSync(path.join(copilot, 'config.json'), JSON.stringify({ installedPlugins: [
+    { name: 'aisdlc-odin', cache_path: path.join(home, 'elsewhere', 'aisdlc-odin'), enabled: true },
+    { name: 'aisdlc-off', cache_path: path.join(home, 'elsewhere', 'aisdlc-off'), enabled: false },
+  ] }));
+  for (const f of ['build.zig', 'old.zig', 'app.nimble', 'main.odin', 'off.txt']) fs.writeFileSync(path.join(dir, f), '');
+  run(['init']);
+  // Without AISDLC_STACK_PLUGINS the script searches; plugins next to this one (in this repository) may add stacks.
+  const env = { ...process.env, CLAUDE_CONFIG_DIR: path.join(home, 'claude'), COPILOT_HOME: copilot };
+  delete env.AISDLC_STACK_PLUGINS;
+  const detected = JSON.parse(spawnSync(process.execPath, [SCRIPT, 'detect-stack'], { cwd: dir, encoding: 'utf8', env }).stdout).detected;
+  assert.deepEqual(detected.filter((s) => ['zig', 'zig-old', 'nim', 'odin', 'off'].includes(s)).sort(), ['nim', 'odin', 'zig']);
 });
 
 test('cli: after_goal checks the coverage report, then pushes the goal branch, by default', () => {
@@ -331,19 +433,19 @@ test('cli: coverage check reads the report the stack declares and holds it to th
   report('coverage-summary.json', summary({}));
   const ok = check();
   assert.equal(ok.code, 0, ok.stdout);
-  assert.deepEqual(ok.json.metrics, { lines: 90, statements: 90, functions: 90, branches: 90 });
+  assert.deepEqual(ok.json.reports[0].metrics, { lines: 90, statements: 90, functions: 90, branches: 90 });
   assert.match(ok.json.notes[0], /isn't a git repository/);
   report('coverage-summary.json', summary({ branches: 72.5, lines: 'Unknown' }));
   const low = check();
   assert.equal(low.code, 1);
   assert.deepEqual(low.json.problems, ['branches coverage is 72.5%, below the 80% threshold.']);
-  assert.equal(low.json.metrics.lines, 90, 'a pct Istanbul could not compute comes from covered/total');
+  assert.equal(low.json.reports[0].metrics.lines, 90, 'a pct Istanbul could not compute comes from covered/total');
 
   // LCOV sums every file's records and has no statement figures.
   manifest({ coverage_report: { path: 'coverage/lcov.info', format: 'lcov' }, coverage_thresholds: thresholds });
   report('lcov.info', 'SF:a.js\nFNF:2\nFNH:2\nLF:10\nLH:9\nBRF:4\nBRH:3\nend_of_record\nSF:b.js\nFNF:2\nFNH:1\nLF:10\nLH:7\nend_of_record\n');
   const lcov = check().json;
-  assert.deepEqual(lcov.metrics, { lines: 80, branches: 75, functions: 75 });
+  assert.deepEqual(lcov.reports[0].metrics, { lines: 80, branches: 75, functions: 75 });
   assert.deepEqual(lcov.problems, [
     'branches coverage is 75%, below the 80% threshold.',
     'functions coverage is 75%, below the 80% threshold.',

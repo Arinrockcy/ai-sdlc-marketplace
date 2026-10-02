@@ -2,6 +2,21 @@
 
 All notable changes to the `aisdlc` plugin. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/). Until 1.0.0, a minor version may include breaking changes; each one is listed under **Breaking** with its upgrade step.
 
+## [0.11.0] - 2026-10-02
+
+### Breaking
+- Several stacks can be active at once: every detected stack with a manifest in `.aisdlc/stacks/`, plus the ones `stack` in config names (a name or a list). Before, only one stack was active, and a repository with several registered stacks had none unless one was configured. The stack hook layer runs each active stack's commands in turn, and `coverage check` checks each stack's report. See [Upgrading to 0.11.0](../../README.md#upgrading).
+- Script output: `detect-stack` returns `active` as a list, `standards_skills` instead of `standards_skill`, and per-stack details under `stacks`; `hooks resolve` returns `stacks` instead of `stack`; `coverage check` lists each stack's report under `reports`.
+
+### Added
+- Stack plugins are detected automatically. The script finds installed stack plugins (next to the core plugin, in Claude Code's `installed_plugins.json`, and in Copilot CLI's `config.json` and `installed-plugins/`) and reads their `stack.json` `markers`, so a new stack needs no core change. It reads only `stack.json` and the plugin manifest, never runs plugin code. `AISDLC_STACK_PLUGINS` replaces the search.
+- `detect-stack` lists `to_register` (a detected or configured stack whose plugin is installed but not registered, with its register skill) and `without_plugin`.
+- `/aisdlc:create-goal` registers a stack plugin installed after setup before planning, and `/aisdlc:implement` does so before a goal starts (and asks first for a goal in progress).
+
+### Changed
+- `/aisdlc:init` no longer asks to confirm the detected stack or choose a primary one: it registers every detected stack whose plugin is installed, tells the user about stacks without one, and asks only when nothing is detected. It leaves `stack` at `auto`.
+- The governance catalog's Stack standards rules refer to every active stack's standards skill.
+
 ## [0.10.1] - 2026-10-01
 
 ### Fixed

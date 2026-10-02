@@ -14,6 +14,7 @@ Input: `$ARGUMENTS` (the text after the skill's name) is the goal description. I
 
 ## 0. Context (keep it cheap)
 - Run `$AISDLC hooks run pre_create_goal`.
+- Run `$AISDLC detect-stack`. If `to_register` lists stacks, a stack plugin was installed after the project was set up. Invoke each entry's `register_skill` (without plugin namespaces, the part after the `:`) before planning, so the plan follows that stack's standards, and tell the user which stacks you registered. Skip an entry whose skill the agent doesn't have.
 - Read `.aisdlc/registry.md`. It lists the unfinished goals and every ADR. Reuse existing ADRs and avoid duplicating an unfinished goal.
 - Run `$AISDLC registry search <keywords>` with a few keywords from the description, to find completed or cancelled goals that overlap it. Don't read `registry-archive.md` whole: it keeps every finished goal, so it only grows.
 - Run `$AISDLC graph query "<keywords>"` to find the modules the goal touches, before searching the code. Pass identifiers and domain words (function, file or module names), not a sentence: the graph matches names, not prose. It refreshes the graph if the code changed, and says so when no graph is set up; then read only the files you need. Never read `graphify-out/` files whole: they grow with the codebase.
@@ -62,7 +63,7 @@ Before you write anything, find the gaps in the description and ask the user abo
 ## 4. Split into tasks
 Apply these rules in order. If a split depends on something the user hasn't said (for example, whether existing data needs migrating), ask; don't assume.
 
-First, the stack's standards. Run `$AISDLC detect-stack`. If `standards_skill` is set, load that skill before splitting, and give each task the criteria the standard implies for it (for example declaration files, both test layers, lint and coverage). If the repo conflicts with the standard (another test runner, a threshold its tooling can't enforce), ask the user which way to go. Record a chosen departure under `## Standards deviations` in `goal.md`, with the reason.
+First, the stacks' standards. Run `$AISDLC detect-stack` and load every skill in `standards_skills` before splitting, and give each task the criteria the standard implies for it (for example declaration files, both test layers, lint and coverage). If the repo conflicts with the standard (another test runner, a threshold its tooling can't enforce), ask the user which way to go. Record a chosen departure under `## Standards deviations` in `goal.md`, with the reason.
 
 1. **Vertical and independently verifiable.** Each task delivers a slice that can be checked on its own. Each task has its own acceptance criteria and a `verify` command (a test, build, lint or script). If you can't tell how a slice would be checked, ask the user. If no command exists, write a concrete manual check prefixed with `manual:` (for example `--verify "manual: GET /health returns 200"`). `/aisdlc:implement` then records evidence for it instead of running it.
 2. **Size cap.** One concern per task, touching about 5 files or fewer, and finishable in one focused session. If a task is bigger, split it again until it fits.

@@ -19,16 +19,14 @@ Init is idempotent. It only creates what is missing and never overwrites existin
 
 2. **Base branch.** Show `git.base_branch` from the JSON output (default `develop`). Ask the user to confirm it or give another name. If it changes, run `$AISDLC config set git.base_branch <name>`.
 
-3. **Stack.** Run `$AISDLC detect-stack`.
-   - If `detected` has exactly one stack, ask the user to confirm it.
-   - If it has several, ask the user which one should be the primary stack.
-   - If it has none, ask the user to name the stack, or keep `auto`.
-   Save the answer with `$AISDLC config set stack <name>`.
-   Then check whether a skill named `aisdlc-<stack>:<stack>-register` is available (`<stack>-register` without plugin namespaces). A stack plugin written before aisdlc 0.10.0 calls it `aisdlc-<stack>:register`; use that one if it is the only one:
-   - **Available:** invoke it. It installs `.aisdlc/stacks/<stack>.json` (standards skill and hook overrides). When it returns, check that the workflow uses what it installed, because the register skill can't run this script:
-     1. Run `$AISDLC detect-stack`. `active` must be the chosen stack and `manifest_installed` true. If not, run `$AISDLC config set stack <name>` with the chosen stack and check again.
-     2. Run `$AISDLC hooks resolve after_task`. Its `source` should be `stack`, with the manifest's commands. If `source` is `env`, tell the user that `AISDLC_HOOK_AFTER_TASK` in their environment replaces the stack's gate for as long as it is set. If it is `config`, show the override in `.aisdlc/config.json` and ask whether to keep it or remove it with `$AISDLC config set hooks.after_task '{"use":"stack"}'`. If `commands` is empty, say that no task gate will run.
-   - **Not available:** tell the user that the stack plugin `aisdlc-<stack>` is not installed. They can install it from the aisdlc marketplace, or continue without it. Without it, core default hooks are used and there are no stack standards. They can also set their own hooks in `.aisdlc/config.json`.
+3. **Stacks.** Run `$AISDLC detect-stack`. It finds the project's languages from marker files, including the markers each installed stack plugin declares, and lists them in `detected`. Every detected stack with a registered manifest is active, so a repository can have several. Leave `stack` in `.aisdlc/config.json` at `auto`: a stack plugin installed later is then picked up by `/aisdlc:create-goal` and `/aisdlc:implement` without changing the config.
+   - **`to_register`:** the language was detected and its plugin is installed, so don't ask whether to use it. For each entry, one at a time, invoke its `register_skill` (without plugin namespaces, the part after the `:`). If the agent has no skill of that name, the plugin is installed for another agent: treat the stack as one in `without_plugin`.
+   - **`without_plugin`:** tell the user that no aisdlc plugin for that stack is installed. They can install `aisdlc-<stack>` from the aisdlc marketplace, and the workflow picks it up by itself, or continue without it: core default hooks apply, with no stack standards. They can also set their own hooks in `.aisdlc/config.json`.
+   - **Nothing detected:** ask the user which stack the project uses, or whether to keep `auto`. If they name one, run `$AISDLC config set stack <name>`, run `$AISDLC detect-stack` again, and register it as above if it is now in `to_register`.
+
+   After the register skills return, check that the workflow uses what they installed, because a register skill can't run this script:
+   1. Run `$AISDLC detect-stack`. Each registered stack must be in `active`, with `manifest_installed` true in `stacks`. If one isn't, its marker is missing from the project root: run `$AISDLC config set stack <name>` with every stack that should apply (a JSON list for several, such as `["nodejs","python"]`) and check again.
+   2. Run `$AISDLC hooks resolve after_task`. Its `source` should be `stack`, with the commands of every active stack's manifest. If `source` is `env`, tell the user that `AISDLC_HOOK_AFTER_TASK` in their environment replaces the stacks' gate for as long as it is set. If it is `config`, show the override in `.aisdlc/config.json` and ask whether to keep it or remove it with `$AISDLC config set hooks.after_task '{"use":"stack"}'`. If `commands` is empty, say that no task gate will run.
 
 4. **Knowledge graph.** Ask the user to choose one:
    - **Graphify (recommended for larger codebases).** A code graph that later steps query instead of searching and reading files, which saves tokens. The workflow runs it code-only: local parsing, no model calls, no API key.

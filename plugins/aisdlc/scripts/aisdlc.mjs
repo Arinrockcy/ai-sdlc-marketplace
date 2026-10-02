@@ -377,23 +377,85 @@ function writeTasksMd(goal) {
 
 // ---------- stack ----------
 
-function detectStacks(root) {
-  const found = [];
-  for (const [marker, stack] of STACK_MARKERS) {
-    if (fs.existsSync(path.join(root, marker)) && !found.includes(stack)) found.push(stack);
+// Stack plugins on this machine: folders with a stack.json. The script reads their stack.json and plugin manifest
+// only (never runs their code), so a plugin can declare the marker files of its language. Whether the agent can use
+// a plugin's skills is still for the skill to check; a plugin found here may be installed for another agent.
+// AISDLC_STACK_PLUGINS (folders separated by the path delimiter) replaces the search, for tests and unusual layouts.
+function stackPluginDirs() {
+  const env = process.env.AISDLC_STACK_PLUGINS;
+  if (env !== undefined) return env.split(path.delimiter).filter(Boolean);
+  const readJson = (file) => { try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return null; } };
+  const subdirs = (dir) => { try { return fs.readdirSync(dir, { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => path.join(dir, e.name)); } catch { return []; } };
+  const home = os.homedir();
+  // Plugins next to this one: this repository, a marketplace clone (VS Code), Copilot CLI's installed-plugins/<marketplace>/.
+  const dirs = subdirs(path.dirname(PLUGIN_ROOT));
+  // Claude Code keeps every downloaded version in its cache; installed_plugins.json names the installed one.
+  const claude = readJson(path.join(process.env.CLAUDE_CONFIG_DIR || path.join(home, '.claude'), 'plugins', 'installed_plugins.json'));
+  for (const entries of Object.values(claude?.plugins || {})) for (const e of [].concat(entries)) if (e?.installPath) dirs.push(e.installPath);
+  // GitHub Copilot CLI records its plugins in config.json and keeps them in installed-plugins/<marketplace>/<plugin>/.
+  const copilotHome = process.env.COPILOT_HOME || path.join(home, '.copilot');
+  for (const p of readJson(path.join(copilotHome, 'config.json'))?.installedPlugins || []) if (p?.cache_path && p.enabled !== false) dirs.push(p.cache_path);
+  for (const marketplace of subdirs(path.join(copilotHome, 'installed-plugins'))) dirs.push(...subdirs(marketplace));
+  return dirs;
+}
+
+// One entry per stack, the first plugin found for it: { stack, plugin, version, markers, register_skill, dir }.
+function stackPlugins() {
+  const plugins = [];
+  const seen = new Set();
+  for (const dir of stackPluginDirs()) {
+    const real = (() => { try { return fs.realpathSync(dir); } catch { return null; } })();
+    if (!real || seen.has(real)) continue;
+    seen.add(real);
+    let manifest;
+    try { manifest = JSON.parse(fs.readFileSync(path.join(real, 'stack.json'), 'utf8')); } catch { continue; }
+    if (typeof manifest?.name !== 'string' || plugins.some((p) => p.stack === manifest.name)) continue;
+    const meta = [path.join(real, '.claude-plugin', 'plugin.json'), path.join(real, 'plugin.json')]
+      .map((file) => { try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return null; } }).find(Boolean) || {};
+    const plugin = meta.name || path.basename(real);
+    // The register skill is `<stack>-register`; stack plugins written before aisdlc 0.10.0 call it `register`.
+    const skill = [`${manifest.name}-register`, 'register'].find((s) => fs.existsSync(path.join(real, 'skills', s, 'SKILL.md')));
+    const markers = Array.isArray(manifest.markers) ? manifest.markers.filter((m) => typeof m === 'string' && m) : [];
+    plugins.push({ stack: manifest.name, plugin, version: meta.version || null, markers, register_skill: skill ? `${plugin}:${skill}` : null, dir: real });
   }
-  if (fs.readdirSync(root).some((f) => f.endsWith('.csproj') || f.endsWith('.sln'))) found.push('dotnet');
+  return plugins;
+}
+
+// A marker is a file name in the project root, or `*.ext` for any root file with that extension.
+function hasMarker(root, entries, marker) {
+  return marker.startsWith('*.') ? entries.some((f) => f.endsWith(marker.slice(1))) : fs.existsSync(path.join(root, marker));
+}
+
+// Stacks whose marker files are in the project root: the built-in STACK_MARKERS, then the markers stack plugins declare.
+function detectStacks(root, plugins = stackPlugins()) {
+  const entries = fs.readdirSync(root);
+  const markers = [...STACK_MARKERS, ['*.csproj', 'dotnet'], ['*.sln', 'dotnet'], ...plugins.flatMap((p) => p.markers.map((m) => [m, p.stack]))];
+  const found = [];
+  for (const [marker, stack] of markers) if (!found.includes(stack) && hasMarker(root, entries, marker)) found.push(stack);
   return found;
 }
 
-// With several stacks detected and none configured, a single installed manifest decides: registering a stack is
-// explicit, and without it a mixed repo would silently lose that stack's hooks and coverage check.
-function activeStack(root, cfg = loadConfig(root)) {
-  if (cfg.stack && cfg.stack !== 'auto') return cfg.stack;
-  const found = detectStacks(root);
-  if (found.length === 1) return found[0];
-  const installed = found.filter((s) => fs.existsSync(path.join(aisdlcDir(root), 'stacks', `${s}.json`)));
-  return installed.length === 1 ? installed[0] : null;
+function installedManifests(root) {
+  const dir = path.join(aisdlcDir(root), 'stacks');
+  return fs.existsSync(dir) ? fs.readdirSync(dir).filter((f) => f.endsWith('.json')).map((f) => f.slice(0, -5)).sort() : [];
+}
+
+// `stack` in config is `auto`, a stack name, or a list of names.
+function configuredStacks(cfg) {
+  const v = cfg.stack;
+  if (!v || v === 'auto') return [];
+  return [].concat(v).filter((s) => typeof s === 'string' && s && s !== 'auto');
+}
+
+// Every stack that applies at once: the configured ones, then each detected stack with an installed manifest.
+// Registering a stack installs its manifest, so a stack registered later becomes active without a config change.
+// With nothing configured or registered, a single detected stack is active (its hooks fall through to the defaults).
+function activeStacks(root, cfg = loadConfig(root), detected = detectStacks(root)) {
+  const installed = installedManifests(root);
+  const active = [...configuredStacks(cfg)];
+  for (const s of detected) if (installed.includes(s) && !active.includes(s)) active.push(s);
+  if (!active.length && detected.length === 1) active.push(detected[0]);
+  return active;
 }
 
 function loadStackManifest(root, stack) {
@@ -408,6 +470,30 @@ function loadStackManifest(root, stack) {
 function standardsSkill(manifest, stack) {
   const name = manifest?.standards_skill || null;
   return name === `aisdlc-${stack}:standards` ? `aisdlc-${stack}:${stack}-standards` : name;
+}
+
+// What the skills need to apply every stack: the active ones with their standards skills, and the detected or
+// configured stacks still to register, with the plugin that registers them (or none installed).
+function stackReport(root, cfg = loadConfig(root)) {
+  const plugins = stackPlugins();
+  const detected = detectStacks(root, plugins);
+  const active = activeStacks(root, cfg, detected);
+  const plugin = (s) => plugins.find((p) => p.stack === s) || null;
+  const stacks = [...new Set([...active, ...detected])].map((s) => {
+    const manifest = loadStackManifest(root, s);
+    const p = plugin(s);
+    return { stack: s, detected: detected.includes(s), active: active.includes(s), manifest_installed: !!manifest, standards_skill: standardsSkill(manifest, s), plugin: p?.plugin || null, plugin_version: p?.version || null, register_skill: p?.register_skill || null };
+  });
+  const unregistered = stacks.filter((s) => !s.manifest_installed);
+  return {
+    configured: cfg.stack || 'auto',
+    detected,
+    active,
+    standards_skills: stacks.filter((s) => s.active && s.standards_skill).map((s) => s.standards_skill),
+    to_register: unregistered.filter((s) => s.register_skill).map((s) => ({ stack: s.stack, plugin: s.plugin, register_skill: s.register_skill })),
+    without_plugin: unregistered.filter((s) => !s.register_skill).map((s) => s.stack),
+    stacks,
+  };
 }
 
 // ---------- hooks ----------
@@ -460,23 +546,38 @@ function hookContext(root, cfg, opts) {
   return vars;
 }
 
+// With several active stacks, a point is a stack hook when any of them sets it: their commands run one stack after
+// another, in the order of `active`. A stack whose value is `{"use":"default"}` contributes the default's commands,
+// and `null` contributes none. A command two stacks share runs once.
+export function mergeStackHooks(manifests, defaults) {
+  const merged = {};
+  for (const point of new Set(manifests.flatMap((m) => Object.keys(m?.hooks || {})))) {
+    const values = manifests.map((m) => m?.hooks?.[point]).filter((v) => v !== undefined);
+    if (values.length === 1) { merged[point] = values[0]; continue; }
+    const commands = values.flatMap((v) => resolveHook(point, { stack: { [point]: v }, default: defaults }).commands);
+    merged[point] = values.every((v) => v === null) ? null : { run: [...new Set(commands)] };
+  }
+  return merged;
+}
+
 function resolveHookFor(root, point, opts) {
   if (!HOOK_POINTS.includes(point)) fail(`Unknown hook point "${point}". Valid: ${HOOK_POINTS.join(', ')}`);
   const cfg = loadConfig(root);
-  const stack = activeStack(root, cfg);
+  const stacks = activeStacks(root, cfg);
   const env = {};
   const e = envHook(point);
   if (e !== undefined) env[point] = e;
+  const defaults = JSON.parse(fs.readFileSync(DEFAULT_HOOKS, 'utf8'));
   const layers = {
     env,
     config: cfg.hooks || {},
-    stack: loadStackManifest(root, stack)?.hooks || {},
-    default: JSON.parse(fs.readFileSync(DEFAULT_HOOKS, 'utf8')),
+    stack: mergeStackHooks(stacks.map((s) => loadStackManifest(root, s)), defaults),
+    default: defaults,
   };
   const r = resolveHook(point, layers);
   const vars = hookContext(root, cfg, opts);
   const commands = r.commands.map((c) => c.replace(/\{(\w+)\}/g, (m, k) => (k in vars ? vars[k] : m)));
-  return { point, stack, ...r, commands };
+  return { point, stacks, ...r, commands };
 }
 
 // ---------- registry ----------
@@ -712,17 +813,31 @@ const COVERAGE_FORMATS = {
   },
 };
 
-// Checks the report the stack manifest declares as quality_gate.coverage_report: it exists and parses, it is newer
-// than every file the goal changed (so it covers the finished code), and it meets quality_gate.coverage_thresholds.
+// Checks the report each active stack's manifest declares as quality_gate.coverage_report: it exists and parses, it is
+// newer than every file the goal changed (so it covers the finished code), and it meets quality_gate.coverage_thresholds.
+// The after_task hook runs every active stack's commands, so each task rewrites every report.
 function coverageCheck(root, g) {
-  const stack = activeStack(root);
+  const stacks = activeStacks(root);
+  const reports = stacks.map((s) => stackCoverage(root, g, s));
+  const notes = reports.flatMap((r) => r.notes);
+  if (!stacks.length) notes.push('No stack is active, so no coverage report is declared.');
+  const problems = reports.flatMap((r) => r.problems);
+  if (reports.some((r) => r.checked_changes)) {
+    const changes = goalChanges(root, g);
+    if (changes) notes.push(...changes.warnings);
+  }
+  return { goal: g.id, stacks, reports: reports.map(({ checked_changes, ...r }) => r), ok: problems.length === 0, problems, notes: [...new Set(notes)] };
+}
+
+function stackCoverage(root, g, stack) {
   const manifest = loadStackManifest(root, stack);
   const problems = [];
   const notes = [];
   let report = {};
-  const result = () => ({ goal: g.id, stack, ...report, ok: problems.length === 0, problems, notes });
+  let checked = false;
+  const result = () => ({ stack, ...report, ok: problems.length === 0, problems, notes, checked_changes: checked });
   if (!manifest) {
-    notes.push(stack ? `No .aisdlc/stacks/${stack}.json is installed, so no coverage report is declared.` : 'No stack is active, so no coverage report is declared.');
+    notes.push(`No .aisdlc/stacks/${stack}.json is installed, so no coverage report is declared.`);
     return result();
   }
   const file = `.aisdlc/stacks/${stack}.json`;
@@ -768,7 +883,7 @@ function coverageCheck(root, g) {
     const shown = newer.slice(0, 3).join(', ') + (newer.length > 3 ? ` and ${newer.length - 3} more` : '');
     problems.push(`${decl.path} is older than ${shown}, which the goal changed, so it may not cover the finished code. Run \`hooks run after_task --goal ${g.id}\` to write it again.`);
   }
-  notes.push(...changes.warnings);
+  checked = true;
   return result();
 }
 
@@ -1165,9 +1280,7 @@ const commands = {
   'detect-stack'() {
     const root = findRoot();
     const cfg = loadConfig(root);
-    const stack = activeStack(root, cfg);
-    const manifest = loadStackManifest(root, stack);
-    out({ configured: cfg.stack || 'auto', detected: detectStacks(root), active: stack, manifest_installed: !!manifest, standards_skill: standardsSkill(manifest, stack) });
+    out(stackReport(root, cfg));
   },
 
   config([action, key, value]) {
@@ -1223,10 +1336,11 @@ const commands = {
         }
       }
       // A stack registration rewrites its manifest; committed inside the goal, it would show up in the goal's diff.
-      const stack = activeStack(root);
-      const manifest = stack && `.aisdlc/stacks/${stack}.json`;
-      if (manifest && fs.existsSync(path.join(root, manifest)) && git(root, ['status', '--porcelain', '--', manifest])?.trim()) {
-        warnings.push(`${manifest} has uncommitted changes, for example from registering the stack again. Commit it on its own before the goal starts, so it stays out of the goal's changes.`);
+      for (const stack of activeStacks(root)) {
+        const manifest = `.aisdlc/stacks/${stack}.json`;
+        if (fs.existsSync(path.join(root, manifest)) && git(root, ['status', '--porcelain', '--', manifest])?.trim()) {
+          warnings.push(`${manifest} has uncommitted changes, for example from registering the stack. Commit it on its own before the goal starts, so it stays out of the goal's changes.`);
+        }
       }
       return out({ goal: g.id, before_goal: commands, switches_branch: switches, base_branch: base, other_in_progress: others, warnings });
     }

@@ -18,7 +18,7 @@ Each rule in `.aisdlc/governance.md` has:
 - a **stage**: `plan` rules are reviewed before implementation, `final` rules against the finished work
 - an optional **check**: an automatic check the script runs (`goal-defined`, `tasks-verifiable`, `dag-valid`, `adr-recorded`, `questions-resolved` or `criteria-met`)
 
-A rule that names a stack's standards skill means the one `$AISDLC detect-stack` returns as `standards_skill`, also where it uses the name from before aisdlc 0.10.0 (`aisdlc-<stack>:standards`).
+A rule that names a stack's standards skill means the matching entry of `standards_skills` from `$AISDLC detect-stack`, also where it uses the name from before aisdlc 0.10.0 (`aisdlc-<stack>:standards`). A rule that refers to `standards_skill` means every entry.
 
 **Review with fresh eyes.** In Modes B and C, if your agent can hand work to a sub-agent or a fresh session, run the review there. Give it the goal ID, the steps of that mode, and the full command `$AISDLC` stands for, with the plugin folder written out as an absolute path (a sub-agent may not get this skill's text or its folder), but not your own reasoning about the plan. A review by the context that wrote the plan tends to confirm it. The reviewer can't ask the user, so it writes what it would ask under `## Questions for the user` in the review file. The session that started the review asks them once the gate is set (Mode B step 6).
 
@@ -28,7 +28,7 @@ The script owns the rules table. Change it only through the `governance add` and
 1. Run `$AISDLC hooks run pre_govern`, then `$AISDLC governance list`. `init` seeds the baseline rules GOV-01 to GOV-05 (`must`, `plan`) and GOV-06 (`must`, `final`, check `criteria-met`). If the list fails, the file has an invalid rule (a duplicate ID, or an unknown severity, stage or check). Show the error and ask the user how to fix it.
    Projects initialized before aisdlc 0.3.0 lack two baseline checks. If no active rule uses `questions-resolved`, offer to set it on the rule about open questions (GOV-05 in the baseline). If no active rule uses `criteria-met`, tell the user that nothing checks the finished code against its acceptance criteria and offer that rule (`final`, check `criteria-met`). Change nothing they don't accept.
 2. Offer the optional rules in `${CLAUDE_PLUGIN_ROOT}/templates/governance-catalog.md` that aren't already covered, grouped by topic. Present them as choices, and let the user pick, reword and set severity and stage for each one. Never add a rule the user didn't choose.
-   If a stack is active (`$AISDLC detect-stack` returns `standards_skill`), offer the catalog's two Stack standards rules, pointing at that skill (for example "Code follows `aisdlc-nodejs:nodejs-standards`", stage `final`) instead of copying its content. The `plan` one catches a plan that can't meet the standard before any code is written.
+   If a stack is active (`$AISDLC detect-stack` returns `standards_skills`), offer the catalog's two Stack standards rules, pointing at those skills (for example "Code follows `aisdlc-nodejs:nodejs-standards`", stage `final`) instead of copying its content. The `plan` one catches a plan that can't meet the standard before any code is written.
 3. Then ask, one question at a time, about anything the catalog doesn't cover that the project needs: coding standards, security and compliance, testing, review or approval needs, performance budgets, and what "done" means.
 4. For each agreed change:
    - Add a rule: `$AISDLC governance add "<rule>" --severity must|should --stage plan|final [--check <name>]`. Ask the user which severity and stage they want. The script refuses to guess them.
@@ -44,7 +44,7 @@ The script owns the rules table. Change it only through the `governance add` and
    - `goal.md`, including Clarifications and Standards deviations. Both are the user's answers: treat them as settled.
    - the task files and the linked ADRs
    - the last review in `stale_reviews`, if there is one. Check that its Required Fixes were addressed, and don't raise again what the user has since answered under Clarifications. Still review every rule again.
-   - the stack's standards: if `$AISDLC detect-stack` returns `standards_skill`, load that skill. Check that the plan can meet it: the tasks carry the criteria it requires (for example declaration files, test layers, lint and coverage), or the goal records the user's deviation. A plan that can't meet the standard is a finding now, not at the final review.
+   - the stacks' standards: load every skill in `standards_skills` from `$AISDLC detect-stack`. Check that the plan can meet each: the tasks carry the criteria it requires (for example declaration files, test layers, lint and coverage), or the goal records the user's deviation. A plan that can't meet the standard is a finding now, not at the final review.
 4. Check each active plan rule strictly, and base every result on evidence in the files:
    - `pass`
    - `fail`, with a concrete reason and the fix

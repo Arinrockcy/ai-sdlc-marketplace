@@ -25,7 +25,7 @@ Input: `$ARGUMENTS` (the text after the skill's name) is the goal ID. If it is m
    - missing verify commands
    - dependencies that look wrong
    - decisions that sound architectural (note these for `/aisdlc:adr`)
-   - the stack's standards: run `$AISDLC detect-stack`. If `standards_skill` is set, load that skill. Check that the tasks carry the criteria it requires (for example declaration files, test layers, lint and coverage). Where the repo conflicts with it (another test runner, a threshold the tooling can't enforce), ask the user which way to go. Record a chosen departure under `## Standards deviations` in `goal.md` with the reason, so reviewers don't rebuild it from the Clarifications.
+   - the stack's standards: run `$AISDLC detect-stack` and load every skill in `standards_skills`. Check that the tasks carry the criteria each requires (for example declaration files, test layers, lint and coverage). Where the repo conflicts with it (another test runner, a threshold the tooling can't enforce), ask the user which way to go. Record a chosen departure under `## Standards deviations` in `goal.md` with the reason, so reviewers don't rebuild it from the Clarifications.
 5. Ask the user **one question at a time**. Use a structured question tool with 2 to 4 concrete options when one is available. Put the most important question first. After each answer:
    - Append it under `## Clarifications` in `goal.md` as `- **Q:** … **A:** …`.
    - If it answers an `- **Open:** …` item under Risks & Unknowns, remove that item. Only the user's answer resolves it.

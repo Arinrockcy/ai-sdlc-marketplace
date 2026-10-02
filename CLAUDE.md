@@ -9,7 +9,7 @@ A Claude Code plugin marketplace (`.claude-plugin/marketplace.json`) that ships 
 - `plugins/aisdlc-nodejs`: a reference stack plugin
 
 Skills must stay agent-neutral markdown, because GitHub Copilot loads the same plugins, and Codex and Cursor adapters are planned. Put Claude-specific details only in path variables (`${CLAUDE_PLUGIN_ROOT}`, `$ARGUMENTS`). Copilot leaves those variables as written (it shows the model the skill's folder instead) and doesn't namespace skills (`/govern`, not `/aisdlc:govern`; its skill tool loads `nodejs-standards`, not `aisdlc-nodejs:nodejs-standards`), so:
-- A skill that uses one of them, a `plugin:skill` name, or the `standards_skill` from `detect-stack` keeps the preamble sentence that says what it stands for. `tests/skills.test.mjs` checks this.
+- A skill that uses one of them, a `plugin:skill` name, or the `standards_skills` from `detect-stack` keeps the preamble sentence that says what it stands for. `tests/skills.test.mjs` checks this.
 - A step that hands work to a sub-agent passes the resolved `$AISDLC` command: the sub-agent doesn't see the skill's folder.
 - Frontmatter must parse as strict YAML: quote a value that contains `: `. Claude Code accepts it unquoted, but Copilot skips the skill.
 
@@ -43,7 +43,7 @@ Each plugin has its own version and `CHANGELOG.md` (Keep a Changelog format).
 - registry regeneration and search
 - review scaffolds (`governance review`), pre-switch checks (`goal preflight`), a goal's changes (`goal diff`) and pushing its branch (`goal push`)
 - the code graph: Graphify setup, freshness and queries
-- the coverage check (`coverage check`) against the report the stack manifest declares
+- the coverage check (`coverage check`) against the report each active stack's manifest declares
 
 Skills call the script (written `$AISDLC` in the skill files) and should never hand-edit state the script owns. Every `$AISDLC …` span in a skill must be a complete, runnable invocation. Write placeholders as `<G-id>`, `<T-id>`, `<ADR-id>`, `<GOV-id>`, `<keywords>` or `<name>`, alternatives as `a|b`, optional parts as `[...]`, and `…` only as an option's value. `tests/skills.test.mjs` runs each one and fails if the script no longer understands it. The script rejects unknown options, so every option must be in `OPTIONS`. The state the script owns: `status`, `gate_*`, `govern_fingerprint` and `cancel_reason` fields, the `## Cancellations` and `## Removed tasks` logs in `goal.md`, the rules table in `governance.md`, `registry.md`, `registry-archive.md`, `tasks.md`, and goal folder moves. When adding workflow behavior, put invariants in the script with tests, and keep instructions in the skill.
 
@@ -72,17 +72,18 @@ Skills call the script (written `$AISDLC` in the skill files) and should never h
 - Task changes need the goal to be in-progress (except resetting to `pending`, used to resume a blocked goal). A task starts, or becomes done, only while the implement gate holds (governance passed and the plan unchanged). It also needs its dependencies done or skipped. It becomes `done` only from `in-progress` with `verified: pass`. `task verify` records that after running the task's `verify` command and the `after_task` hook. It takes `--evidence` instead for a `manual:` check, or when neither exists and nothing would run.
 - Frontmatter values must be single-line. Only `adrs`, `depends_on` and `goals` parse as arrays.
 
-**Hooks.** Each point resolves in the order env `AISDLC_HOOK_<POINT>` > `.aisdlc/config.json` `hooks` > `.aisdlc/stacks/<stack>.json` > `plugins/aisdlc/defaults/hooks.json`. `{"use":"stack"|"default"}` delegates to another layer, and `null` disables the hook. The list of hook points is `HOOK_POINTS` in the script. When adding a workflow step, add it to `STEPS` so it gets `pre_`/`post_` points.
+**Hooks.** Each point resolves in the order env `AISDLC_HOOK_<POINT>` > `.aisdlc/config.json` `hooks` > `.aisdlc/stacks/<stack>.json` (every active stack, merged) > `plugins/aisdlc/defaults/hooks.json`. `{"use":"stack"|"default"}` delegates to another layer, and `null` disables the hook. The list of hook points is `HOOK_POINTS` in the script. When adding a workflow step, add it to `STEPS` so it gets `pre_`/`post_` points.
 
 **Stack plugins** follow `plugins/aisdlc/docs/stack-plugin-contract.md`:
 - a `stack.json` manifest, including `quality_gate.coverage_report`, the report its test command writes on every run
 - a `<stack>-register` skill that copies the manifest into the project's `.aisdlc/stacks/`
-- a `<stack>-standards` skill that `/aisdlc:implement` loads
-
-Both names carry the stack, because Copilot keeps only one of two plugin skills with the same name.
+- a `<stack>-standards` skill that `/aisdlc:implement` loads (both names carry the stack, because Copilot keeps only one of two plugin skills with the same name)
+- `markers`: the root files that show a project uses the stack
 - optionally, a zero-dependency script for the plugin's deterministic steps, as `aisdlc-nodejs` has in `scripts/nodejs.mjs` (written `$NODEJS` in its skills). It reads the plugin's own `stack.json` and project-local files, never the core's. Its `OLDEST_COMPATIBLE_MANIFEST` names the oldest installed manifest the plugin still accepts: raise it with any release that changes what the manifest must contain. Its `TEMPLATE_HISTORY` holds the hash of every earlier committed template, so unedited copies update; a test fails until a changed template's old hash is added.
 
-The core script never reads other plugins' directories, only project-local files. To add stack detection, edit `STACK_MARKERS`.
+The core script finds installed stack plugins (`stackPluginDirs`): plugins next to it, Claude Code's `installed_plugins.json`, and Copilot CLI's `config.json` and `installed-plugins/`. From each it reads only `stack.json` and the plugin manifest, never runs its code, and uses them to detect the stack (`markers`) and name the register skill. Everything else it reads is project-local. `STACK_MARKERS` covers stacks whose plugin isn't installed. Tests set `AISDLC_STACK_PLUGINS`, which replaces the search.
+
+**Several stacks.** Every detected stack with a manifest in `.aisdlc/stacks/` is active, plus the ones `stack` in config names. Registering a stack activates it, so a plugin installed later needs no config change. The stack hook layer runs each active stack's commands in turn (`mergeStackHooks`), and `coverage check` checks every active stack's report.
 
 ## Product decisions to preserve
 
@@ -106,5 +107,6 @@ These were settled with the repo owner:
 - `/aisdlc:govern` offers `templates/governance-catalog.md` rules as choices and never adds one silently. `governance add` requires an explicit severity and stage.
 - `/aisdlc:implement` runs one task per invocation unless `--all` or `implement.mode: "auto"` is set.
 - A goal auto-completes once all tasks pass.
+- Stacks are detected, not chosen. Init registers every detected stack whose plugin is installed without asking, and `/aisdlc:create-goal` and `/aisdlc:implement` register a stack plugin installed later (mid-goal, implement asks first). A repository can have several active stacks.
 - Graphify is optional and used only to save tokens. Init offers it. The script runs it code-only (no model calls), and `graph query` rebuilds it whenever the code changed, so no skill asks about rebuilding. A missing or failing Graphify never blocks the workflow: skills fall back to searching the code. `registry.md` indexes goals and ADRs, never code.
 - When a skill step is deterministic (a lookup, a git check, a scaffold, a mapping), it goes in the script. Skills keep only judgment and user interaction.
