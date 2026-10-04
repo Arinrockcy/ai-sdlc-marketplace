@@ -1,35 +1,34 @@
 # Goal: ship the `goal` plugin 0.1.0 in aisdlc-marketplace
 
 - **Slug:** `goal-plugin`
-- **Status:** draft
-- **Requested:** 2026-10-03, source: user request "create claude plugin for it" (the goal workflow committed to samuraiui as `b50ea1e`)
+- **Status:** in-progress
+- **Requested:** 2026-10-03, source: user request to package an existing goal workflow from another project as a plugin
 - **Branch:** `goal-plugin`, off `master` at `6481535`; never pushed
-- **Plan approved by user:** not yet
-- **Orchestrated from:** a session in `/Users/arins/work/samuraiui`; every changed file is in this repo
+- **Plan approved by user:** 2026-10-04
+- **Orchestrated from:** a session in the source project; every changed file is in this repo
 
 ## Goal
 
 This marketplace gains a third plugin, `goal` 0.1.0: a generic port of
-samuraiui's goal workflow for Claude Code and GitHub Copilot. It ships the
+an existing project-specific goal workflow for Claude Code and GitHub Copilot. It ships the
 skill `goal-workflow` with its ledger template, the skill `start`, four role
 agents (`planner`, `governor`, `implementer`, `reviewer`), and a SessionStart
-triage hook. Samurai-specific rules become "the project's instructions" and
+triage hook. The source project's own rules become "the project's instructions" and
 its commands become the project's own, recorded per goal.
 
 Done means `npm test` and `npm run validate` pass with the plugin included, it
 loads with `--plugin-dir`, installs from the local marketplace in Claude Code,
 and is hand-checked in Copilot CLI once the user has installed it.
 
-Out of scope: any change to samuraiui's app code; any change to `aisdlc` or
+Out of scope: any change to the source project; any change to `aisdlc` or
 `aisdlc-nodejs` behaviour or versions; a per-repo config file; Codex or Cursor
 adapters; `DEPENDENCY_GUARDIAN_PLAN.md`; pushing; tagging.
 
 ## Source material
 
-In `/Users/arins/work/samuraiui` at `b50ea1e`:
-`.agents/skills/goal-workflow/SKILL.md`, `.claude/agents/goal-*.md`,
-`.agents/templates/goal-ledger.md`, and the "Task workflow" section of
-`.agents/PROJECT_INSTRUCTIONS.md`.
+The source project's goal workflow: its canonical skill, four role agents,
+ledger template, and the task-workflow section of its instructions. The
+orchestrator passes their location to each agent; it is not recorded here.
 
 ## Project commands
 
@@ -82,8 +81,8 @@ only that sub-task's files. Each sub-task adds its line to
 `plugins/goal/CHANGELOG.md` and grows `plugins/goal/tests/goal.test.mjs` with
 the checks for what it adds.
 
-The Samurai-term search used below is: case-sensitive `FLEX`, and
-case-insensitive `samurai`, `vitest`, `eslint`, `validate:components`,
+The source-term search used below is: case-sensitive `FLEX`, and
+case-insensitive `vitest`, `eslint`, `validate:components`,
 `PROJECT_INSTRUCTIONS`, `.agents/`, `.ai/`, `agent-contract`, `Codex`,
 `/usr/local/bin`, over `plugins/goal` excluding `plugins/goal/tests/`.
 
@@ -93,7 +92,7 @@ project commands, the decisions, and the template text it needs.
 
 ### 1. Scaffold `goal` 0.1.0, register it, and widen the preamble test
 
-- **Status:** pending
+- **Status:** in-progress
 - **Scope:** Plugin manifest (`name`, `version` 0.1.0, `description`, `author {name: "arin"}`); changelog head in the repo's format; marketplace entry (`source` `./plugins/goal`, `category` `development`) and an updated top-level marketplace description that mentions goal, in both marketplace copies; `validate` script gains `claude plugin validate plugins/goal`; the skill preamble test widened from the hard-coded `aisdlc` prefix to every marketplace plugin name, treating `<plugin>:<name>` as a skill reference only when `<name>` is a skill folder of that plugin, so agent names such as `goal:planner` are not held to the skill phrase; a `goal.test.mjs` skeleton. No `aisdlc` version bump, since no aisdlc behaviour changes.
 - **Source document:** none
 - **Areas:** `plugins/goal/.claude-plugin/plugin.json`, `plugins/goal/CHANGELOG.md`, `plugins/goal/tests/goal.test.mjs`, `.claude-plugin/marketplace.json`, `.github/plugin/marketplace.json`, `package.json`, `plugins/aisdlc/tests/skills.test.mjs`, this ledger
@@ -114,7 +113,7 @@ project commands, the decisions, and the template text it needs.
 - **Areas:** `plugins/goal/skills/goal-workflow/SKILL.md`, `plugins/goal/skills/goal-workflow/ledger-template.md`, `plugins/goal/tests/goal.test.mjs`
 - **Changes a screen:** no
 - **Depends on:** 1
-- **Acceptance:** the skills tests pass, including the widened preamble test; the Samurai-term search finds nothing; tests check the template exists where the skill names it and the term search stays empty; by reading, all of these are present: steps 0-4, resuming, statuses, the standing rules (never assume, ask with options, record every answer, only the user changes scope, never push), and the gate conditions (reviewer verdict, governor verdict, tests against baseline, lint, build, project validation, browser check with ask-when-it-cannot-run)
+- **Acceptance:** the skills tests pass, including the widened preamble test; the source-term search finds nothing; tests check the template exists where the skill names it and the term search stays empty; by reading, all of these are present: steps 0-4, resuming, statuses, the standing rules (never assume, ask with options, record every answer, only the user changes scope, never push), and the gate conditions (reviewer verdict, governor verdict, tests against baseline, lint, build, project validation, browser check with ask-when-it-cannot-run)
 - **Governor notes:** AGENTS.md lines 11, 13, 14; skills.test.mjs:70-110.
 - **Review:**
 - **Verification:**
@@ -144,7 +143,7 @@ project commands, the decisions, and the template text it needs.
 - **Areas:** `plugins/goal/agents/planner.md`, `governor.md`, `implementer.md`, `reviewer.md`, `plugins/goal/tests/goal.test.mjs`
 - **Changes a screen:** no
 - **Depends on:** 2
-- **Acceptance:** the Samurai-term search finds nothing; a test checks each agent's frontmatter is strict single-line YAML with `name` equal to the file name; no agent points at the skill's folder; each role keeps its closing verdict line and its "Questions for the user" rule; manual: `/agents` in a `claude --plugin-dir plugins/goal` session shows the four agents, recorded here with how they are addressed
+- **Acceptance:** the source-term search finds nothing; a test checks each agent's frontmatter is strict single-line YAML with `name` equal to the file name; no agent points at the skill's folder; each role keeps its closing verdict line and its "Questions for the user" rule; manual: `/agents` in a `claude --plugin-dir plugins/goal` session shows the four agents, recorded here with how they are addressed
 - **Governor notes:** AGENTS.md lines 13, 14. `claude plugin validate` does not check agent frontmatter, so the test is the only check.
 - **Review:**
 - **Verification:**
@@ -204,7 +203,7 @@ project commands, the decisions, and the template text it needs.
 - **Areas:** this ledger; and, only for fixes the checks call for, `plugins/goal/**`, `README.md`, `AGENTS.md`, both marketplace files
 - **Changes a screen:** no
 - **Depends on:** 7
-- **Acceptance:** each command exits 0; skill, agents, hook and start are discoverable in Claude Code; the Copilot result is recorded for each of skills, agents (including what it does with `tools:`), hook and start; every format risk below has a recorded answer; the user's plugin registrations match the recorded starting contents; `git status --short` is clean here, and in samuraiui shows exactly ` M .agent-contract/marketplace-listings.md`; `git log origin/master..HEAD` shows eight sub-task commits plus one closing ledger commit; nothing pushed; `goal-plugin` is left unmerged for the user
+- **Acceptance:** each command exits 0; skill, agents, hook and start are discoverable in Claude Code; the Copilot result is recorded for each of skills, agents (including what it does with `tools:`), hook and start; every format risk below has a recorded answer; the user's plugin registrations match the recorded starting contents; `git status --short` is clean here, and the source project's working tree is as the orchestrator found it; `git log origin/master..HEAD` shows eight sub-task commits plus one closing ledger commit; nothing pushed; `goal-plugin` is left unmerged for the user
 - **Governor notes:** 
 - **Review:**
 - **Verification:**
@@ -227,14 +226,14 @@ project commands, the decisions, and the template text it needs.
 |---|---|---|---|
 | 2026-10-03 | Simple or complex | Complex | all |
 | 2026-10-03 | Content | Generic version, no per-repo config file | 2, 3 |
-| 2026-10-03 | samuraiui's committed copies | Kept; the plugin is not installed in samuraiui | all |
+| 2026-10-03 | The source project's own copies | Kept; the plugin is not installed there | all |
 | 2026-10-03 | Relation to aisdlc | A third plugin inside this marketplace | 1 |
 | 2026-10-03 | Names | Plugin `goal`; skill `goal-workflow`; agents `planner`, `governor`, `implementer`, `reviewer`, kept even if Copilot drops the namespace | 1-4 |
 | 2026-10-03 | Ledger and commits | `.agent-goals/` in this repo, committed with each sub-task | all |
 | 2026-10-03 | Branch | New branch `goal-plugin` off `master`, never pushed | all |
 | 2026-10-03 | Triage entry | SessionStart hook plus an explicit start entry | 4, 5 |
 | 2026-10-03 | Project commands in the plugin | Planner finds, user confirms at plan approval, recorded in the ledger; missing recorded as "none" | 2, 3 |
-| 2026-10-03 | Samurai-only steps | Generalised | 2, 3 |
+| 2026-10-03 | Source-project-only steps | Generalised | 2, 3 |
 | 2026-10-03 | Ledger template location | Inside the skill folder | 2 |
 | 2026-10-03 | Testing | Validate, `npm test`, hook JSON check, scratch-repo load and local install, uninstalled afterwards; temporary marketplace registration accepted | 5, 7 |
 | 2026-10-03 | Conventions | Plugin CHANGELOG, root README section, version 0.1.0, `goal 0.1.0: ...` commit style, no tag; author `arin`, no licence, as the other plugins | 1, 6 |
@@ -249,7 +248,7 @@ project commands, the decisions, and the template text it needs.
 | 2026-10-03 | Ledger folder name in the plugin | `.agent-goals/` | 2 |
 | 2026-10-03 | Project commands for this goal | As listed under "Project commands" | all |
 | 2026-10-03 | Commits for this goal | Auto-commit on `goal-plugin` once the gate passes | all |
-| 2026-10-03 | Task detail | Appended to the source task document when a sub-task finishes, with all four parts; applies to samuraiui's workflow and the plugin | 2 |
+| 2026-10-03 | Task detail | Appended to the source task document when a sub-task finishes, with all four parts; applies to the source project's workflow and the plugin | 2 |
 | 2026-10-04 | Deterministic steps in a script | A small `scripts/goal.mjs` for listing and scaffolding ledgers, tested | 3, 5 |
 | 2026-10-04 | AGENTS.md changes | Plugin list, a goal paragraph, and a goal block under preserved product decisions | 7 |
 | 2026-10-04 | Fallback role text | The skill points at the plugin root's `agents/` files with the standard preamble | 2 |
@@ -262,9 +261,11 @@ project commands, the decisions, and the template text it needs.
 | 2026-10-04 | Repo descriptions | Marketplace, AGENTS.md and README updated to mention goal; category `development`; historical Upgrading lines untouched | 1, 7 |
 | 2026-10-04 | Commit style in the plugin | The project's style and the host's attribution; the plugin prescribes neither | 4 |
 | 2026-10-04 | After the goal closes | `goal-plugin` is left unmerged; the user merges or pushes | 8 |
-| 2026-10-04 | Task detail in samuraiui | Done separately as a simple task, samuraiui commit `5f4b03a` | none |
+| 2026-10-04 | Task detail in the source project | Done separately there as a simple task | none |
+| 2026-10-04 | Plan approval | Approved | all |
+| 2026-10-04 | Local paths and source-project references in this ledger | Removed before the first commit | all |
 
 ## Deferred and open
 
-- Backporting to samuraiui any wording fixes found while porting: not in this goal; raise as a question.
-- The ledger holds local absolute paths and samuraiui references; they would be published if `goal-plugin` is merged and pushed.
+- Backporting to the source project any wording fixes found while porting: not in this goal; raise as a question.
+- The source project's name is kept out of this repo: it is checked for by the reviewer by hand, not by a committed test or search term.
