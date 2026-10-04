@@ -70,7 +70,13 @@ plugins. No failing test files.
 - At plan approval the plugin also asks whether to work on a new branch or the
   current one, and confirms the project commands the planner found.
 - Commits follow the project's message style and the host's attribution.
-- The workflow's agents never push; the user may.
+- The workflow never pushes on its own; it pushes when the user explicitly asks.
+- Clear-context check: whenever the next thing to start does not need the
+  current session's context, the orchestrator makes sure the ledger is up to
+  date, says so, and stops until the user clears the session or says to
+  continue. It runs before a new goal or unrelated task, after plan approval,
+  between sub-tasks, and when the goal closes. Role agents are spawned fresh
+  for each sub-task and resumed only within it.
 
 ## Sub-tasks
 
@@ -83,7 +89,8 @@ the checks for what it adds.
 
 The source-term search used below is: case-sensitive `FLEX`, and
 case-insensitive `vitest`, `eslint`, `validate:components`,
-`PROJECT_INSTRUCTIONS`, `.agents/`, `.ai/`, `agent-contract`, `Codex`,
+`PROJECT_INSTRUCTIONS`, `.agents/`, `.ai/` as a path (not a web address on
+an `.ai` domain), `agent-contract`, `Codex`,
 `/usr/local/bin`, over `plugins/goal` excluding `plugins/goal/tests/`.
 
 Role agents do not see a skill's folder (AGENTS.md line 13). Agents are
@@ -102,12 +109,12 @@ project commands, the decisions, and the template text it needs.
 - **Governor notes:** release.test.mjs:10-23; skills.test.mjs:101-110; AGENTS.md lines 29-33. A manifest-only plugin validates (checked by the governor).
 - **Review:** safe to commit, no fix rounds. Two minor findings, neither against the spec: placeholder forms such as `/goal:<skill>` are not matched by the marketplace rule (open question below); a non-string marketplace `source` would throw, as it already does in the release test. Governor: compliant once this ledger was corrected.
 - **Verification:** `npm test` exits 0: 86 tests, 84 pass, 0 fail, 2 skipped (baseline 81 pass). `npm run validate` exits 0 with no warnings for the marketplace and all three plugins. The two marketplace files are identical. In a scratch copy, a skill using `/goal:<skill>` without the preamble fails the widened test, agent names pass, and mutations of version, changelog head, marketplace copy and entry each fail a test. Not verified: install-time behaviour, which sub-task 8 covers.
-- **Commit:**
+- **Commit:** `8ca3e78`
 - **Task detail:** Done: manifest, changelog head `## [0.1.0] - 2026-10-04`, marketplace entry and top-level description in both copies, `validate` script, widened preamble test, three-test `goal.test.mjs` that compares the changelog head with the manifest instead of pinning the version. Not done: nothing in scope. Files: `plugins/goal/.claude-plugin/plugin.json`, `plugins/goal/CHANGELOG.md`, `plugins/goal/tests/goal.test.mjs`, `.claude-plugin/marketplace.json`, `.github/plugin/marketplace.json`, `package.json`, `plugins/aisdlc/tests/skills.test.mjs`. Decisions: see the 2026-10-04 rows for sub-task 1 in the decision log.
 
 ### 2. Skill `goal-workflow` and ledger template
 
-- **Status:** pending
+- **Status:** done
 - **Scope:** Generic port of the canonical skill with the decided behaviour above, the repo's preamble sentences, agent-neutral wording with Claude detail as an aside (clearing the session, the structured question tool, background agents, resuming an agent), generalised triage criteria, the neutral fallback that hands a generic sub-agent the role file at the plugin root's `agents/` folder, and one sentence saying it is separate from `.aisdlc/`. Ledger template next to SKILL.md with Project commands, Source document, Task detail, branch, and the per-goal commit and fix-loop choices.
 - **Source document:** none
 - **Areas:** `plugins/goal/skills/goal-workflow/SKILL.md`, `plugins/goal/skills/goal-workflow/ledger-template.md`, `plugins/goal/tests/goal.test.mjs`
@@ -115,15 +122,15 @@ project commands, the decisions, and the template text it needs.
 - **Depends on:** 1
 - **Acceptance:** the skills tests pass, including the widened preamble test; the source-term search finds nothing; tests check the template exists where the skill names it and the term search stays empty; by reading, all of these are present: steps 0-4, resuming, statuses, the standing rules (never assume, ask with options, record every answer, only the user changes scope, never push), and the gate conditions (reviewer verdict, governor verdict, tests against baseline, lint, build, project validation, browser check with ask-when-it-cannot-run)
 - **Governor notes:** AGENTS.md lines 11, 13, 14; skills.test.mjs:70-110.
-- **Review:**
-- **Verification:**
+- **Review:** safe to commit after two fix rounds. Round 1 fixed a dropped predecessor blocking the next sub-task, Resuming ignoring the goal's status and an outstanding commit, the browser-check exception, the declined and closing commit, the no-sub-agent wording, who drops or abandons, and a search term that matched web addresses. Round 2 added the clear-context and fresh-role-agent rules and three Resuming clauses. Governor: compliant; no rule violation, no undecided behaviour, no scope creep. Four optional clarifications from the last review are carried to sub-task 3.
+- **Verification:** `npm test` exits 0: 89 tests, 87 pass, 0 fail, 2 skipped (baseline 81 pass). `npm run validate` exits 0 with no warnings. The source-term search and a hand search for the source project's name find nothing in `plugins/goal`. In scratch copies, mutations of the skill, template and term list each fail the test meant to catch them. Not verified: the role files the skill points at (sub-task 4) and behaviour in a live session of either agent (sub-task 8).
 - **Commit:**
-- **Task detail:**
+- **Task detail:** Done: the generic skill (steps 0-4, standing rules, roles with the neutral fallback, once-per-goal questions at approval, seven gate conditions, task detail, resuming by status, clear-context check, fresh role agents per sub-task), the ledger template next to it, and three tests (term search, template presence, the term patterns themselves). Not done: nothing in scope. Files: `plugins/goal/skills/goal-workflow/SKILL.md`, `plugins/goal/skills/goal-workflow/ledger-template.md`, `plugins/goal/tests/goal.test.mjs`, `plugins/goal/CHANGELOG.md`. Decisions: the 2026-10-04 rows for sub-task 2 in the decision log. Follow-ups: the four clarifications listed under sub-task 3.
 
 ### 3. Script for listing and scaffolding ledgers
 
 - **Status:** pending
-- **Scope:** A zero-dependency `goal.mjs` with two commands: list the ledgers in a project's `.agent-goals/` with slug, goal and status; create a ledger from the template for a given slug without overwriting an existing one. The skill is updated to call it with a written-out path.
+- **Scope:** A zero-dependency `goal.mjs` with two commands: list the ledgers in a project's `.agent-goals/` with slug, goal and status; create a ledger from the template for a given slug without overwriting an existing one. The skill is updated to call it with a written-out path. Also applies four clarifications to the skill carried from the sub-task 2 review: the fresh-agents rule also allows resuming an agent with the user's answers; after the last sub-task the clear-context stop happens once, and the closing commit is made by a new implementer or the last sub-task's if still available; before a new goal or unrelated task the user is told to give the request again after clearing, since no ledger holds it yet; and Resuming's baseline check means the baseline section is still unfilled, not that the project has no test command.
 - **Source document:** none
 - **Areas:** `plugins/goal/scripts/goal.mjs`, `plugins/goal/tests/goal.test.mjs`, `plugins/goal/skills/goal-workflow/SKILL.md`
 - **Changes a screen:** no
@@ -269,6 +276,20 @@ project commands, the decisions, and the template text it needs.
 | 2026-10-04 | Goal changelog intro | Same as aisdlc-nodejs, without the pre-1.0.0 sentence | 1 |
 | 2026-10-04 | First ledger draft pushed on `master` as `502c390`, naming the source project | Accepted; history is left as it is. The row above saying the references were removed before the first commit is wrong: they were removed in `f16f26a`, the second commit | all |
 | 2026-10-04 | Pushing | The user pushes the branches themselves; the workflow's agents never push | all |
+| 2026-10-04 | Ledger's first commit in the plugin | Travels with the first sub-task's commit; no separate plan commit | 2 |
+| 2026-10-04 | Browser check recorded as "none" on a screen change | Asked each time, never skipped silently | 2 |
+| 2026-10-04 | Pushing in the plugin | Never on its own; pushes when the user explicitly asks | 2 |
+| 2026-10-04 | New branch in the plugin | The orchestrator creates it right after approval and asks first when the tree has uncommitted changes | 2 |
+| 2026-10-04 | Dropped sub-task | Counts like done everywhere; only the user drops | 2 |
+| 2026-10-04 | Command recorded as "none" | Waives that gate condition for the goal; the approval question states which conditions will not be checked | 2 |
+| 2026-10-04 | Declined commit | The sub-task stays done with its commit outstanding; the next one waits | 2 |
+| 2026-10-04 | Smaller points | Goal in-progress at the first sub-task; closing commit follows the commit choice; slug is lowercase letters, digits and hyphens | 2, 3 |
+| 2026-10-04 | Agent without sub-agents | Roles run one at a time in the current session; the review runs in a fresh session | 2 |
+| 2026-10-04 | Plan edits and rejection | An edited plan goes back through the governor; a rejected plan is abandoned; only the user drops a sub-task or abandons a goal | 2 |
+| 2026-10-04 | Narrowed `.ai/` search term | Accepted: it matches a path, not a web address on an `.ai` domain | 2 |
+| 2026-10-04 | Clear-context check | In the plugin (the source project's own workflow was changed separately, outside this goal): stop and ask the user to clear the session before a new goal or unrelated task, after plan approval, between sub-tasks and at close; role agents fresh per sub-task | 2, 4 |
+| 2026-10-04 | "Continue without clearing" | Asked at every point; not recorded as a standing choice | 2 |
+| 2026-10-04 | Optional clarifications from the last sub-task 2 review | Sub-task 2 committed as reviewed; the four clarifications are applied in sub-task 3 | 2, 3 |
 
 ## Deferred and open
 
