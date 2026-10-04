@@ -8,6 +8,6 @@
   "scripts": {
     "test": "node --test plugins/*/tests/*.test.mjs",
     "bench": "node scripts/bench.mjs",
-    "validate": "claude plugin validate . && claude plugin validate plugins/aisdlc && claude plugin validate plugins/aisdlc-nodejs"
+    "validate": "claude plugin validate . && claude plugin validate plugins/aisdlc && claude plugin validate plugins/aisdlc-nodejs && claude plugin validate plugins/goal"
   }
 }

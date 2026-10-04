@@ -1,6 +1,6 @@
 {
   "name": "aisdlc-marketplace",
-  "description": "Stack-agnostic AI-SDLC workflow (goals, clarification, ADRs, governance gates, dependency-ordered implementation) plus pluggable stack plugins.",
+  "description": "Stack-agnostic AI-SDLC workflow (goals, clarification, ADRs, governance gates, dependency-ordered implementation) plus pluggable stack plugins, and the goal plugin: a governed workflow that triages each task and runs a complex one a sub-task at a time.",
   "owner": {
     "name": "arin"
   },
@@ -17,6 +17,13 @@
       "source": "./plugins/aisdlc-nodejs",
       "description": "Node.js stack plugin for aisdlc: Node.js 24+, coding standards, lint/coverage gates, SonarQube analysis, dependency vulnerability scans, and Express REST API/auth/JWT practices.",
       "version": "0.11.0",
+      "category": "development"
+    },
+    {
+      "name": "goal",
+      "source": "./plugins/goal",
+      "description": "Goal workflow: triage each task as simple or complex, then plan, govern, implement, review and commit a complex task one sub-task at a time, tracked in a ledger.",
+      "version": "0.1.0",
       "category": "development"
     }
   ]

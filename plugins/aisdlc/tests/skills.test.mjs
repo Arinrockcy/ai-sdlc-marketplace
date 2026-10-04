@@ -98,16 +98,37 @@ test('skills: frontmatter parses as strict YAML and follows the Agent Skills spe
 // GitHub Copilot does neither, so a skill that relies on one says what it stands for. Its skill tool matches names
 // exactly, so a skill that loads another by its namespaced name (written out, or the `standards_skill` that
 // `detect-stack` returns) also says to drop the prefix.
-const BARE_SKILL_NAME = /(^|[^/\w-])aisdlc(-[a-z]+|-<[a-z]+>)?:[a-z<]/m;
+//
+// The `aisdlc` family has only skills in its namespace, and its skills also name stack plugins that are not in this
+// marketplace (`aisdlc-<stack>:…`), so any `aisdlc…:name` counts. For every plugin in the marketplace, `plugin:name`
+// counts when `name` is one of that plugin's skill folders: a plugin's namespace can also hold agents (`goal:planner`),
+// and an agent name is not a skill to load.
+const AISDLC_COMMAND = /\/aisdlc(-[a-z]+)?:[a-z]/;
+const AISDLC_SKILL_NAME = /(^|[^/\w-])aisdlc(-[a-z]+|-<[a-z]+>)?:[a-z<]/m;
+
+// One `plugin:skill` alternative per skill folder of each marketplace plugin, or null when no plugin has a skill.
+function marketplaceSkillNames() {
+  const quote = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const names = JSON.parse(fs.readFileSync(path.join(REPO, '.claude-plugin/marketplace.json'), 'utf8')).plugins.flatMap((entry) => {
+    const dir = path.join(REPO, entry.source, 'skills');
+    if (!fs.existsSync(dir)) return [];
+    return fs.readdirSync(dir).filter((s) => fs.existsSync(path.join(dir, s, 'SKILL.md'))).map((s) => `${quote(entry.name)}:${quote(s)}`);
+  });
+  return names.length ? `(?:${names.join('|')})(?![\\w-])` : null;
+}
+
 test('skills: explain Claude Code variables and skill names for agents that leave them as written', () => {
+  const names = marketplaceSkillNames();
+  const command = names && new RegExp(`/${names}`);
+  const skillName = names && new RegExp(`(^|[^/\\w-])${names}`, 'm');
   const missing = [];
   for (const file of skillFiles()) {
     const text = fs.readFileSync(file, 'utf8');
     const rel = path.relative(REPO, file);
     if (text.includes('${CLAUDE_PLUGIN_ROOT}') && !text.includes('still starts with an unexpanded variable, that variable stands for this plugin\'s folder: two levels above the folder that holds this SKILL.md')) missing.push(`${rel}: \${CLAUDE_PLUGIN_ROOT}`);
     if (text.includes('$ARGUMENTS') && !text.includes('(the text after the skill\'s name)') && !text.includes('after the skill\'s name: `$ARGUMENTS`')) missing.push(`${rel}: $ARGUMENTS`);
-    if (/\/aisdlc(-[a-z]+)?:[a-z]/.test(text) && !text.includes('in an agent without plugin namespaces, such as GitHub Copilot,')) missing.push(`${rel}: /plugin:skill names`);
-    if ((BARE_SKILL_NAME.test(text) || text.includes('standards_skill')) && !text.includes('use only the `<skill>` part, both to load a skill and when you tell the user what to run')) missing.push(`${rel}: plugin:skill names`);
+    if ((AISDLC_COMMAND.test(text) || command?.test(text)) && !text.includes('in an agent without plugin namespaces, such as GitHub Copilot,')) missing.push(`${rel}: /plugin:skill names`);
+    if ((AISDLC_SKILL_NAME.test(text) || skillName?.test(text) || text.includes('standards_skill')) && !text.includes('use only the `<skill>` part, both to load a skill and when you tell the user what to run')) missing.push(`${rel}: plugin:skill names`);
   }
   assert.deepEqual(missing, []);
 });

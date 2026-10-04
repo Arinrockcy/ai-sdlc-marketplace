@@ -1,0 +1,8 @@
+{
+  "name": "goal",
+  "version": "0.1.0",
+  "description": "Goal workflow: triage each task as simple or complex, then plan, govern, implement, review and commit a complex task one sub-task at a time, tracked in a ledger.",
+  "author": {
+    "name": "arin"
+  }
+}

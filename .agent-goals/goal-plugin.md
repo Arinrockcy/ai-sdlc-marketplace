@@ -3,7 +3,7 @@
 - **Slug:** `goal-plugin`
 - **Status:** in-progress
 - **Requested:** 2026-10-03, source: user request to package an existing goal workflow from another project as a plugin
-- **Branch:** `goal-plugin`, off `master` at `6481535`; never pushed
+- **Branch:** `goal-plugin`, off `master` at `502c390`; the workflow's agents never push, the user may
 - **Plan approved by user:** 2026-10-04
 - **Orchestrated from:** a session in the source project; every changed file is in this repo
 
@@ -42,7 +42,7 @@ Confirmed by the user 2026-10-03.
 
 ## Test baseline
 
-Recorded on `6481535`: `npm test` exits 0 with 83 tests, 81 pass, 0 fail, 2
+Recorded on `6481535`, one commit before the branch point (`502c390` adds only this ledger's first draft): `npm test` exits 0 with 83 tests, 81 pass, 0 fail, 2
 skipped (both in `plugins/aisdlc-nodejs/tests/eslint-template.test.mjs`, which
 need `AISDLC_ESLINT`). `npm run validate` exits 0 for the marketplace and both
 plugins. No failing test files.
@@ -70,7 +70,7 @@ plugins. No failing test files.
 - At plan approval the plugin also asks whether to work on a new branch or the
   current one, and confirms the project commands the planner found.
 - Commits follow the project's message style and the host's attribution.
-- Never push.
+- The workflow's agents never push; the user may.
 
 ## Sub-tasks
 
@@ -92,18 +92,18 @@ project commands, the decisions, and the template text it needs.
 
 ### 1. Scaffold `goal` 0.1.0, register it, and widen the preamble test
 
-- **Status:** in-progress
-- **Scope:** Plugin manifest (`name`, `version` 0.1.0, `description`, `author {name: "arin"}`); changelog head in the repo's format; marketplace entry (`source` `./plugins/goal`, `category` `development`) and an updated top-level marketplace description that mentions goal, in both marketplace copies; `validate` script gains `claude plugin validate plugins/goal`; the skill preamble test widened from the hard-coded `aisdlc` prefix to every marketplace plugin name, treating `<plugin>:<name>` as a skill reference only when `<name>` is a skill folder of that plugin, so agent names such as `goal:planner` are not held to the skill phrase; a `goal.test.mjs` skeleton. No `aisdlc` version bump, since no aisdlc behaviour changes.
+- **Status:** done
+- **Scope:** Plugin manifest (`name`, `version` 0.1.0, `description`, `author {name: "arin"}`); changelog head in the repo's format; marketplace entry (`source` `./plugins/goal`, `category` `development`) and an updated top-level marketplace description that mentions goal, in both marketplace copies; `validate` script gains `claude plugin validate plugins/goal`; the skill preamble test widened to every marketplace plugin name, with the two original aisdlc-family patterns kept alongside the new marketplace-derived rule so no aisdlc check weakens; the new rule treats `<plugin>:<name>` as a skill reference only when `<name>` is a skill folder of that plugin, so agent names such as `goal:planner` are not held to the skill phrase; a `goal.test.mjs` skeleton. No `aisdlc` version bump, since no aisdlc behaviour changes.
 - **Source document:** none
 - **Areas:** `plugins/goal/.claude-plugin/plugin.json`, `plugins/goal/CHANGELOG.md`, `plugins/goal/tests/goal.test.mjs`, `.claude-plugin/marketplace.json`, `.github/plugin/marketplace.json`, `package.json`, `plugins/aisdlc/tests/skills.test.mjs`, this ledger
 - **Changes a screen:** no
 - **Depends on:** none
 - **Acceptance:** the two marketplace files are identical; the release tests pass with three plugins; `package.json` `validate` includes `plugins/goal`; the widened test still passes for every aisdlc skill and fails on a scratch skill that uses `/goal:<skill>` without the preamble
 - **Governor notes:** release.test.mjs:10-23; skills.test.mjs:101-110; AGENTS.md lines 29-33. A manifest-only plugin validates (checked by the governor).
-- **Review:**
-- **Verification:**
+- **Review:** safe to commit, no fix rounds. Two minor findings, neither against the spec: placeholder forms such as `/goal:<skill>` are not matched by the marketplace rule (open question below); a non-string marketplace `source` would throw, as it already does in the release test. Governor: compliant once this ledger was corrected.
+- **Verification:** `npm test` exits 0: 86 tests, 84 pass, 0 fail, 2 skipped (baseline 81 pass). `npm run validate` exits 0 with no warnings for the marketplace and all three plugins. The two marketplace files are identical. In a scratch copy, a skill using `/goal:<skill>` without the preamble fails the widened test, agent names pass, and mutations of version, changelog head, marketplace copy and entry each fail a test. Not verified: install-time behaviour, which sub-task 8 covers.
 - **Commit:**
-- **Task detail:**
+- **Task detail:** Done: manifest, changelog head `## [0.1.0] - 2026-10-04`, marketplace entry and top-level description in both copies, `validate` script, widened preamble test, three-test `goal.test.mjs` that compares the changelog head with the manifest instead of pinning the version. Not done: nothing in scope. Files: `plugins/goal/.claude-plugin/plugin.json`, `plugins/goal/CHANGELOG.md`, `plugins/goal/tests/goal.test.mjs`, `.claude-plugin/marketplace.json`, `.github/plugin/marketplace.json`, `package.json`, `plugins/aisdlc/tests/skills.test.mjs`. Decisions: see the 2026-10-04 rows for sub-task 1 in the decision log.
 
 ### 2. Skill `goal-workflow` and ledger template
 
@@ -203,7 +203,7 @@ project commands, the decisions, and the template text it needs.
 - **Areas:** this ledger; and, only for fixes the checks call for, `plugins/goal/**`, `README.md`, `AGENTS.md`, both marketplace files
 - **Changes a screen:** no
 - **Depends on:** 7
-- **Acceptance:** each command exits 0; skill, agents, hook and start are discoverable in Claude Code; the Copilot result is recorded for each of skills, agents (including what it does with `tools:`), hook and start; every format risk below has a recorded answer; the user's plugin registrations match the recorded starting contents; `git status --short` is clean here, and the source project's working tree is as the orchestrator found it; `git log origin/master..HEAD` shows eight sub-task commits plus one closing ledger commit; nothing pushed; `goal-plugin` is left unmerged for the user
+- **Acceptance:** each command exits 0; skill, agents, hook and start are discoverable in Claude Code; the Copilot result is recorded for each of skills, agents (including what it does with `tools:`), hook and start; every format risk below has a recorded answer; the user's plugin registrations match the recorded starting contents; `git status --short` is clean here, and the source project's working tree is as the orchestrator found it; `git log master..HEAD` shows the plan commit, eight sub-task commits and one closing ledger commit; no agent pushed; `goal-plugin` is left unmerged for the user
 - **Governor notes:** 
 - **Review:**
 - **Verification:**
@@ -264,8 +264,14 @@ project commands, the decisions, and the template text it needs.
 | 2026-10-04 | Task detail in the source project | Done separately there as a simple task | none |
 | 2026-10-04 | Plan approval | Approved | all |
 | 2026-10-04 | Local paths and source-project references in this ledger | Removed before the first commit | all |
+| 2026-10-04 | Plugin and marketplace descriptions | Accepted as the implementer wrote them | 1 |
+| 2026-10-04 | Original aisdlc patterns in the preamble test | Kept alongside the marketplace-derived rule | 1 |
+| 2026-10-04 | Goal changelog intro | Same as aisdlc-nodejs, without the pre-1.0.0 sentence | 1 |
+| 2026-10-04 | First ledger draft pushed on `master` as `502c390`, naming the source project | Accepted; history is left as it is. The row above saying the references were removed before the first commit is wrong: they were removed in `f16f26a`, the second commit | all |
+| 2026-10-04 | Pushing | The user pushes the branches themselves; the workflow's agents never push | all |
 
 ## Deferred and open
 
 - Backporting to the source project any wording fixes found while porting: not in this goal; raise as a question.
 - The source project's name is kept out of this repo: it is checked for by the reviewer by hand, not by a committed test or search term.
+- Open question from the sub-task 1 review: whether placeholder forms such as `/goal:<skill>` should require the preamble. Left as is unless a goal skill writes one.
