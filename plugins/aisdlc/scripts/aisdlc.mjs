@@ -226,6 +226,7 @@ const REMOVED_TASKS = /^removed tasks\b/i;
 // What the agent writes while it works; the plan review never judged it.
 const TASK_PROGRESS_SECTIONS = /^(notes|work log|review)\b/i;
 const TASK_REVIEW = /^review\b/i;
+const CODE_REVIEW = 'code-review.md';
 
 const removedTaskIds = (goal) => listItems(section(readDoc(goal.file).body, REMOVED_TASKS))
   .map((item) => item.match(/\bT-\d+\b/)?.[0]).filter(Boolean);
@@ -1554,7 +1555,7 @@ const commands = {
         if (t.reviewed !== 'pass') fail(`${taskId} has not passed its review; run \`task review ${g.id} ${taskId} pass|fail --evidence "<findings>"\` first.`);
       }
       const patch = { status, reason: typeof opts.reason === 'string' ? opts.reason : '' };
-      if (status !== 'done') Object.assign(patch, { verified: '', verify_evidence: '', reviewed: '', review_evidence: '' });
+      if (status !== 'done') Object.assign(patch, { verified: '', verify_evidence: '', reviewed: '', review_evidence: '', review_round: '', review_fails: '' });
       updateDoc(t.file, patch);
       // The final review judged the finished tasks; any change to them means it has to run again.
       const notes = invalidate(g, 'final');
@@ -1595,23 +1596,28 @@ const commands = {
       return;
     }
     if (action === 'review') {
-      // Records the review of a verified task and keeps every round under the task's Review section.
+      // Records the review of a verified task. Every round goes to the goal's code-review.md and the task's Review section.
       const [taskId, result] = rest;
       if (!taskId || !['pass', 'fail'].includes(result)) fail('Usage: task review <G-id> <T-id> pass|fail --evidence "<findings>"');
       const t = getTask(g, taskId);
       assertOpen(g);
       if (t.status !== 'in-progress') fail(`${taskId} is ${t.status}; only an in-progress task can be reviewed.`);
       if (t.verified !== 'pass') fail(`${taskId} has not passed verification; run \`task verify ${g.id} ${taskId}\` before the review.`);
-      const evidence = typeof opts.evidence === 'string' ? opts.evidence.replace(/\s*\n\s*/g, ' ').trim() : '';
-      if (!evidence) fail(`--evidence is required: ${result === 'pass' ? 'what you checked and found for each acceptance criterion' : 'the defects found'}.`);
+      const full = typeof opts.evidence === 'string' ? opts.evidence.trim() : '';
+      if (!full) fail(`--evidence is required: ${result === 'pass' ? 'what you checked and found for each acceptance criterion' : 'the defects found'}.`);
+      const evidence = full.replace(/\s*\n\s*/g, ' ');
+      const round = Number(t.review_round || 0) + 1;
+      const fails = result === 'fail' ? Number(t.review_fails || 0) + 1 : 0;
       const doc = readDoc(t.file);
-      doc.data.reviewed = result;
-      doc.data.review_evidence = clip(evidence);
-      doc.body = appendToSection(doc.body, TASK_REVIEW, 'Review', `- ${today()}: ${result}: ${evidence}`);
+      Object.assign(doc.data, { reviewed: result, review_evidence: clip(evidence), review_round: round, review_fails: fails });
+      doc.body = appendToSection(doc.body, TASK_REVIEW, 'Review', `- ${today()}: round ${round}: ${result}: ${evidence}`);
       if ('updated' in doc.data) doc.data.updated = today();
       writeDoc(t.file, doc);
+      const log = path.join(g.dir, CODE_REVIEW);
+      const head = fs.existsSync(log) ? fs.readFileSync(log, 'utf8').replace(/\s*$/, '\n') : `# Code review: ${g.id}\n\nWritten by \`task review\`: every review round of every task, oldest first.\n`;
+      fs.writeFileSync(log, `${head}\n## ${taskId}: ${t.title}, round ${round} (${today()}): ${result}\n\n${full}\n`);
       writeTasksMd(g);
-      process.stdout.write(`[aisdlc] review ${taskId}: ${result}\n`);
+      out({ goal: g.id, task: taskId, result, round, fails_in_a_row: fails, file: path.relative(root, log) });
       if (result === 'fail') process.exitCode = 1;
       return;
     }

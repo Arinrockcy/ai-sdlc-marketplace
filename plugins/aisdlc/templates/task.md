@@ -10,6 +10,8 @@ verified:
 verify_evidence:
 reviewed:
 review_evidence:
+review_round:
+review_fails:
 reason:
 ---
 
