@@ -124,7 +124,7 @@ project commands, the decisions, and the template text it needs.
 - **Governor notes:** AGENTS.md lines 11, 13, 14; skills.test.mjs:70-110.
 - **Review:** safe to commit after two fix rounds. Round 1 fixed a dropped predecessor blocking the next sub-task, Resuming ignoring the goal's status and an outstanding commit, the browser-check exception, the declined and closing commit, the no-sub-agent wording, who drops or abandons, and a search term that matched web addresses. Round 2 added the clear-context and fresh-role-agent rules and three Resuming clauses. Governor: compliant; no rule violation, no undecided behaviour, no scope creep. Four optional clarifications from the last review are carried to sub-task 3.
 - **Verification:** `npm test` exits 0: 89 tests, 87 pass, 0 fail, 2 skipped (baseline 81 pass). `npm run validate` exits 0 with no warnings. The source-term search and a hand search for the source project's name find nothing in `plugins/goal`. In scratch copies, mutations of the skill, template and term list each fail the test meant to catch them. Not verified: the role files the skill points at (sub-task 4) and behaviour in a live session of either agent (sub-task 8).
-- **Commit:**
+- **Commit:** `d847648`
 - **Task detail:** Done: the generic skill (steps 0-4, standing rules, roles with the neutral fallback, once-per-goal questions at approval, seven gate conditions, task detail, resuming by status, clear-context check, fresh role agents per sub-task), the ledger template next to it, and three tests (term search, template presence, the term patterns themselves). Not done: nothing in scope. Files: `plugins/goal/skills/goal-workflow/SKILL.md`, `plugins/goal/skills/goal-workflow/ledger-template.md`, `plugins/goal/tests/goal.test.mjs`, `plugins/goal/CHANGELOG.md`. Decisions: the 2026-10-04 rows for sub-task 2 in the decision log. Follow-ups: the four clarifications listed under sub-task 3.
 
 ### 3. Script for listing and scaffolding ledgers
@@ -296,3 +296,4 @@ project commands, the decisions, and the template text it needs.
 - Backporting to the source project any wording fixes found while porting: not in this goal; raise as a question.
 - The source project's name is kept out of this repo: it is checked for by the reviewer by hand, not by a committed test or search term.
 - Open question from the sub-task 1 review: whether placeholder forms such as `/goal:<skill>` should require the preamble. Left as is unless a goal skill writes one.
+- Resuming this goal after a cleared session: the source being ported is the goal workflow of the project the orchestrating session runs in; the user names its location when resuming, since it is not recorded here.
