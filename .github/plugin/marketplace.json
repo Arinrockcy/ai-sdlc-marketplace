@@ -18,6 +18,13 @@
       "description": "Node.js stack plugin for aisdlc: Node.js 24+, coding standards, lint/coverage gates, SonarQube analysis, dependency vulnerability scans, and Express REST API/auth/JWT practices.",
       "version": "0.11.0",
       "category": "development"
+    },
+    {
+      "name": "dependency-guardian",
+      "source": "./plugins/dependency-guardian",
+      "description": "Blocks unsafe npm installs and scans for vulnerable, deprecated and discouraged packages. Scanner is dependency-free and CI-ready.",
+      "version": "0.1.0",
+      "category": "development"
     }
   ]
 }

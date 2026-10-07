@@ -278,3 +278,17 @@ Acceptance requires:
 - Manual terminal commands cannot be intercepted by an agent plugin; the committed CI scanner is the enforcement backstop.
 - The repository remains dependency-free and uses its existing version/changelog release discipline.
 - Initial team rollout runs the scanner in report review first, records necessary timed waivers, then enables the required CI gate.
+
+## Review amendments
+
+An independent review of this plan against the repo settled these points. They override the sections above where they differ.
+
+- **No third-party code.** `guardian.mjs`, its tests and every helper import only `node:` built-ins and relative files, and the plugin has no `package.json` dependencies and no `node_modules`. Registry and `npm` access goes through `execFileSync('npm', …)` and `fetch`. `tests/no-dependencies.test.mjs` enforces it.
+- **Hook contract.** Deny: reason on stderr, exit `2`, no JSON. Allow: no output, exit `0`. `hook` never exits `1`: every internal error becomes a deny with exit `2`.
+- **Preflight per command.** `npm install|add|update`: `--package-lock-only` on a temp copy. `npm audit fix`: `--package-lock-only` too, and `--force` is always an `ask`. `npm ci`: audit the existing lockfile. `npx` and `npm exec`: check the package alone (catalog, deprecation, audit). No lockfile means no baseline: fail closed.
+- **Command parsing.** Parse only the npm segments of a chained command, so `npm install && npm test` is not blocked. Fail closed only when a package name is dynamic or the source is unsupported. Handle `cd`, env prefixes, `--prefix`, `-g`, `-w` and `--workspace`.
+- **Timing.** Hook timeout 120 s. Preflight stops at its own deadline 10 s earlier and denies. Registry calls run with a concurrency cap.
+- **Files.** `.dependency-guardian/config.json` (project-owned, with `version`) and `.dependency-guardian/catalog.json` (managed). `validate-policy` checks both. A malformed one denies with exit `2`.
+- **Drift.** `guardian.mjs` carries a version, and `scan` warns when the vendored copy differs from the plugin's. `setup` updates managed files by hash history, like `TEMPLATE_HISTORY` in `aisdlc-nodejs`.
+- **Offline.** Add `scan --offline`: local catalog checks only, never a strict pass.
+- **Tests.** Widen `plugins/aisdlc/tests/skills.test.mjs` to every plugin name in `marketplace.json` and add a `$GUARDIAN` span check. Add a test that `hooks/hooks.json` and the repository hook template run `guardian.mjs hook` and set a timeout.
