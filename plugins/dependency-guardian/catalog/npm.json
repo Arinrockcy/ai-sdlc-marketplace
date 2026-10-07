@@ -1,0 +1,22 @@
+{
+  "version": 1,
+  "ecosystem": "npm",
+  "rules": [
+    {
+      "id": "NPM-MOMENT",
+      "package": "moment",
+      "direct": "deny",
+      "transitive": "warn",
+      "rationale": "Moment.js describes itself as a legacy project in maintenance mode and discourages its use in new projects. Its mutable objects and large locale bundle are the usual reasons teams move off it.",
+      "alternatives": [
+        { "name": "Intl and Date", "use": "Formatting, relative time and simple arithmetic where the runtime's built-in support is enough" },
+        { "name": "Temporal", "use": "Correct time zone and calendar arithmetic, where the target runtimes support it or a polyfill is acceptable" },
+        { "name": "date-fns", "use": "Modular, functional helpers over native Date; small bundles when only a few functions are used" },
+        { "name": "Luxon", "use": "Time zone and locale-heavy applications, with immutable DateTime objects" },
+        { "name": "Day.js", "use": "A Moment-like API that eases a migration, with a small core" }
+      ],
+      "sources": ["https://momentjs.com/docs/#/-project-status/"],
+      "reviewed": "2026-10-07"
+    }
+  ]
+}
