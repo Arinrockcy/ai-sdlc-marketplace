@@ -2,6 +2,20 @@
 
 All notable changes to the `aisdlc` plugin. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/). Until 1.0.0, a minor version may include breaking changes; each one is listed under **Breaking** with its upgrade step.
 
+## [0.12.0] - 2026-10-07
+
+### Breaking
+- A task is done only after a passing review as well as a passing `task verify`. `task set <G-id> <T-id> done` now refuses a task without `reviewed: pass`, so a task that was verified but not yet reviewed when you update must be reviewed before it can finish. See [Upgrading to 0.12.0](../../README.md#upgrading).
+
+### Added
+- `task review <G-id> <T-id> pass|fail --evidence "…"` records the review of a verified, in-progress task. It sets the task's `reviewed` and `review_evidence` fields and keeps every round, with its date, under the task's `## Review` section. A `fail` exits 1, like `task verify`. Evidence is required for both results.
+- Task files get a `## Work log` section (what was done, what failed and why, what was discovered) and a `## Review` section. Task files created before 0.12.0 don't have them: the script adds `## Review` on the first review, and `/aisdlc:implement` adds `## Work log`.
+- `/aisdlc:implement` reviews each task after it verifies, in the same session: every acceptance criterion needs the code and test that show it is met, plus a check for defects, scope and the ADRs and standards. A failed review is handled like a failed verify: the user picks retry, skip or block.
+
+### Changed
+- `task verify` clears the task's review, because the code may have changed since. Any change of a task's status other than to `done`, and `task edit … verify`, clear it too.
+- The plan fingerprint leaves out the Work log and Review sections, like Notes, so writing them never invalidates governance.
+
 ## [0.11.0] - 2026-10-02
 
 ### Breaking

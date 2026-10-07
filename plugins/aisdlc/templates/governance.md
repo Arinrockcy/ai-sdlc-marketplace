@@ -23,7 +23,7 @@ Edit via `/aisdlc:govern` (no argument), which uses `aisdlc.mjs governance add|s
 The script enforces these:
 
 - All tasks `done`, or `skipped` with a recorded reason.
-- `task verify` passed for every done task (its verify command, or evidence when there is only a manual check or nothing to run, plus the `after_task` hook).
+- `task verify` passed for every done task (its verify command, or evidence when there is only a manual check or nothing to run, plus the `after_task` hook), followed by a passing `task review`.
 - If any `final` rule is active, the final review passed.
 
 Anything else "done" has to mean belongs in a `final` rule, so it is actually checked.

@@ -8,6 +8,8 @@ risk: {{risk}}
 verify:
 verified:
 verify_evidence:
+reviewed:
+review_evidence:
 reason:
 ---
 
@@ -22,3 +24,7 @@ reason:
 ## Files (expected)
 
 ## Notes
+
+## Work log
+
+## Review
