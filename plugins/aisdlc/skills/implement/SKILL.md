@@ -45,6 +45,14 @@ Once `pre_implement` has run, every way this run ends (a finished task in single
 6. **Stack standards.** Run `$AISDLC detect-stack`. Invoke every skill in `standards_skills` (for example `aisdlc-nodejs:nodejs-standards`) now, and follow each for the code of its stack in this run, except where the goal's `## Standards deviations` records a departure the user chose. If one isn't installed, tell the user that its stack plugin is missing or older than this workflow expects, and stop. If the list is empty, follow the conventions already in the repo. If the goal is already in progress and `to_register` lists stacks, a stack plugin was installed mid-goal: ask the user whether to register it now, so its gate applies to the remaining tasks, or after the goal.
 7. **Mode.** Run the whole goal if `$ARGUMENTS` contains `--all` or `$AISDLC config get implement.mode` returns `"auto"`. Otherwise run **one task**, then stop.
 
+## Roles
+A task is worked by three roles. The explorer and the reviewer never edit the project.
+- **task-explorer** (read-only): reads the task file, `goal.md`, the linked ADRs, the goal's `code-review.md` entries for this task and the current diff. It returns, per finding, what is wrong, where (file and line) and what to change, and puts anything the task and the ADRs don't settle under **Questions for the user**. It runs at the start of each fix round.
+- **implementer**: applies the task, or the explorer's fix plan, inside the task's scope, and keeps the task file's Work log. It may be this session.
+- **code-reviewer** (read-only on the project): reviews the diff as a reviewer would, not as its author: for each acceptance criterion it finds the code and the test or check that shows it is met (a criterion with nothing behind it is a defect), and looks for unhandled errors, missing edge cases, behavior changed outside the task, tests that can't fail and leftover debug code. It checks the diff against the task's ADRs and the stack standards, and that it stayed in scope. It reads the diff, not a summary of it. It records its verdict with `task review` (step 5), so a `pass` evidence cites files or tests, and "looks good" doesn't count.
+
+Where your agent can hand work to a sub-agent, run the explorer and the reviewer as sub-agents. Where it can't, run each role in turn in this session. A sub-agent doesn't see this skill, the conversation or the skill's folder: give it the role text above, the goal ID and task ID, the task file's path, the stack standards you loaded, and the full `$AISDLC` command with the plugin folder written out as an absolute path. A role can't ask the user: it returns its questions under **Questions for the user**, and you ask them.
+
 ## 2. Task loop
 Repeat these steps for each task:
 
@@ -60,20 +68,19 @@ Repeat these steps for each task:
    - Run `$AISDLC task verify <G-id> <T-id>`. It runs the task's `verify` command and then the `after_task` hook (for example, the stack's test command), and records the result.
    - If `verify` is a manual check (`manual: …`), carry out the check first, then pass what you observed: `$AISDLC task verify <G-id> <T-id> --evidence "<what you checked and saw>"`.
    - Check every acceptance criterion honestly. A passing command doesn't excuse an unmet criterion; treat that as a failure.
-5. **Review.** Once verification passed, review the task's change as a reviewer would, not as its author. It is a check of your own work, so look for what you would miss: read the diff (`git diff`, plus the task's new files), not your memory of it.
-   - For each acceptance criterion, find the code and the test or check that shows it is met. A criterion with nothing behind it is a defect.
-   - Look for defects and regressions: unhandled errors, missing edge cases, behavior changed outside the task, tests that can't fail, and leftover debug code.
-   - Check the diff against the task's linked ADRs and the stack standards you loaded, and check that it stayed inside the task's scope.
-   - Record it: `$AISDLC task review <G-id> <T-id> pass --evidence "<for each criterion, what shows it is met>"`, or `$AISDLC task review <G-id> <T-id> fail --evidence "<the defects found>"`. A `pass` evidence cites files or tests, and a bare "looks good" doesn't count. Every round is kept in the task file's `## Review`.
-   - A task can't be marked done without a passing review. Running `task verify` again clears the review, so after any fix, verify and review again.
-6. **On failure** of the verify or the review, show the failing output or the defects and ask the user to pick one:
-   - **Retry:** fix the problem and go back to step 4.
+   - If verification fails, show the failing output and ask the user to pick one: **Retry** (fix the problem and verify again), **Skip** or **Block** (both as in step 6).
+5. **Review.** Once verification passed, hand the task's change to the **code-reviewer** (see Roles). It records the result with `$AISDLC task review <G-id> <T-id> pass --evidence "<for each criterion, what shows it is met>"` or `$AISDLC task review <G-id> <T-id> fail --evidence "<the defects found, one per line, with file and line>"`. The script appends the round, with its full findings, to the goal's `code-review.md` and a one-line entry to the task's `## Review`, and prints `round` and `fails_in_a_row`. A task can't be marked done without a passing review. Running `task verify` again clears the review, so after any fix, verify and review again.
+6. **Failed review: the fix loop.** On `fail`, read `fails_in_a_row` from the `task review` output and decide:
+   - **Stuck.** If the defects the reviewer found are the ones the previous round already listed in `code-review.md` (a fix attempt changed nothing that matters), or the fixes keep breaking something else, stop the loop. Show the findings and ask the user to pick one: **Re-govern** (recommended: the task or its acceptance criteria may be wrong; run `$AISDLC gate set <G-id> govern pending`, then `post_implement`, and stop; the user runs `/aisdlc:govern <G-id>`, then `/aisdlc:implement <G-id>` resumes this task), **one more try**, **skip** or **block** (as below).
+   - **Automatic retry.** If `fails_in_a_row` is 1 or 2, don't ask. Run one fix round: the **task-explorer** reads the findings and the code and returns a fix plan, the **implementer** applies it, then go back to step 4 (verify), and review again (step 5). At most 2 automatic retries.
+   - **Ask the user.** If `fails_in_a_row` is 3 or more, the automatic retries are used up. Show the findings and ask how many more retries to run (0 stops the loop). Run that many fix rounds the same way without asking again, then ask again if the review still fails. If the user picks 0, ask whether to re-govern, skip or block.
+   - A verify that fails inside the loop isn't a review failure: show its output and ask the user to pick retry, skip or block, as below.
    - **Skip:** run `$AISDLC task set <G-id> <T-id> skipped --reason "<why>"`.
    - **Block:** run `$AISDLC task set <G-id> <T-id> blocked --reason "<why>"`, then `$AISDLC hooks run on_block --goal <G-id> --task <T-id>`. Dependent tasks wait. Independent tasks can still run.
 7. **On success:**
    - Tick the acceptance criteria in the task file, and make sure its Work log says what was done.
    - Run `$AISDLC task set <G-id> <T-id> done`.
-   - If `auto_commit` is true, commit now, so the commit includes the task's state. Stage only the files this task changed plus the `.aisdlc/` files the script updated (the task file, the goal's `tasks.md` and `registry.md`). Use the message `<G-id>/<T-id>: <task title>`.
+   - If `auto_commit` is true, commit now, so the commit includes the task's state. Stage only the files this task changed plus the `.aisdlc/` files the script updated (the task file, the goal's `tasks.md` and `code-review.md`, and `registry.md`). Use the message `<G-id>/<T-id>: <task title>`.
    - **Extra work.** If you wrote down extra work in step 3, show it to the user and ask whether to add it as tasks. For each one they approve:
      1. Run `$AISDLC task new <G-id> "<title>" --risk … --depends … --verify "…"` and fill in the task file.
      2. Run `$AISDLC dag write <G-id>`.

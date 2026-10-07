@@ -1248,20 +1248,30 @@ test('cli: a task needs a passing review after its verification before it is don
 
   const failed = review('fail', '--evidence', 'no error test\nmissing null check');
   assert.equal(failed.code, 1);
+  assert.deepEqual([failed.json.round, failed.json.fails_in_a_row], [1, 1]);
   assert.deepEqual([data().reviewed, data().review_evidence], ['fail', 'no error test missing null check']);
   assert.equal(run(['task', 'set', 'G-001', 'T-01', 'done']).code, 1, 'a failed review does not pass the gate');
 
   // Fixing the code means verifying again, which sends the task back to review.
   run(['task', 'verify', 'G-001', 'T-01']);
   assert.equal(data().reviewed, '');
-  assert.equal(review('pass', '--evidence', 'criteria 1 met: tests/a.test.mjs:12').code, 0);
+  assert.equal(review('fail', '--evidence', 'still no error test').json.fails_in_a_row, 2);
+  run(['task', 'verify', 'G-001', 'T-01']);
+  const passed = review('pass', '--evidence', 'criteria 1 met: tests/a.test.mjs:12');
+  assert.deepEqual([passed.code, passed.json.round, passed.json.fails_in_a_row], [0, 3, 0], 'a pass ends the run of failures');
   assert.equal(data().reviewed, 'pass');
+
+  // The goal's code-review.md keeps every round with its full, multi-line findings.
+  const log = fs.readFileSync(path.join(dir, passed.json.file), 'utf8');
+  assert.match(log, /^# Code review: G-001/);
+  assert.match(log, /## T-01: A, round 1 \(\d{4}-\d\d-\d\d\): fail\n\nno error test\nmissing null check\n\n## T-01: A, round 2 [^\n]*: fail\n\nstill no error test\n\n## T-01: A, round 3 [^\n]*: pass\n\ncriteria 1 met/);
 
   // Every round stays in the Review section, and the plan stays governed while the agent writes there.
   edit(file, (s) => s.replace('## Work log\n', '## Work log\n\nTried the cache first; it broke the tests.\n'));
   const body = fs.readFileSync(file, 'utf8');
-  assert.match(body, /## Review\n+- \d{4}-\d\d-\d\d: fail: no error test missing null check\n- \d{4}-\d\d-\d\d: pass: criteria 1 met/);
+  assert.match(body, /## Review\n+- \d{4}-\d\d-\d\d: round 1: fail: no error test missing null check\n- [^\n]*round 2: fail[^\n]*\n- [^\n]*round 3: pass: criteria 1 met/);
   assert.equal(stale(), '');
   assert.equal(run(['task', 'set', 'G-001', 'T-01', 'done']).code, 0);
   assert.equal(data().reviewed, 'pass', 'done keeps the review');
+  assert.ok(fs.existsSync(path.join(dir, run(['goal', 'show', 'G-001']).json.dir, 'code-review.md')));
 });
