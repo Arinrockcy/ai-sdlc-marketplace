@@ -91,7 +91,8 @@ test('waivers: all five fields are required, scoped to one known rule and one pa
   assert.match(bad({ ruleId: 'NPM-NOPE' }), /ruleId NPM-NOPE is not a known rule/);
   assert.match(bad({ package: 'mom*' }), /one package, not a pattern/);
   assert.match(bad({ extra: 1 }), /unknown field "extra"/);
-  assert.ok(BUILTIN_RULES.every((id) => validateConfig({ version: 1, waivers: [waiver({ ruleId: id })] }, catalog).length === 0));
+  assert.ok(BUILTIN_RULES.filter((id) => id !== 'GUARD-WAIVER').every((id) => validateConfig({ version: 1, waivers: [waiver({ ruleId: id })] }, catalog).length === 0));
+  assert.match(bad({ ruleId: 'GUARD-WAIVER' }), /GUARD-WAIVER cannot be waived/);
 });
 
 test('waivers: active through the whole expiresAt day (UTC) and expired from the next midnight', () => {
@@ -182,7 +183,7 @@ test('cli: unknown commands and options exit 2, and commands not built yet say s
     assert.equal(p.run([]).status, 2);
     assert.match(p.run(['frobnicate']).stderr, /Usage: guardian\.mjs <validate-policy\|scan\|preflight\|hook>/);
     assert.match(p.run(['validate-policy', '--bogus']).stderr, /Unknown option --bogus/);
-    for (const cmd of ['scan', 'preflight', 'hook']) {
+    for (const cmd of ['preflight', 'hook']) {
       const r = p.run([cmd]);
       assert.deepEqual([r.status, /not implemented yet/.test(r.stderr)], [2, true], cmd);
     }

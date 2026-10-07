@@ -23,7 +23,7 @@
       "name": "dependency-guardian",
       "source": "./plugins/dependency-guardian",
       "description": "Blocks unsafe npm installs and scans for vulnerable, deprecated and discouraged packages. Scanner is dependency-free and CI-ready.",
-      "version": "0.2.0",
+      "version": "0.3.0",
       "category": "development"
     }
   ]

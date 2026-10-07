@@ -6,10 +6,11 @@
 // assessment. `hook` never exits 1, because agents treat that as a non-blocking error.
 
 import fs from 'node:fs';
+import { execFile } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-export const GUARDIAN_VERSION = '0.2.0';
+export const GUARDIAN_VERSION = '0.3.0';
 const MIN_NODE_MAJOR = 24;
 const SCRIPT_FILE = fileURLToPath(import.meta.url);
 const SCRIPT_DIR = path.dirname(SCRIPT_FILE);
@@ -54,7 +55,9 @@ const AUDIT_LEVELS = ['low', 'moderate', 'high', 'critical'];
 const OUTDATED_ACTIONS = ['warn', 'deny', 'off'];
 const DEPRECATED_ACTIONS = ['deny', 'warn'];
 // Rules the scanner itself raises. Waivers can name them; the catalog and the configuration can't redefine them.
-export const BUILTIN_RULES = ['GUARD-AUDIT', 'GUARD-DEPRECATED', 'GUARD-OUTDATED', 'GUARD-SOURCE'];
+export const BUILTIN_RULES = ['GUARD-AUDIT', 'GUARD-DEPRECATED', 'GUARD-OUTDATED', 'GUARD-SOURCE', 'GUARD-SIGNATURE', 'GUARD-WAIVER'];
+// Findings about waivers themselves: an expired waiver can't waive its own expiry.
+const UNWAIVABLE = ['GUARD-WAIVER'];
 const RULE_ID = /^[A-Z][A-Z0-9]*(-[A-Z0-9]+)+$/;
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -111,6 +114,7 @@ export function validateWaiver(w, where, knownRules) {
   unknownKeys(w, ['ruleId', 'package', 'owner', 'reason', 'expiresAt'], where, errors);
   for (const k of ['ruleId', 'package', 'owner', 'reason']) if (!nonEmpty(w[k])) errors.push(`${where}: ${k} is required`);
   if (nonEmpty(w.ruleId) && !knownRules.has(w.ruleId)) errors.push(`${where}: ruleId ${w.ruleId} is not a known rule`);
+  if (UNWAIVABLE.includes(w.ruleId)) errors.push(`${where}: ${w.ruleId} cannot be waived`);
   if (nonEmpty(w.package) && w.package.includes('*')) errors.push(`${where}: package must name one package, not a pattern`);
   if (!isDate(w.expiresAt)) errors.push(`${where}: expiresAt must be a date (YYYY-MM-DD)`);
   return errors;
@@ -195,6 +199,282 @@ export function loadPolicy(root, { scriptDir = SCRIPT_DIR } = {}) {
   return { catalog, config, rules: [...catalog.rules, ...config.rules], configFile: fs.existsSync(file) ? file : null };
 }
 
+// ---------- npm ----------
+
+// Credentials never reach output: npm's own error text can echo a registry URL or a token from .npmrc.
+export function redact(text) {
+  return String(text ?? '')
+    .replace(/(\/\/[^\s:]+\/?:_(?:authToken|auth|password)\s*=\s*)\S+/gi, '$1[redacted]')
+    .replace(/(:\/\/)[^\s/@:]+:[^\s/@]+@/g, '$1[redacted]@')
+    .replace(/\bnpm_[A-Za-z0-9]{20,}\b/g, '[redacted]');
+}
+
+// Runs npm without a shell and never throws on a non-zero exit: `npm audit` and `npm outdated` exit 1 on findings.
+function npm(args, cwd, timeout = 120_000) {
+  return new Promise((resolve) => {
+    execFile('npm', args, { cwd, encoding: 'utf8', maxBuffer: 1 << 28, timeout }, (error, stdout, stderr) => {
+      if (error?.code === 'ENOENT') return resolve({ code: 'ENOENT', stdout: '', stderr: 'npm was not found on PATH' });
+      if (error?.killed) return resolve({ code: 'TIMEOUT', stdout: stdout ?? '', stderr: `npm ${args[0]} timed out` });
+      resolve({ code: error ? error.code : 0, stdout: stdout ?? '', stderr: stderr ?? '' });
+    });
+  });
+}
+
+async function mapLimit(items, limit, fn) {
+  const results = new Array(items.length);
+  let next = 0;
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (next < items.length) { const i = next++; results[i] = await fn(items[i]); }
+  }));
+  return results;
+}
+
+const tryJson = (text) => { try { return JSON.parse(text); } catch { return undefined; } };
+
+// ---------- project: package.json and package-lock.json ----------
+
+const DEP_TYPES = ['dependencies', 'devDependencies', 'optionalDependencies'];
+const SEVERITIES = ['info', 'low', 'moderate', 'high', 'critical'];
+const rank = (sev) => SEVERITIES.indexOf(sev);
+const NODE_MODULES = 'node_modules/';
+
+// Reads the lockfile's package list. Only lockfile v2 and v3 name every package with its version.
+export function readLockfile(root) {
+  const file = path.join(root, 'package-lock.json');
+  if (!fs.existsSync(file)) fail('package-lock.json is missing. The scan assesses the locked dependency tree. Create one without running install scripts: npm install --package-lock-only --ignore-scripts');
+  const lock = readJson(file, 'package-lock.json');
+  if (!isObject(lock.packages)) fail(`package-lock.json has lockfileVersion ${lock.lockfileVersion ?? 'unknown'}, which this version cannot read. Upgrade it without running install scripts: npm install --package-lock-only --ignore-scripts`);
+  const packages = [];
+  const workspaces = [];
+  for (const [key, entry] of Object.entries(lock.packages)) {
+    if (key === '' || !isObject(entry)) continue;
+    const at = key.lastIndexOf(NODE_MODULES);
+    if (at === -1) { workspaces.push(key); continue; }
+    if (entry.link) continue;
+    const name = key.slice(at + NODE_MODULES.length);
+    packages.push({ name, version: entry.version, key, resolved: entry.resolved, deprecated: typeof entry.deprecated === 'string' ? entry.deprecated : null, dev: Boolean(entry.dev) });
+  }
+  return { packages, workspaces };
+}
+
+// The direct dependencies of the selected workspaces (or of the root and every workspace), with the section each is in.
+export function directDependencies(root, lock, selection) {
+  const sources = [];
+  const rootPkg = readJson(path.join(root, 'package.json'), 'package.json');
+  const named = lock.workspaces.map((dir) => ({ dir, pkg: readJson(path.join(root, dir, 'package.json'), `${dir}/package.json`) }));
+  if (selection.length) {
+    for (const want of selection) if (!named.some((w) => w.pkg.name === want)) fail(`Unknown workspace "${want}". Workspaces: ${named.map((w) => w.pkg.name).join(', ') || 'none'}`);
+    sources.push(...named.filter((w) => selection.includes(w.pkg.name)));
+  } else sources.push({ dir: '', pkg: rootPkg }, ...named);
+  const direct = new Map();
+  for (const { dir, pkg } of sources) {
+    for (const type of DEP_TYPES) for (const name of Object.keys(pkg[type] ?? {})) {
+      if (!direct.has(name)) direct.set(name, { type, prefixes: new Set() });
+      // npm hoists a workspace's dependencies to the root node_modules unless versions clash.
+      direct.get(name).prefixes.add(`${NODE_MODULES}${name}`).add(`${dir ? `${dir}/` : ''}${NODE_MODULES}${name}`);
+    }
+  }
+  return direct;
+}
+
+const isRegistryTarball = (resolved) => {
+  try { const u = new URL(resolved); return /^https?:$/.test(u.protocol) && u.pathname.includes('/-/'); } catch { return false; }
+};
+
+// ---------- findings ----------
+
+const finding = (f) => ({ waiver: null, alternatives: [], remediation: [], ...f });
+const idOf = (rule, pkg, version) => `${rule}:${pkg}${version ? `@${version}` : ''}`;
+
+function catalogFindings(entries, rules) {
+  const found = [];
+  for (const e of entries) {
+    for (const rule of matchRules(rules, e.name)) {
+      const action = e.direct ? rule.direct : rule.transitive;
+      if (action === 'allow') continue;
+      found.push(finding({
+        id: idOf(rule.id, e.name, e.version), rule: rule.id, source: 'catalog', package: e.name, version: e.version,
+        relationship: e.direct ? 'direct' : 'transitive', dependencyType: e.type, severity: action === 'deny' ? 'high' : 'low', action,
+        evidence: [rule.rationale, ...(rule.sources ?? []).map((u) => `Source: ${u}`)],
+        alternatives: rule.alternatives ?? [],
+        remediation: action === 'deny' ? [`Remove ${e.name}${e.direct ? '' : ' (it is pulled in by another package)'}, or choose an alternative`] : [],
+      }));
+    }
+  }
+  return found;
+}
+
+function sourceFindings(entries) {
+  return entries.filter((e) => e.resolved && !isRegistryTarball(e.resolved)).map((e) => finding({
+    id: idOf('GUARD-SOURCE', e.name, e.version), rule: 'GUARD-SOURCE', source: 'lockfile', package: e.name, version: e.version,
+    relationship: e.direct ? 'direct' : 'transitive', dependencyType: e.type, severity: 'high', action: 'deny',
+    evidence: [`Installed from ${redact(e.resolved)}, not from a registry, so npm audit and npm view cannot assess it`],
+    remediation: ['Publish it to a registry, or waive GUARD-SOURCE for this package with an owner, a reason and an expiry'],
+  }));
+}
+
+function deprecationFinding(e, message, action) {
+  return finding({
+    id: idOf('GUARD-DEPRECATED', e.name, e.version), rule: 'GUARD-DEPRECATED', source: e.viaRegistry ? 'npm-view' : 'lockfile', package: e.name, version: e.version,
+    relationship: e.direct ? 'direct' : 'transitive', dependencyType: e.type, severity: action === 'deny' ? 'high' : 'low', action,
+    evidence: [redact(message)], remediation: [`Replace ${e.name}, or move to a version that is not deprecated`],
+  });
+}
+
+function auditFindings(report, byName, level) {
+  const found = [];
+  for (const v of Object.values(report.vulnerabilities)) {
+    const entry = byName.get(v.name);
+    const blocking = rank(v.severity) >= rank(level);
+    const fix = v.fixAvailable;
+    found.push(finding({
+      id: idOf('GUARD-AUDIT', v.name, entry?.version), rule: 'GUARD-AUDIT', source: 'npm-audit', package: v.name, version: entry?.version ?? null,
+      relationship: v.isDirect ? 'direct' : 'transitive', dependencyType: entry?.type ?? 'transitive', severity: v.severity, action: blocking ? 'deny' : 'info',
+      evidence: (v.via ?? []).map((x) => (isObject(x) ? `${x.title} (${x.url}) [${x.severity}]` : `Through ${x}`)),
+      remediation: isObject(fix)
+        ? [`npm install ${fix.name}@${fix.version}${fix.isSemVerMajor ? ' (major update, breaking changes possible)' : ''}`]
+        : [fix === true ? 'npm audit fix' : 'No fix is available yet'],
+    }));
+  }
+  return found;
+}
+
+// Active waivers make a blocking finding non-blocking and stay visible on it. An expired one blocks, with a finding of its own.
+export function applyWaivers(findings, waivers, now = new Date()) {
+  for (const f of findings) {
+    const w = f.action === 'deny' ? waivers.find((x) => x.ruleId === f.rule && x.package === f.package) : null;
+    if (w) f.waiver = { state: waiverState(w, now), owner: w.owner, reason: w.reason, expiresAt: w.expiresAt };
+  }
+  const expired = waivers.filter((w) => waiverState(w, now) === 'expired').map((w) => finding({
+    id: idOf('GUARD-WAIVER', w.package) + `:${w.ruleId}`, rule: 'GUARD-WAIVER', source: 'waiver', package: w.package, version: null,
+    relationship: 'direct', dependencyType: null, severity: 'high', action: 'deny',
+    evidence: [`The waiver of ${w.ruleId} for ${w.package} (owner ${w.owner}) expired on ${w.expiresAt}: ${w.reason}`],
+    remediation: ['Fix the finding and remove the waiver, or have its owner renew it with a new expiry'],
+  }));
+  return [...findings, ...expired];
+}
+
+const isBlocking = (f) => f.action === 'deny' && f.waiver?.state !== 'active';
+
+// ---------- scan ----------
+
+export async function scan(root, { ci = false, signatures = false, offline = false, workspace } = {}) {
+  const { config, rules } = loadPolicy(root);
+  const lock = readLockfile(root);
+  const selection = workspace ? [workspace] : config.workspaces;
+  const direct = directDependencies(root, lock, selection);
+  const entries = lock.packages.map((p) => {
+    const d = direct.get(p.name);
+    const isDirect = Boolean(d) && [...d.prefixes].includes(p.key);
+    return { ...p, direct: isDirect, type: isDirect ? d.type : 'transitive' };
+  });
+  const byName = new Map();
+  for (const e of entries) if (!byName.has(e.name) || e.direct) byName.set(e.name, e);
+
+  const errors = [];
+  const wsArgs = selection.flatMap((w) => [`--workspace=${w}`]);
+  const found = [...catalogFindings(entries, rules), ...sourceFindings(entries)];
+  let npmVersion = null;
+
+  // Deprecation. The lockfile records it for every package; direct ones are also asked of the registry, which is fresher.
+  const deprecation = new Map();
+  for (const e of entries) if (e.deprecated) deprecation.set(`${e.name}@${e.version}`, { e, message: e.deprecated });
+  if (!offline) {
+    const registry = entries.filter((e) => e.direct && e.resolved && isRegistryTarball(e.resolved));
+    const views = await mapLimit(registry, 4, async (e) => ({ e, r: await npm(['view', `${e.name}@${e.version}`, 'deprecated', '--json'], root) }));
+    for (const { e, r } of views) {
+      const text = r.stdout.trim();
+      const parsed = text ? tryJson(text) : '';
+      if (r.code !== 0 || parsed === undefined || isObject(parsed)) errors.push(`npm view ${e.name}@${e.version} failed: ${redact((isObject(parsed) && parsed.error?.summary) || r.stderr || r.code).toString().trim().split('\n')[0]}`);
+      else if (typeof parsed === 'string' && parsed) deprecation.set(`${e.name}@${e.version}`, { e: { ...e, viaRegistry: true }, message: parsed });
+    }
+  }
+  for (const { e, message } of deprecation.values()) found.push(deprecationFinding(e, message, e.direct ? config.deprecated : 'warn'));
+
+  if (!offline) {
+    const v = await npm(['--version'], root);
+    if (v.code === 0) npmVersion = v.stdout.trim();
+    else errors.push(redact(v.stderr).trim() || 'npm could not be run');
+
+    const audit = await npm(['audit', '--json', `--audit-level=${config.auditLevel}`, ...wsArgs], root);
+    const report = tryJson(audit.stdout);
+    if (report === undefined || report.error || report.message && !report.vulnerabilities) errors.push(`npm audit failed: ${redact(report?.message || report?.error?.summary || audit.stderr || audit.code).toString().trim().split('\n')[0]}`);
+    else if (report.auditReportVersion !== 2 || !isObject(report.vulnerabilities)) fail(`npm audit returned output this version cannot read (auditReportVersion ${report.auditReportVersion ?? 'missing'}). Use npm 7 or later.`);
+    else found.push(...auditFindings(report, byName, config.auditLevel));
+
+    if (config.outdated !== 'off') {
+      const outdated = await npm(['outdated', '--json', ...wsArgs], root);
+      const list = outdated.stdout.trim() ? tryJson(outdated.stdout) : {};
+      if (!isObject(list)) errors.push(`npm outdated failed: ${redact(outdated.stderr || outdated.code).toString().trim().split('\n')[0]}`);
+      else for (const [name, info] of Object.entries(list)) {
+        const e = byName.get(name);
+        for (const i of [info].flat()) {
+          const current = i.current ?? e?.version;
+          if (!e?.direct || !i.latest || current === i.latest) continue;
+          found.push(finding({
+            id: idOf('GUARD-OUTDATED', name, current), rule: 'GUARD-OUTDATED', source: 'npm-outdated', package: name, version: current,
+            relationship: 'direct', dependencyType: e.type, severity: 'low', action: config.outdated,
+            evidence: [`${current} is installed; the latest is ${i.latest}${i.wanted && i.wanted !== current ? ` (${i.wanted} satisfies the range)` : ''}`],
+            remediation: [`npm install ${name}@${i.latest}`],
+          }));
+        }
+      }
+    }
+
+    if (signatures || config.signatures) {
+      const sig = await npm(['audit', 'signatures', '--json', ...wsArgs], root);
+      const report2 = tryJson(sig.stdout);
+      if (!isObject(report2) || (!Array.isArray(report2.invalid) && !Array.isArray(report2.missing))) errors.push(`npm audit signatures failed: ${redact(report2?.error?.summary || sig.stderr || sig.code).toString().trim().split('\n')[0]}`);
+      else {
+        for (const [list, action, what] of [[report2.invalid ?? [], 'deny', 'has an invalid registry signature'], [report2.missing ?? [], config.signatures ? 'deny' : 'warn', 'has no registry signature']]) {
+          for (const x of list) {
+            const e = byName.get(x.name);
+            found.push(finding({
+              id: idOf('GUARD-SIGNATURE', x.name, x.version), rule: 'GUARD-SIGNATURE', source: 'npm-signatures', package: x.name, version: x.version,
+              relationship: e?.direct ? 'direct' : 'transitive', dependencyType: e?.type ?? 'transitive', severity: action === 'deny' ? 'high' : 'low', action,
+              evidence: [`${x.name}@${x.version} ${what}`],
+            }));
+          }
+        }
+      }
+    }
+  }
+
+  const findings = applyWaivers(found, config.waivers);
+  const blocking = findings.filter(isBlocking).length;
+  let status = blocking ? 'fail' : 'pass';
+  if (!blocking && errors.length) status = 'error';
+  if (!blocking && offline && ci) { status = 'error'; errors.push('An offline scan skips the registry checks, so it cannot pass strict CI.'); }
+  return {
+    schemaVersion: 1, status, projectRoot: root, offline, complete: !offline && !errors.length,
+    toolVersions: { guardian: GUARDIAN_VERSION, node: process.versions.node, npm: npmVersion },
+    summary: {
+      packages: entries.length, direct: entries.filter((e) => e.direct).length, blocking,
+      warnings: findings.filter((f) => f.action === 'warn').length, informational: findings.filter((f) => f.action === 'info').length,
+      waived: findings.filter((f) => f.waiver?.state === 'active').length,
+    },
+    errors, findings,
+  };
+}
+
+export function formatScan(result) {
+  const head = { pass: 'PASS', fail: 'FAIL', error: 'ERROR' }[result.status];
+  const s = result.summary;
+  const lines = [`dependency-guardian ${GUARDIAN_VERSION}: ${head}: ${s.blocking} blocking, ${s.warnings} warning(s), ${s.informational} informational, ${s.waived} waived (${s.direct} direct of ${s.packages} packages)`];
+  if (result.offline) lines.push('Offline: only the catalog and the lockfile were checked. Audit, outdated and registry checks were skipped.');
+  const order = (f) => [isBlocking(f) ? 0 : f.action === 'warn' ? 1 : f.waiver ? 2 : 3, f.package];
+  for (const f of [...result.findings].sort((a, b) => { const [x, y] = [order(a), order(b)]; return x[0] - y[0] || x[1].localeCompare(y[1]); })) {
+    const tag = isBlocking(f) ? 'BLOCK' : f.waiver?.state === 'active' ? 'WAIVED' : f.action === 'warn' ? 'warn' : 'info';
+    lines.push(`${tag.padEnd(6)} ${f.rule} ${f.package}${f.version ? `@${f.version}` : ''} (${f.relationship}${f.dependencyType && f.dependencyType !== 'transitive' ? `, ${f.dependencyType}` : ''}, ${f.severity})`);
+    for (const e of f.evidence) lines.push(`         ${e}`);
+    if (f.waiver) lines.push(`         Waiver: ${f.waiver.state}, owner ${f.waiver.owner}, until ${f.waiver.expiresAt}: ${f.waiver.reason}`);
+    if (f.alternatives.length) lines.push(`         Alternatives: ${f.alternatives.map((a) => `${a.name} (${a.use})`).join('; ')}`);
+    for (const r of f.remediation) lines.push(`         Fix: ${r}`);
+  }
+  for (const e of result.errors) lines.push(`ERROR  ${e}`);
+  return `${lines.join('\n')}\n`;
+}
+
 // ---------- commands ----------
 
 const out = (value) => process.stdout.write(`${JSON.stringify(value, null, 2)}\n`);
@@ -222,7 +502,11 @@ const commands = {
     }
     if (expired.length) process.exitCode = 1;
   },
-  scan: notYet('scan'),
+  async scan(_pos, opts) {
+    const result = await scan(findProjectRoot(), opts);
+    process.stdout.write(opts.json ? `${JSON.stringify(result, null, 2)}\n` : formatScan(result));
+    process.exitCode = { pass: 0, fail: 1, error: 2 }[result.status];
+  },
   preflight: notYet('preflight'),
   hook: notYet('hook'),
 };
@@ -238,14 +522,19 @@ export function main(argv = process.argv.slice(2)) {
     process.stderr.write(`Usage: guardian.mjs <${Object.keys(commands).join('|')}> [--ci] [--json] [--workspace <name>] [--signatures] [--offline] [-- <npm arguments>]\n`);
     process.exit(2);
   }
-  try {
-    const { pos, opts, rest } = parseArgs(args);
-    commands[cmd](pos, opts, rest);
-  } catch (e) {
+  let opts = {};
+  const onError = (e) => {
     if (!(e instanceof UserError)) throw e;
+    // A scan that cannot finish still answers in its own format when JSON was asked for.
+    if (cmd === 'scan' && opts.json) process.stdout.write(`${JSON.stringify({ schemaVersion: 1, status: 'error', error: e.message, errors: [e.message], findings: [] }, null, 2)}\n`);
     process.stderr.write(`dependency-guardian: ${e.message}\n`);
     process.exit(2);
-  }
+  };
+  try {
+    const parsed = parseArgs(args);
+    opts = parsed.opts;
+    Promise.resolve(commands[cmd](parsed.pos, parsed.opts, parsed.rest)).catch(onError);
+  } catch (e) { onError(e); }
 }
 
 // Compare real paths: a symlinked folder (macOS's /tmp, a linked project) must not make the script silently do nothing.
