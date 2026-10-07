@@ -1152,6 +1152,52 @@ test('cli: graph sync refreshes the graph and reports changed code files it does
   assert.match(run(['graph', 'sync', 'G-001'], { AISDLC_GRAPHIFY: path.join(dir, 'missing') }).json.note, /Graph unavailable/);
 });
 
+test('cli: task explore records the files a task will change without touching the plan, and implement.explore says when to run it', () => {
+  const { run, dir } = project();
+  run(['init']);
+  fs.writeFileSync(path.join(dir, 'a.js'), '1\n');
+  governedGoal(run, dir, [['A', '--risk', 'high'], ['B']]);
+  run(['state', 'move', 'G-001', 'in-progress']);
+  const task = path.join(dir, run(['goal', 'show', 'G-001']).json.tasks[0].file);
+  const stale = () => run(['gate', 'require', 'G-001', 'implement']).json.problems.join();
+
+  // A bad value fails loudly and leaves the task as it was.
+  run(['config', 'set', 'implement.explore', 'sometimes']);
+  assert.match(run(['task', 'set', 'G-001', 'T-01', 'in-progress']).stderr, /implement\.explore "sometimes" is not valid/);
+  assert.equal(run(['goal', 'show', 'G-001']).json.tasks[0].status, 'pending');
+  assert.equal(run(['config', 'get', 'implement.explore']).json, 'sometimes');
+
+  run(['config', 'set', 'implement.explore', 'risk']);
+  assert.deepEqual(run(['task', 'set', 'G-001', 'T-01', 'in-progress']).json.explore, { mode: 'risk', run: true });
+
+  const usage = run(['task', 'explore', 'G-001', 'T-01', 'a.js']);
+  assert.match(usage.stderr, /--evidence is required/);
+  assert.match(run(['task', 'explore', 'G-001', 'T-01']).stderr, /Usage: task explore/);
+  assert.match(run(['task', 'explore', 'G-001', 'T-01', '../x.js', '--evidence', 'why']).stderr, /relative to the project root/);
+  assert.match(run(['task', 'explore', 'G-001', 'T-01', '/etc/passwd', '--evidence', 'why']).stderr, /relative to the project root/);
+  assert.match(run(['task', 'explore', 'G-001', 'T-02', 'a.js', '--evidence', 'why']).stderr, /only an in-progress task can be explored/);
+
+  // The list is a hint: it names what exists and what is new, and it never reopens governance.
+  const r = run(['task', 'explore', 'G-001', 'T-01', 'a.js', './b.js', 'a.js', '--evidence', 'a.js holds the handler; b.js is the new route']);
+  assert.deepEqual(r.json.files, [{ file: 'a.js', state: 'exists' }, { file: 'b.js', state: 'new' }]);
+  assert.match(fs.readFileSync(task, 'utf8'), /## Explored\n\n- a\.js \(exists\)\n- b\.js \(new\)\n\nWhy: a\.js holds the handler; b\.js is the new route\n/);
+  assert.equal(stale(), '');
+
+  // A second exploration replaces the first.
+  run(['task', 'explore', 'G-001', 'T-01', 'a.js', '--evidence', 'only a.js']);
+  const text = fs.readFileSync(task, 'utf8');
+  assert.equal(text.match(/## Explored/g).length, 1);
+  assert.doesNotMatch(text, /b\.js/);
+  assert.equal(stale(), '');
+
+  // Without risk mode the medium-risk task skips it, and the default is never.
+  assert.deepEqual(run(['task', 'set', 'G-001', 'T-02', 'in-progress']).json.explore, { mode: 'risk', run: false });
+  run(['task', 'set', 'G-001', 'T-02', 'pending']);
+  run(['config', 'set', 'implement.explore', 'never']);
+  assert.deepEqual(run(['task', 'set', 'G-001', 'T-02', 'in-progress']).json.explore, { mode: 'never', run: false });
+  assert.equal(run(['task', 'set', 'G-001', 'T-02', 'pending']).json.explore, undefined, 'only a start asks');
+});
+
 test('cli: tasks are removed with a reason before the goal starts, edited in place, and IDs are never reused', () => {
   const { run, dir } = project();
   run(['init']);

@@ -224,8 +224,11 @@ function nextId(prefix, existing, width) {
 // The goal's log of removed tasks. The script writes it, and it keeps removed IDs from being allocated again.
 const REMOVED_TASKS = /^removed tasks\b/i;
 // What the agent writes while it works; the plan review never judged it.
-const TASK_PROGRESS_SECTIONS = /^(notes|work log|review)\b/i;
+const TASK_PROGRESS_SECTIONS = /^(notes|work log|review|explored)\b/i;
 const TASK_REVIEW = /^review\b/i;
+// The task-explorer's list of files to change, written by `task explore`. A hint for the implementer, never plan.
+const TASK_EXPLORED = /^explored\b/i;
+const EXPLORE_MODES = ['never', 'risk', 'always'];
 const CODE_REVIEW = 'code-review.md';
 
 const removedTaskIds = (goal) => listItems(section(readDoc(goal.file).body, REMOVED_TASKS))
@@ -1142,6 +1145,14 @@ function planFingerprint(root, goal) {
   return createHash('sha256').update(JSON.stringify(plan)).digest('hex').slice(0, 16);
 }
 
+// Whether the task-explorer runs before a task: `implement.explore` is never (the default), risk (high-risk tasks only)
+// or always. A bad value fails loudly instead of being read as the default.
+function exploreDecision(root, t) {
+  const mode = loadConfig(root).implement?.explore ?? 'never';
+  if (!EXPLORE_MODES.includes(mode)) fail(`implement.explore "${mode}" is not valid. Use ${EXPLORE_MODES.join(', ')}: \`config set implement.explore <mode>\`.`);
+  return { mode, run: mode === 'always' || (mode === 'risk' && t.risk === 'high') };
+}
+
 // ---------- gates ----------
 
 function requireStep(root, goal, step) {
@@ -1612,12 +1623,13 @@ const commands = {
       }
       const patch = { status, reason: typeof opts.reason === 'string' ? opts.reason : '' };
       if (status !== 'done') Object.assign(patch, { verified: '', verify_evidence: '', reviewed: '', review_evidence: '', review_round: '', review_fails: '' });
+      const explore = status === 'in-progress' ? exploreDecision(root, t) : null;
       updateDoc(t.file, patch);
       // The final review judged the finished tasks; any change to them means it has to run again.
       const notes = invalidate(g, 'final');
       writeTasksMd(g);
       registrySync(root);
-      return out({ goal: g.id, task: taskId, status, progress: goalProgress(listTasks(g)), notes });
+      return out({ goal: g.id, task: taskId, status, progress: goalProgress(listTasks(g)), notes, ...(explore && { explore }) });
     }
     if (action === 'verify') {
       // Runs the task's verify command, then the after_task hook, and records the result `done` requires.
@@ -1677,7 +1689,25 @@ const commands = {
       if (result === 'fail') process.exitCode = 1;
       return;
     }
-    fail('Usage: task new|edit|remove|set|verify|review');
+    if (action === 'explore') {
+      // Records what the task-explorer found: the files the task will change and why. It replaces the earlier list.
+      const [taskId, ...files] = rest;
+      if (!taskId || !files.length) fail('Usage: task explore <G-id> <T-id> <file>... --evidence "<where each file needs changes and why>"');
+      const t = getTask(g, taskId);
+      assertOpen(g);
+      if (t.status !== 'in-progress') fail(`${taskId} is ${t.status}; only an in-progress task can be explored.`);
+      const why = typeof opts.evidence === 'string' ? opts.evidence.trim().replace(/\s*\n\s*/g, ' ') : '';
+      if (!why) fail('--evidence is required: where each file needs changes and why.');
+      const bad = files.filter((f) => path.isAbsolute(f) || f.split(/[\\/]/).includes('..'));
+      if (bad.length) fail(`Files must be relative to the project root and inside it: ${bad.join(', ')}`);
+      const listed = [...new Set(files.map((f) => f.replace(/^\.\//, '')))].map((f) => ({ file: f, state: fs.existsSync(path.join(root, f)) ? 'exists' : 'new' }));
+      const doc = readDoc(t.file);
+      const lines = [...listed.map((l) => `- ${l.file} (${l.state})`), '', `Why: ${why}`].join('\n');
+      doc.body = appendToSection(withoutSection(doc.body, TASK_EXPLORED), TASK_EXPLORED, 'Explored', lines);
+      writeDoc(t.file, doc);
+      return out({ goal: g.id, task: taskId, files: listed });
+    }
+    fail('Usage: task new|edit|remove|set|verify|review|explore');
   },
 
   dag([action, goalId]) {

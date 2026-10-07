@@ -6,7 +6,8 @@
     "branch_prefix": "feature/"
   },
   "implement": {
-    "mode": "single"
+    "mode": "single",
+    "explore": "never"
   },
   "graph": {
     "provider": "none"

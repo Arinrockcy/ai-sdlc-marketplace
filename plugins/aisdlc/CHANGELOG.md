@@ -2,6 +2,12 @@
 
 All notable changes to the `aisdlc` plugin. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/). Until 1.0.0, a minor version may include breaking changes; each one is listed under **Breaking** with its upgrade step.
 
+## [0.15.0] - 2026-10-07
+
+### Added
+- `implement.explore` in `.aisdlc/config.json` (`never` by default, `risk` or `always`) decides whether `/aisdlc:implement` runs the task-explorer before a task's implementation: never, only for high-risk tasks, or for every task. `task set <G-id> <T-id> in-progress` returns it as `explore: { mode, run }`, and a value other than those three fails instead of being read as `never`. New projects get `"explore": "never"`; existing configs behave the same without the key.
+- `task explore <G-id> <T-id> <file>... --evidence "…"` records the files the explorer found, and why, in the task's `## Explored` section, marking each as existing or new. A later exploration replaces the earlier one. The section is a hint for the implementer, so, like Notes, the Work log and the Review, it is outside the plan fingerprint and never reopens governance.
+
 ## [0.14.0] - 2026-10-07
 
 ### Added
