@@ -15,7 +15,7 @@ Input: `$ARGUMENTS` (the text after the skill's name) is `<G-id>`, optionally fo
 The script enforces the order:
 - A goal only starts once governance passed. Each task start re-checks that the plan hasn't changed since then.
 - A task only starts once its dependencies are done or skipped.
-- A task can only be marked done after `task verify` passed.
+- A task can only be marked done after `task verify` passed and `task review` passed after it.
 - If governance.md has `final` rules, a goal only completes after the final review passed.
 
 If a command refuses, show its message; don't work around it.
@@ -54,17 +54,24 @@ Repeat these steps for each task:
 3. **Implement** against the task's acceptance criteria and its linked ADRs.
    - Read only what the task needs. Run `$AISDLC graph query "<keywords>"` before searching broadly. It refreshes the graph when the code changed, including in earlier tasks, and says so when no graph is set up.
    - If the task, its acceptance criteria and its ADRs don't settle a choice you have to make (behavior, a public name, error handling, data shape), and the repo's conventions don't either, stop and ask the user. Record the answer in the task file's Notes.
-   - Stay inside the task's scope. If you discover extra work, don't do it. Write it down and add it after this task is done (step 6). Adding a task resets governance, and a task can't be marked done while governance is pending.
+   - Keep the task file's `## Work log` as you go: what you did, what failed and why, and what you discovered. Write plain bullets. Don't edit `## Review`, the script writes it.
+   - Stay inside the task's scope. If you discover extra work, don't do it. Write it down in the Work log and add it after this task is done (step 7). Adding a task resets governance, and a task can't be marked done while governance is pending.
 4. **Verify.**
    - Run `$AISDLC task verify <G-id> <T-id>`. It runs the task's `verify` command and then the `after_task` hook (for example, the stack's test command), and records the result.
    - If `verify` is a manual check (`manual: …`), carry out the check first, then pass what you observed: `$AISDLC task verify <G-id> <T-id> --evidence "<what you checked and saw>"`.
    - Check every acceptance criterion honestly. A passing command doesn't excuse an unmet criterion; treat that as a failure.
-5. **On failure,** show the failing output and ask the user to pick one:
+5. **Review.** Once verification passed, review the task's change as a reviewer would, not as its author. It is a check of your own work, so look for what you would miss: read the diff (`git diff`, plus the task's new files), not your memory of it.
+   - For each acceptance criterion, find the code and the test or check that shows it is met. A criterion with nothing behind it is a defect.
+   - Look for defects and regressions: unhandled errors, missing edge cases, behavior changed outside the task, tests that can't fail, and leftover debug code.
+   - Check the diff against the task's linked ADRs and the stack standards you loaded, and check that it stayed inside the task's scope.
+   - Record it: `$AISDLC task review <G-id> <T-id> pass --evidence "<for each criterion, what shows it is met>"`, or `$AISDLC task review <G-id> <T-id> fail --evidence "<the defects found>"`. A `pass` evidence cites files or tests, and a bare "looks good" doesn't count. Every round is kept in the task file's `## Review`.
+   - A task can't be marked done without a passing review. Running `task verify` again clears the review, so after any fix, verify and review again.
+6. **On failure** of the verify or the review, show the failing output or the defects and ask the user to pick one:
    - **Retry:** fix the problem and go back to step 4.
    - **Skip:** run `$AISDLC task set <G-id> <T-id> skipped --reason "<why>"`.
    - **Block:** run `$AISDLC task set <G-id> <T-id> blocked --reason "<why>"`, then `$AISDLC hooks run on_block --goal <G-id> --task <T-id>`. Dependent tasks wait. Independent tasks can still run.
-6. **On success:**
-   - Tick the acceptance criteria in the task file.
+7. **On success:**
+   - Tick the acceptance criteria in the task file, and make sure its Work log says what was done.
    - Run `$AISDLC task set <G-id> <T-id> done`.
    - If `auto_commit` is true, commit now, so the commit includes the task's state. Stage only the files this task changed plus the `.aisdlc/` files the script updated (the task file, the goal's `tasks.md` and `registry.md`). Use the message `<G-id>/<T-id>: <task title>`.
    - **Extra work.** If you wrote down extra work in step 3, show it to the user and ask whether to add it as tasks. For each one they approve:
@@ -73,7 +80,7 @@ Repeat these steps for each task:
      3. Relay the `notes` from `task new`: governance was reset, because a new task hasn't been reviewed.
 
      Then run `post_implement` and stop. The user runs `/aisdlc:govern <G-id>`, then `/aisdlc:implement <G-id>`.
-7. **Check progress.** Read the `progress` object that `task set` returns:
+8. **Check progress.** Read the `progress` object that `task set` returns:
    - `complete: true`: go to section 3.
    - `stuck: true` (only blocked or waiting tasks remain): run `$AISDLC state move <G-id> blocked`, report the blockers, run `post_implement` and stop.
    - Otherwise, in single mode, run `post_implement`, then stop and show the next ready task. In auto mode, continue the loop.
@@ -83,7 +90,7 @@ All tasks are done or skipped at this point.
 1. **Final review.** Run `$AISDLC goal show <G-id>`. If `final_review_required` is true and `gates.final` isn't `passed`, run the govern skill's final review (`/aisdlc:govern <G-id> --final`, Mode C) now. If it fails, show the Required Fixes, handle them as Mode C describes, run `post_implement` and stop.
 2. **Uncommitted work.** Run `$AISDLC goal diff <G-id>`. If `uncommitted` or `untracked` isn't empty, tell the user that the goal's work isn't committed yet and that the after-goal hook only pushes commits. List the files, and ask whether to commit them now together with `.aisdlc/`. Never commit without asking.
 3. **After-goal hook.** Run `$AISDLC hooks run after_goal --goal <G-id>`. By default it runs `coverage check`, then `goal push`, which pushes the goal's branch to `origin`. `goal push` refuses when the goal was built on the base branch: aisdlc never pushes the base branch. `coverage check` reads the report the stack manifest declares (`quality_gate.coverage_report`). It fails when the report is missing, is older than a file the goal changed, or falls below `quality_gate.coverage_thresholds`. If the hook fails, show the output and ask the user whether to retry, finish anyway or stop:
-   - **Retry:** for a missing or out-of-date report, run `$AISDLC hooks run after_task --goal <G-id>` first to write it again. Coverage below a threshold needs more tests, which is new work: offer to add it as a task (section 2, step 6). Adding a task resets governance, so run `post_implement` and stop.
+   - **Retry:** for a missing or out-of-date report, run `$AISDLC hooks run after_task --goal <G-id>` first to write it again. Coverage below a threshold needs more tests, which is new work: offer to add it as a task (section 2, step 7). Adding a task resets governance, so run `post_implement` and stop.
    - **Finish anyway:** go on to step 4, and name the failure in the summary. The hook stops at its first failing command, so after a failed coverage check the branch wasn't pushed. A refused `goal push` (the goal is on the base branch) is also a finish-anyway case: tell the user the branch wasn't pushed.
    - **Stop:** run `post_implement` and stop. The goal stays in progress.
 4. Run `$AISDLC state move <G-id> completed`. The goal completes automatically once every task passes and, if there are final rules, the final review passes. The registry updates itself.

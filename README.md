@@ -63,7 +63,7 @@ No step works from assumptions. When something is unclear or under-documented an
 Each step refuses to run until the previous gate passes, and the script enforces it:
 - A goal can't start before governance passes.
 - Tasks run in dependency order.
-- A task is done only after `task verify` passes.
+- A task is done only after `task verify` passes and `task review` passes after it. The review (and every fix round) is kept in the task file's `## Review`, next to a `## Work log` of what was done and what failed.
 - A goal with `final`-stage rules completes only after the final review passes. New projects start with one: GOV-06, every acceptance criterion met.
 - A goal you no longer want is cancelled with a reason (`aisdlc.mjs state move G-001 cancelled --reason "…"`). Every reason stays in the goal's `## Cancellations` log, even after the goal is reopened. It reopens with `state move G-001 pending`, or `state move G-001 blocked` if its work had started. Completed goals can't change.
 - A goal is `pending` only until its first task starts. After that, new scope goes in as new tasks (governance runs again), or in a new goal.
@@ -113,6 +113,14 @@ See [`plugins/aisdlc/docs/stack-plugin-contract.md`](plugins/aisdlc/docs/stack-p
 ## Upgrading
 
 Each plugin keeps a changelog: [`aisdlc`](plugins/aisdlc/CHANGELOG.md), [`aisdlc-nodejs`](plugins/aisdlc-nodejs/CHANGELOG.md). Breaking changes are listed there with their upgrade step.
+
+### 0.11.x → 0.12.0 (`aisdlc`)
+
+A task now needs a passing review before it can be done.
+
+- Tasks that are `in-progress` and already verified need `$AISDLC task review <G-id> <T-id> pass --evidence "…"` (or `/aisdlc:implement`, which does it) before `task set … done` accepts them. Done tasks and tasks not yet started are unaffected.
+- Older task files have no `## Work log` or `## Review` section. `task review` adds `## Review` itself, and `/aisdlc:implement` adds the Work log. No edits are needed.
+- Scripts that call `task set … done` directly must call `task review` first.
 
 ### 0.10.x → 0.11.0 (both plugins)
 

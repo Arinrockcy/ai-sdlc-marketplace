@@ -107,6 +107,9 @@ export function formatDoc({ data, body }) {
 const readDoc = (file) => parseDoc(fs.readFileSync(file, 'utf8'));
 const writeDoc = (file, doc) => fs.writeFileSync(file, formatDoc(doc));
 
+// Frontmatter holds one short line; the full text goes in the body.
+const clip = (text) => (text.length > 400 ? `${text.slice(0, 399)}…` : text);
+
 function updateDoc(file, patch) {
   const doc = readDoc(file);
   Object.assign(doc.data, patch);
@@ -220,6 +223,9 @@ function nextId(prefix, existing, width) {
 
 // The goal's log of removed tasks. The script writes it, and it keeps removed IDs from being allocated again.
 const REMOVED_TASKS = /^removed tasks\b/i;
+// What the agent writes while it works; the plan review never judged it.
+const TASK_PROGRESS_SECTIONS = /^(notes|work log|review)\b/i;
+const TASK_REVIEW = /^review\b/i;
 
 const removedTaskIds = (goal) => listItems(section(readDoc(goal.file).body, REMOVED_TASKS))
   .map((item) => item.match(/\bT-\d+\b/)?.[0]).filter(Boolean);
@@ -996,8 +1002,7 @@ const CANCELLATIONS = /^cancellations\b/i;
 
 function withoutSection(body, re) {
   const lines = bodyLines(body);
-  const r = sectionRange(lines, re);
-  if (r) lines.splice(r[0], r[1] - r[0]);
+  for (let r = sectionRange(lines, re); r; r = sectionRange(lines, re)) lines.splice(r[0], r[1] - r[0]);
   return lines.join('\n');
 }
 
@@ -1065,7 +1070,7 @@ function runChecks(root, goal, rules) {
 }
 
 // Hash of what the plan review judged: goal text, planned task fields and text, linked ADR statuses and plan rules.
-// Progress (status, verify results, ticked boxes, task Notes) and the goal's Cancellations log are left out, so doing
+// Progress (status, verify and review results, ticked boxes, task Notes, Work log and Review) and the goal's Cancellations log are left out, so doing
 // the work, or pausing it, never invalidates it.
 function planFingerprint(root, goal) {
   const norm = (body) => bodyLines(body).map((l) => l.replace(/\[[xX]\]/g, '[ ]').trimEnd()).join('\n').trim();
@@ -1073,7 +1078,7 @@ function planFingerprint(root, goal) {
   const adrStatus = new Map(listAdrs(root).map((a) => [a.id, a.status]));
   const plan = {
     goal: [g.data.title, g.data.adrs, g.data.adr_reason, norm(withoutSection(g.body, CANCELLATIONS))],
-    tasks: listTasks(goal).map((t) => [t.id, t.title, t.depends_on, t.risk, String(t.verify ?? ''), norm(withoutSection(readDoc(t.file).body, /^notes\b/i))]),
+    tasks: listTasks(goal).map((t) => [t.id, t.title, t.depends_on, t.risk, String(t.verify ?? ''), norm(withoutSection(readDoc(t.file).body, TASK_PROGRESS_SECTIONS))]),
     adrs: (Array.isArray(g.data.adrs) ? g.data.adrs : []).map((id) => [id, adrStatus.get(id)]),
     rules: activeRules(root, 'plan').map((r) => [r.id, r.rule, r.severity, r.check]),
   };
@@ -1517,7 +1522,7 @@ const commands = {
         doc.data.risk = v;
       } else {
         // A new check makes the old result meaningless.
-        Object.assign(doc.data, { verify: v, verified: '', verify_evidence: '' });
+        Object.assign(doc.data, { verify: v, verified: '', verify_evidence: '', reviewed: '', review_evidence: '' });
       }
       const changed = formatDoc(doc) !== fs.readFileSync(t.file, 'utf8') || file !== t.file;
       writeDoc(t.file, doc);
@@ -1546,9 +1551,10 @@ const commands = {
       if (status === 'done') {
         if (t.status !== 'in-progress') fail(`${taskId} is ${t.status}; only an in-progress task can be marked done.`);
         if (t.verified !== 'pass') fail(`${taskId} has not passed verification; run \`task verify ${g.id} ${taskId}\` first.`);
+        if (t.reviewed !== 'pass') fail(`${taskId} has not passed its review; run \`task review ${g.id} ${taskId} pass|fail --evidence "<findings>"\` first.`);
       }
       const patch = { status, reason: typeof opts.reason === 'string' ? opts.reason : '' };
-      if (status !== 'done') Object.assign(patch, { verified: '', verify_evidence: '' });
+      if (status !== 'done') Object.assign(patch, { verified: '', verify_evidence: '', reviewed: '', review_evidence: '' });
       updateDoc(t.file, patch);
       // The final review judged the finished tasks; any change to them means it has to run again.
       const notes = invalidate(g, 'final');
@@ -1582,12 +1588,34 @@ const commands = {
       // One line the final review can cite instead of running everything again.
       const summary = ran.map((r) => `${r.cmd}: exit ${r.code}${r.tests ? ` (${r.tests})` : ''}`).join('; ');
       const recorded = [byHand ? evidence : '', summary].filter(Boolean).join('; ').replace(/\s*\n\s*/g, ' ');
-      updateDoc(t.file, { verified: code ? 'fail' : 'pass', verify_evidence: recorded.length > 400 ? `${recorded.slice(0, 399)}…` : recorded });
+      // The code may have changed since the last review, so verifying again sends the task back to review.
+      updateDoc(t.file, { verified: code ? 'fail' : 'pass', verify_evidence: clip(recorded), reviewed: '', review_evidence: '' });
       process.stdout.write(`[aisdlc] verify ${taskId}: ${code ? 'fail' : 'pass'}\n`);
       if (code) process.exitCode = code;
       return;
     }
-    fail('Usage: task new|edit|remove|set|verify');
+    if (action === 'review') {
+      // Records the review of a verified task and keeps every round under the task's Review section.
+      const [taskId, result] = rest;
+      if (!taskId || !['pass', 'fail'].includes(result)) fail('Usage: task review <G-id> <T-id> pass|fail --evidence "<findings>"');
+      const t = getTask(g, taskId);
+      assertOpen(g);
+      if (t.status !== 'in-progress') fail(`${taskId} is ${t.status}; only an in-progress task can be reviewed.`);
+      if (t.verified !== 'pass') fail(`${taskId} has not passed verification; run \`task verify ${g.id} ${taskId}\` before the review.`);
+      const evidence = typeof opts.evidence === 'string' ? opts.evidence.replace(/\s*\n\s*/g, ' ').trim() : '';
+      if (!evidence) fail(`--evidence is required: ${result === 'pass' ? 'what you checked and found for each acceptance criterion' : 'the defects found'}.`);
+      const doc = readDoc(t.file);
+      doc.data.reviewed = result;
+      doc.data.review_evidence = clip(evidence);
+      doc.body = appendToSection(doc.body, TASK_REVIEW, 'Review', `- ${today()}: ${result}: ${evidence}`);
+      if ('updated' in doc.data) doc.data.updated = today();
+      writeDoc(t.file, doc);
+      writeTasksMd(g);
+      process.stdout.write(`[aisdlc] review ${taskId}: ${result}\n`);
+      if (result === 'fail') process.exitCode = 1;
+      return;
+    }
+    fail('Usage: task new|edit|remove|set|verify|review');
   },
 
   dag([action, goalId]) {

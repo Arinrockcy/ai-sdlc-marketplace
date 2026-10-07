@@ -197,10 +197,12 @@ test('cli: full gated flow from init to completed', () => {
   run(['task', 'set', 'G-001', 'T-01', 'in-progress']);
   assert.equal(run(['task', 'set', 'G-001', 'T-01', 'done']).code, 1, 'done needs a passing verify');
   assert.equal(run(['task', 'verify', 'G-001', 'T-01']).code, 0);
+  run(['task', 'review', 'G-001', 'T-01', 'pass', '--evidence', 'checked']);
   run(['task', 'set', 'G-001', 'T-01', 'done']);
   assert.equal(run(['state', 'move', 'G-001', 'completed']).code, 1, 'cannot complete with open tasks');
   run(['task', 'set', 'G-001', 'T-02', 'in-progress']);
   run(['task', 'verify', 'G-001', 'T-02']);
+  run(['task', 'review', 'G-001', 'T-02', 'pass', '--evidence', 'checked']);
   const last = run(['task', 'set', 'G-001', 'T-02', 'done']);
   assert.equal(last.json.progress.complete, true);
 
@@ -515,6 +517,7 @@ test('cli: task verify runs verify then after_task, records the result, and need
 
   assert.equal(run(['task', 'verify', 'G-001', 'T-03']).code, 1, 'manual check needs --evidence');
   assert.equal(run(['task', 'verify', 'G-001', 'T-03', '--evidence', 'curl returned 200']).code, 0);
+  run(['task', 'review', 'G-001', 'T-03', 'pass', '--evidence', 'checked']);
   assert.equal(run(['task', 'set', 'G-001', 'T-03', 'done']).code, 0);
 
   // Going back to in-progress clears the recorded result.
@@ -630,6 +633,7 @@ test('cli: a plan change after governance passed needs a new review; progress do
   // Doing the work (status, verify results, ticked boxes, Notes) keeps the plan governed.
   run(['task', 'set', 'G-001', 'T-01', 'in-progress']);
   run(['task', 'verify', 'G-001', 'T-01']);
+  run(['task', 'review', 'G-001', 'T-01', 'pass', '--evidence', 'checked']);
   edit(task, (s) => s.replace('- [ ] It works', '- [x] It works').replace('## Notes\n', '## Notes\n\nAsked the user: keep the old API.\n'));
   assert.equal(run(['task', 'set', 'G-001', 'T-01', 'done']).code, 0);
   assert.equal(stale(), '');
@@ -710,6 +714,7 @@ test('cli: final-stage rules gate completion', () => {
 
   run(['task', 'set', 'G-001', 'T-01', 'in-progress']);
   run(['task', 'verify', 'G-001', 'T-01']);
+  run(['task', 'review', 'G-001', 'T-01', 'pass', '--evidence', 'checked']);
   run(['task', 'set', 'G-001', 'T-01', 'done']);
   assert.match(run(['state', 'move', 'G-001', 'completed']).stderr, /needs a passing final governance review/);
   assert.equal(run(['gate', 'require', 'G-001', 'final']).code, 0);
@@ -727,6 +732,7 @@ test('cli: final-stage rules gate completion', () => {
   assert.ok(fs.existsSync(path.join(goalDir, 'governance-final.stale-1.md')));
   run(['task', 'set', 'G-001', 'T-01', 'in-progress']);
   run(['task', 'verify', 'G-001', 'T-01']);
+  run(['task', 'review', 'G-001', 'T-01', 'pass', '--evidence', 'checked']);
   run(['task', 'set', 'G-001', 'T-01', 'done']);
   writeReview(goalDir, 'G-001', {}, 'pass', final);
   run(['gate', 'set', 'G-001', 'final', 'passed']);
@@ -1086,6 +1092,7 @@ test('cli: tasks are removed with a reason before the goal starts, edited in pla
   assert.match(run(['task', 'remove', 'G-001', 'T-04', '--reason', 'x']).stderr, /in-progress; tasks can only be removed before the goal starts\. Skip it instead/);
   run(['task', 'set', 'G-001', 'T-01', 'in-progress']);
   run(['task', 'verify', 'G-001', 'T-01']);
+  run(['task', 'review', 'G-001', 'T-01', 'pass', '--evidence', 'checked']);
   run(['task', 'set', 'G-001', 'T-01', 'done']);
   assert.match(run(['task', 'edit', 'G-001', 'T-01', 'risk', 'low']).stderr, /T-01 is done; a finished task no longer changes/);
 });
@@ -1129,6 +1136,7 @@ test('cli: the final review scaffold leaves criteria-met for the reviewer', () =
   for (const id of ['T-01', 'T-02']) {
     run(['task', 'set', 'G-001', id, 'in-progress']);
     run(['task', 'verify', 'G-001', id]);
+    run(['task', 'review', 'G-001', id, 'pass', '--evidence', 'checked']);
     run(['task', 'set', 'G-001', id, 'done']);
   }
   const show = run(['goal', 'show', 'G-001']).json;
@@ -1218,4 +1226,42 @@ test('cli: goal diff lists committed, uncommitted and untracked changes, and pre
   gitIn(dir, 'add', '-A');
   gitIn(dir, 'commit', '-qm', 'stack');
   assert.doesNotMatch(run(['goal', 'preflight', 'G-001']).json.warnings.join('\n'), /nodejs\.json/);
+});
+
+test('cli: a task needs a passing review after its verification before it is done', () => {
+  const { run, dir } = project();
+  run(['init']);
+  governedGoal(run, dir, [['A', '--verify', 'true']]);
+  run(['state', 'move', 'G-001', 'in-progress']);
+  const file = path.join(dir, run(['goal', 'show', 'G-001']).json.tasks[0].file);
+  const data = () => parseDoc(fs.readFileSync(file, 'utf8')).data;
+  const stale = () => run(['gate', 'require', 'G-001', 'implement']).json.problems.join();
+  const review = (...args) => run(['task', 'review', 'G-001', 'T-01', ...args]);
+
+  assert.match(review('pass', '--evidence', 'x').stderr, /pending; only an in-progress task can be reviewed/);
+  run(['task', 'set', 'G-001', 'T-01', 'in-progress']);
+  assert.match(review('pass', '--evidence', 'x').stderr, /has not passed verification/, 'the review comes after verify');
+  run(['task', 'verify', 'G-001', 'T-01']);
+  assert.match(review('pass').stderr, /--evidence is required/);
+  assert.match(review('maybe', '--evidence', 'x').stderr, /Usage: task review/);
+  assert.match(run(['task', 'set', 'G-001', 'T-01', 'done']).stderr, /has not passed its review/);
+
+  const failed = review('fail', '--evidence', 'no error test\nmissing null check');
+  assert.equal(failed.code, 1);
+  assert.deepEqual([data().reviewed, data().review_evidence], ['fail', 'no error test missing null check']);
+  assert.equal(run(['task', 'set', 'G-001', 'T-01', 'done']).code, 1, 'a failed review does not pass the gate');
+
+  // Fixing the code means verifying again, which sends the task back to review.
+  run(['task', 'verify', 'G-001', 'T-01']);
+  assert.equal(data().reviewed, '');
+  assert.equal(review('pass', '--evidence', 'criteria 1 met: tests/a.test.mjs:12').code, 0);
+  assert.equal(data().reviewed, 'pass');
+
+  // Every round stays in the Review section, and the plan stays governed while the agent writes there.
+  edit(file, (s) => s.replace('## Work log\n', '## Work log\n\nTried the cache first; it broke the tests.\n'));
+  const body = fs.readFileSync(file, 'utf8');
+  assert.match(body, /## Review\n+- \d{4}-\d\d-\d\d: fail: no error test missing null check\n- \d{4}-\d\d-\d\d: pass: criteria 1 met/);
+  assert.equal(stale(), '');
+  assert.equal(run(['task', 'set', 'G-001', 'T-01', 'done']).code, 0);
+  assert.equal(data().reviewed, 'pass', 'done keeps the review');
 });
