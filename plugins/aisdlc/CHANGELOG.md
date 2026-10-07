@@ -2,6 +2,11 @@
 
 All notable changes to the `aisdlc` plugin. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/). Until 1.0.0, a minor version may include breaking changes; each one is listed under **Breaking** with its upgrade step.
 
+## [0.14.0] - 2026-10-07
+
+### Added
+- `graph sync <G-id>` refreshes the code graph and reports which of the goal's changed source files (committed, uncommitted and untracked) it holds (`changed`, `indexed`) and which it doesn't (`missing`). `/aisdlc:implement` runs it after each task is done, so the next task starts from current code and a file the graph can't parse is noticed at once. It never blocks a task, and it returns a `note` instead when no graph is set up, Graphify is unavailable, or the project isn't a git repository.
+
 ## [0.13.0] - 2026-10-07
 
 ### Added

@@ -80,6 +80,7 @@ Repeat these steps for each task:
 7. **On success:**
    - Tick the acceptance criteria in the task file, and make sure its Work log says what was done.
    - Run `$AISDLC task set <G-id> <T-id> done`.
+   - Run `$AISDLC graph sync <G-id>`. It refreshes the code graph, so the next task starts from current code, and lists the goal's changed source files that the graph doesn't hold (`missing`). If `missing` is not empty, add the files to the task's Work log and search for code in them directly from then on. This never blocks the task. When the graph isn't set up it returns a `note`: ignore it.
    - If `auto_commit` is true, commit now, so the commit includes the task's state. Stage only the files this task changed plus the `.aisdlc/` files the script updated (the task file, the goal's `tasks.md` and `code-review.md`, and `registry.md`). Use the message `<G-id>/<T-id>: <task title>`.
    - **Extra work.** If you wrote down extra work in step 3, show it to the user and ask whether to add it as tasks. For each one they approve:
      1. Run `$AISDLC task new <G-id> "<title>" --risk … --depends … --verify "…"` and fill in the task file.

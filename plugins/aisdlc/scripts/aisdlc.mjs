@@ -767,13 +767,23 @@ function graphUpdate(root, force = false) {
 const GRAPH_CODE_EXTENSIONS = new Set(['js', 'mjs', 'cjs', 'jsx', 'ts', 'tsx', 'py', 'java', 'kt', 'go', 'rs', 'rb', 'php', 'cs', 'c', 'h', 'cpp', 'hpp', 'cc', 'swift', 'scala', 'sql']);
 const GRAPH_MIN_COVERAGE = 0.5;
 
+const isGraphCode = (f) => GRAPH_CODE_EXTENSIONS.has(path.extname(f).slice(1).toLowerCase());
+
+// The source files the graph holds, relative to the project root. Null when graph.json is missing or unreadable.
+function graphIndexedFiles(root) {
+  let nodes;
+  try { nodes = JSON.parse(fs.readFileSync(path.join(root, GRAPH_DIR, 'graph.json'), 'utf8')).nodes; } catch { return null; }
+  if (!Array.isArray(nodes) || !nodes.length) return null;
+  return { nodes: nodes.length, files: new Set(nodes.map((n) => n.source_file && path.relative(root, path.resolve(root, n.source_file))).filter(Boolean)) };
+}
+
 function graphCodeFiles(root) {
   const list = (...args) => git(root, ['ls-files', '-z', ...args])?.split('\0').filter(Boolean);
   const tracked = list();
   if (!tracked) return null;
   const files = new Set([...tracked, ...list('-o', '--exclude-standard')]);
   for (const f of list('-d')) files.delete(f);
-  return [...files].filter((f) => !GRAPH_IGNORED.some((d) => f.startsWith(d)) && GRAPH_CODE_EXTENSIONS.has(path.extname(f).slice(1).toLowerCase())).sort();
+  return [...files].filter((f) => !GRAPH_IGNORED.some((d) => f.startsWith(d)) && isGraphCode(f)).sort();
 }
 
 // Whether the graph can be trusted to find code: `ok`, `degraded` (usable, with the listed problems) or `unusable`
@@ -786,18 +796,16 @@ function graphCheck(root, provider) {
   if (!tool.installed) return unusable('Graphify is not installed');
   if (!tool.supported) return unusable(`Graphify ${tool.version || ''} lacks ${tool.missing.join(', ')}`);
   const graphFile = path.join(root, GRAPH_DIR, 'graph.json');
-  if (!fs.existsSync(graphFile)) return unusable('no graph built yet; run `graph setup`');
   // Like a query, check on the graph as it is now, so files added since the last build don't count as missing.
   try { graphUpdate(root); } catch (e) {
     if (!(e instanceof UserError)) throw e;
     problems.push(`could not refresh the graph: ${e.message}`);
   }
-  let nodes;
-  try { nodes = JSON.parse(fs.readFileSync(graphFile, 'utf8')).nodes; } catch { return unusable(`${GRAPH_DIR}/graph.json is not valid JSON; run \`graph setup\``); }
-  if (!Array.isArray(nodes) || !nodes.length) return unusable('the graph has no nodes');
+  const graph = graphIndexedFiles(root);
+  if (!graph) return unusable(fs.existsSync(graphFile) ? `${GRAPH_DIR}/graph.json is not valid JSON or has no nodes; run \`graph setup\`` : 'no graph built yet; run `graph setup`');
   if (!graphIgnoreOk(root)) problems.push('.graphifyignore does not list .aisdlc/, so workflow state makes the graph stale; run `graph setup`');
   for (const w of graphWarnings(root)) problems.push(`graphify: ${w}`);
-  const indexed = new Set(nodes.map((n) => n.source_file && path.relative(root, path.resolve(root, n.source_file))).filter(Boolean));
+  const indexed = graph.files;
   const files = graphCodeFiles(root);
   let coverage = null;
   if (files) {
@@ -807,7 +815,7 @@ function graphCheck(root, provider) {
     if (coverage.ratio < GRAPH_MIN_COVERAGE) problems.push(`only ${coverage.indexed} of ${coverage.files} source files are in the graph`);
   }
   const fresh = graphFreshness(root);
-  return { provider, status: problems.length ? 'degraded' : 'ok', version: tool.version, nodes: nodes.length, stale: fresh.stale, ...(coverage && { coverage }), ...(problems.length && { problems }) };
+  return { provider, status: problems.length ? 'degraded' : 'ok', version: tool.version, nodes: graph.nodes, stale: fresh.stale, ...(coverage && { coverage }), ...(problems.length && { problems }) };
 }
 
 // ---------- goal changes ----------
@@ -1872,10 +1880,26 @@ const commands = {
       return out({ provider: 'graphify', version: tool.version, dir: GRAPH_DIR, ignore_added: addedIgnore, ...graphUpdate(root, true) });
     }
     if (provider !== 'graphify') {
-      if (action === 'update' || action === 'query') return out({ provider, note: 'No code graph is set up; search the code directly.' });
-      fail('Usage: graph status | check | setup | update | query "<keywords>" [--budget N]');
+      if (action === 'update' || action === 'query' || action === 'sync') return out({ provider, note: 'No code graph is set up; search the code directly.' });
+      fail('Usage: graph status | check | sync <G-id> | setup | update | query "<keywords>" [--budget N]');
     }
     if (action === 'update') return out(graphUpdate(root));
+    if (action === 'sync') {
+      if (!words[0]) fail('Usage: graph sync <G-id>');
+      const g = getGoal(root, words[0]);
+      const changes = goalChanges(root, g);
+      if (!changes) return out({ goal: g.id, provider, note: 'graph sync needs a git repository; search the code directly.' });
+      let refresh;
+      try { refresh = graphUpdate(root); } catch (e) {
+        if (!(e instanceof UserError) && e.code !== 'ENOENT') throw e;
+        return out({ goal: g.id, provider, note: `Graph unavailable (${e.code === 'ENOENT' ? 'graphify is not installed' : e.message}); search the code directly.` });
+      }
+      const graph = graphIndexedFiles(root);
+      if (!graph) return out({ goal: g.id, provider, note: `${GRAPH_DIR}/graph.json is missing or empty; run \`graph setup\`, or search the code directly.` });
+      const changed = [...new Set([...changes.committed, ...changes.uncommitted, ...changes.untracked])].filter((f) => isGraphCode(f) && fs.existsSync(path.join(root, f))).sort();
+      const missing = changed.filter((f) => !graph.files.has(f));
+      return out({ goal: g.id, refreshed: Boolean(refresh.updated), changed: changed.length, indexed: changed.length - missing.length, ...(missing.length && { missing }), ...(refresh.warning && { warning: refresh.warning }), ...(refresh.warnings && { warnings: refresh.warnings }) });
+    }
     if (action === 'query') {
       const question = words.join(' ').trim();
       if (!question) fail('Usage: graph query "<keywords>" [--budget N]');
@@ -1899,7 +1923,7 @@ const commands = {
       if (/^No matching nodes found/m.test(result)) process.stdout.write('[aisdlc] Nothing in the graph matches. Retry with identifiers (function, file or module names) rather than a sentence, or search the code directly.\n');
       return;
     }
-    fail('Usage: graph status | check | setup | update | query "<keywords>" [--budget N]');
+    fail('Usage: graph status | check | sync <G-id> | setup | update | query "<keywords>" [--budget N]');
   },
 };
 

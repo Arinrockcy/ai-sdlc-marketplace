@@ -1106,6 +1106,52 @@ test('cli: graph check says whether the graph can be trusted to find code', { sk
   assert.equal(fs.readFileSync(runsFile, 'utf8').trim(), 'run', 'check ran graphify update once');
 });
 
+test('cli: graph sync refreshes the graph and reports changed code files it does not hold', { skip: process.platform === 'win32' }, () => {
+  const { run, dir } = project();
+  gitIn(dir, 'init', '-q', '-b', 'develop');
+  fs.writeFileSync(path.join(dir, '.gitignore'), 'graphify-out/\nfake-graphify\n');
+  fs.writeFileSync(path.join(dir, 'a.js'), '1\n');
+  run(['init']);
+  run(['goal', 'new', 'A']);
+  gitIn(dir, 'add', '-A');
+  gitIn(dir, 'commit', '-qm', 'base');
+  gitIn(dir, 'checkout', '-q', '-b', 'feature/a');
+  run(['goal', 'set', 'G-001', 'branch', 'feature/a']);
+  const env = { AISDLC_GRAPHIFY: fakeGraphify(dir), FAKE_NOOP: '1' }; // update leaves the hand-written graph alone
+  const graph = (files) => {
+    fs.mkdirSync(path.join(dir, 'graphify-out'), { recursive: true });
+    fs.writeFileSync(path.join(dir, 'graphify-out/graph.json'), JSON.stringify({ nodes: files.map((f, i) => ({ id: `n${i}`, source_file: f })), links: [] }));
+  };
+
+  assert.match(run(['graph', 'sync', 'G-001'], env).json.note, /No code graph is set up/);
+  run(['config', 'set', 'graph.provider', 'graphify']);
+  assert.match(run(['graph', 'sync'], env).stderr, /Usage: graph sync <G-id>/);
+  assert.match(run(['graph', 'sync', 'G-001'], env).json.note, /missing or empty/);
+
+  // b.js is committed on the branch, c.js is untracked, a.js is edited, README.md is not code, and gone.js was deleted.
+  fs.writeFileSync(path.join(dir, 'b.js'), '2\n');
+  gitIn(dir, 'add', 'b.js');
+  gitIn(dir, 'commit', '-qm', 'b');
+  fs.writeFileSync(path.join(dir, 'a.js'), 'changed\n');
+  fs.writeFileSync(path.join(dir, 'c.js'), '3\n');
+  fs.writeFileSync(path.join(dir, 'README.md'), 'docs\n');
+  graph(['a.js', 'b.js']);
+  let r = run(['graph', 'sync', 'G-001'], env).json;
+  assert.deepEqual([r.goal, r.refreshed, r.changed, r.indexed, r.missing], ['G-001', false, 3, 2, ['c.js']]);
+  assert.match(r.warning, /left graphify-out\/graph\.json unchanged/, 'the no-op update is passed on');
+
+  graph(['a.js', 'b.js', 'c.js']);
+  r = run(['graph', 'sync', 'G-001'], env).json;
+  assert.deepEqual([r.changed, r.indexed, r.missing], [3, 3, undefined]);
+
+  // Sync refreshes a stale graph first (the fake rebuilds an empty one, which sync then calls unusable).
+  const rebuilt = run(['graph', 'sync', 'G-001'], { AISDLC_GRAPHIFY: env.AISDLC_GRAPHIFY }).json;
+  assert.match(rebuilt.note, /missing or empty/);
+  assert.equal(fs.readFileSync(path.join(dir, 'graphify-out/runs'), 'utf8').trim(), 'run');
+  fs.appendFileSync(path.join(dir, 'a.js'), 'more\n');
+  assert.match(run(['graph', 'sync', 'G-001'], { AISDLC_GRAPHIFY: path.join(dir, 'missing') }).json.note, /Graph unavailable/);
+});
+
 test('cli: tasks are removed with a reason before the goal starts, edited in place, and IDs are never reused', () => {
   const { run, dir } = project();
   run(['init']);
