@@ -2,6 +2,11 @@
 
 All notable changes to the `aisdlc` plugin. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/). Until 1.0.0, a minor version may include breaking changes; each one is listed under **Breaking** with its upgrade step.
 
+## [0.13.0] - 2026-10-07
+
+### Added
+- `graph check` says whether the code graph can be trusted to find code: `ok`, `degraded` or `unusable`, with the reasons. It checks that Graphify is installed and supports the commands the workflow uses, that `graph.json` parses and has nodes, that `.aisdlc/` is ignored, Graphify's own warnings from the last build, and the share of the project's source files that are in the graph (`coverage`, with the first files missing). A stale graph is not a problem, because every query refreshes it. `/aisdlc:init` runs it after setup and `/aisdlc:implement` runs it before the first task, falling back to searching the code when the graph is unusable.
+
 ## [0.12.0] - 2026-10-07
 
 ### Breaking

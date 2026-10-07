@@ -1046,6 +1046,66 @@ test('cli: graph setup, freshness and query drive graphify without the model', {
   assert.match(run(['graph', 'status'], env).stderr, /graph\.path "docs\/graph" is not supported/);
 });
 
+test('cli: graph check says whether the graph can be trusted to find code', { skip: process.platform === 'win32' }, () => {
+  const { run, dir } = project();
+  gitIn(dir, 'init', '-q');
+  for (const f of ['a.js', 'b.js', 'c.py', 'd.sql']) fs.writeFileSync(path.join(dir, f), 'x\n');
+  fs.writeFileSync(path.join(dir, 'README.md'), 'not code\n');
+  fs.writeFileSync(path.join(dir, '.gitignore'), 'graphify-out/\nfake-graphify\n');
+  run(['init']);
+  const env = { AISDLC_GRAPHIFY: fakeGraphify(dir), FAKE_NOOP: '1' }; // update leaves the hand-written graph alone
+  const graph = (files) => {
+    fs.mkdirSync(path.join(dir, 'graphify-out'), { recursive: true });
+    fs.writeFileSync(path.join(dir, 'graphify-out/graph.json'), JSON.stringify({ nodes: files.map((f, i) => ({ id: `n${i}`, source_file: f })), links: [] }));
+  };
+
+  assert.equal(run(['graph', 'check'], env).json.status, 'none', 'no provider, no graph to check');
+  run(['config', 'set', 'graph.provider', 'graphify']);
+  const unusable = (e, re) => { const r = run(['graph', 'check'], e).json; assert.equal(r.status, 'unusable'); assert.match(r.problems[0], re); return r; };
+  assert.ok(unusable({ AISDLC_GRAPHIFY: path.join(dir, 'missing') }, /not installed/).install);
+  unusable(env, /no graph built yet/);
+  fs.mkdirSync(path.join(dir, 'graphify-out'));
+  fs.writeFileSync(path.join(dir, 'graphify-out/graph.json'), '{oops');
+  unusable(env, /not valid JSON/);
+  graph([]);
+  unusable(env, /no nodes/);
+  graph(['elsewhere.js']);
+  unusable(env, /none of the project's source files/);
+
+  // Every source file is in the graph (the README is not code), but .aisdlc/ is not ignored yet.
+  graph(['a.js', 'b.js', 'c.py', 'd.sql']);
+  let r = run(['graph', 'check'], env).json;
+  assert.deepEqual([r.status, r.coverage.files, r.coverage.indexed, r.coverage.ratio], ['degraded', 4, 4, 1]);
+  assert.match(r.problems[0], /\.graphifyignore does not list \.aisdlc\//);
+  fs.writeFileSync(path.join(dir, '.graphifyignore'), '.aisdlc/\n');
+  r = run(['graph', 'check'], env).json;
+  assert.equal(r.status, 'ok');
+  assert.equal(r.nodes, 4);
+  assert.equal(r.problems, undefined);
+
+  // Some files missing is fine until under half of them are indexed; the check names what is missing.
+  graph(['a.js', 'b.js', 'c.py']);
+  r = run(['graph', 'check'], env).json;
+  assert.deepEqual([r.status, r.coverage.missing], ['ok', ['d.sql']]);
+  graph(['a.js']);
+  r = run(['graph', 'check'], env).json;
+  assert.equal(r.status, 'degraded');
+  assert.match(r.problems[0], /only 1 of 4 source files/);
+  assert.deepEqual(r.coverage.missing, ['b.js', 'c.py', 'd.sql']);
+
+  // Graphify's own warnings from the last build are problems too, and a stale graph is refreshed first rather than reported.
+  graph(['a.js', 'b.js', 'c.py', 'd.sql']);
+  fs.writeFileSync(path.join(dir, 'graphify-out/.aisdlc-warnings'), '2 .sql file(s) contributed nothing\n');
+  r = run(['graph', 'check'], env).json;
+  assert.deepEqual([r.status, r.stale, r.problems], ['degraded', true, ['graphify: 2 .sql file(s) contributed nothing']]);
+
+  // A stale graph is refreshed before it is judged (the fake rebuilds an empty graph, so it ends up unusable).
+  const runsFile = path.join(dir, 'graphify-out/runs');
+  fs.rmSync(runsFile, { force: true });
+  assert.equal(run(['graph', 'check'], { AISDLC_GRAPHIFY: env.AISDLC_GRAPHIFY }).json.status, 'unusable');
+  assert.equal(fs.readFileSync(runsFile, 'utf8').trim(), 'run', 'check ran graphify update once');
+});
+
 test('cli: tasks are removed with a reason before the goal starts, edited in place, and IDs are never reused', () => {
   const { run, dir } = project();
   run(['init']);
