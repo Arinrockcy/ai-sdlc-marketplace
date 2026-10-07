@@ -2,6 +2,20 @@
 
 All notable changes to the `dependency-guardian` plugin. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/).
 
+## [0.4.0] - 2026-10-07
+
+### Added
+- `parseCommandLine(line, { cwd })`, exported from `guardian.mjs`, the command parser that pre-install enforcement builds on. It is a pure function: it runs nothing, reads no file and expands nothing. It answers `{ actions, unjudgeable }`: each dependency-changing npm command with the directory it runs in, `global`, `workspaces`, `allWorkspaces`, `includeWorkspaceRoot`, `force` and its packages (`spec`, `name`, `range`, `alias`), and everything the hook must fail closed on, each with a `kind`, a `reason` and the command's text.
+- Commands covered: `npm install` (`i`, `add`, `isntall`, `install-test` and every other alias or unique abbreviation npm resolves), `update`, `ci` (`clean-install`, `install-ci-test`), `audit fix`, `npx`, `npm exec` (`x`) and `npm init <initializer>` (checked as `create-<initializer>`). `npm install && npm test` yields the install alone; `npm test`, `npm run`, `npm uninstall` and every other command yield nothing.
+- Options: `-w` and `--workspace` (repeatable, before or after the subcommand), `-ws`, `--include-workspace-root`, `--prefix` and `-C` (resolved against the working directory), `-g`, `--global` and `--location=global`, `--force`, `-p` and `--package` for `npx`, `-c` and `--call`, and `--no` and `-n`, which make `npx` download nothing. `npm_config_*` variables set the same things, and an option on the command line wins over one in the environment. Scoped packages, ranges, tags and `alias@npm:real@range` all parse, however they are quoted.
+- Shell syntax: quoting and escapes, `;` `&&` `||` `|` `&` and newlines, `( … )` subshells, `$(…)`, backticks and `<(…)` (each parsed as commands of their own, so `echo $(npm i x)` is seen), redirections, here-documents, comments, `cd`, `pushd` and `popd` (tracked across a chain, undone by a subshell, a pipe or `&`), `NAME=value` prefixes, `export` and `unset`, the wrappers `env` (with `-C`), `sudo`, `doas`, `time`, `command`, `exec`, `nohup`, `nice`, `timeout`, `setsid`, `stdbuf` and `corepack`, `xargs` (its packages come from standard input), `bash -c` and its siblings, and `eval`.
+- Fail closed (`unjudgeable`) on: a package name or version the shell expands (`$PKG`, `$(…)`, a glob, a brace list, `~`), an expanded `--workspace`, `--prefix`, `--registry` or `--global`, an npm subcommand that is a variable, packages from git, URLs, GitHub shorthands, local paths or tarballs, a name that is not a package name, an unknown option that comes straight before a word it might swallow (an unknown option anywhere else is read as a flag), a working directory that `cd` left unknown (`$DIR`, `~`, `-`), a wrapper option the parser does not know in front of npm, a dynamic command name next to a dependency verb, and a command line that does not parse. Dynamic values that do not decide what is installed (`--loglevel $L`, `npm test -- $FILE`, `eval "$(ssh-agent)"`) pass.
+
+### Notes
+- Out of scope, because they run code the command line does not show: scripts, `npm run`, aliases, `curl | sh`, and `npm link`, `npm dedupe` and `npm pkg set`. `scan --ci` backs these up.
+- Nothing calls the parser yet: `hook` and `preflight` arrive in a later release.
+- A `$(…)` or backtick inside a `bash -c` or `eval` string is read twice and reported once.
+
 ## [0.3.0] - 2026-10-07
 
 ### Added
