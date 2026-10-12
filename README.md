@@ -6,7 +6,7 @@ A stack-agnostic AI-SDLC workflow for Claude Code and GitHub Copilot. Its skills
 |--------|---------|
 | `aisdlc` | Core workflow: init, create-goal, challenge, adr, govern, implement |
 | `aisdlc-nodejs` | Node.js stack: Node.js 24+, ES modules, coding standards, ESLint/coverage gates, SonarQube, vulnerability scans, and Express REST API/auth/JWT practices |
-| `dependency-guardian` | npm dependency guard: blocks unsafe installs, scans for vulnerable, deprecated and discouraged packages, CI-ready scanner |
+| `dependency-guardian` | npm dependency scanner: finds vulnerable, deprecated and discouraged packages, CI-ready (`guardian.mjs scan`). Blocking unsafe agent-issued installs is planned, not yet available |
 
 ## Install
 
@@ -14,7 +14,7 @@ A stack-agnostic AI-SDLC workflow for Claude Code and GitHub Copilot. Its skills
 /plugin marketplace add <path-or-git-url-of-this-repo>
 /plugin install aisdlc@aisdlc-marketplace
 /plugin install aisdlc-nodejs@aisdlc-marketplace   # optional, per stack
-/plugin install dependency-guardian@aisdlc-marketplace   # optional, npm install guard
+/plugin install dependency-guardian@aisdlc-marketplace   # optional, npm dependency scanner (install guard not yet available)
 ```
 
 ### GitHub Copilot
@@ -25,7 +25,7 @@ Copilot CLI reads the same marketplace:
 copilot plugin marketplace add <path-or-owner/repo>
 copilot plugin install aisdlc@aisdlc-marketplace
 copilot plugin install aisdlc-nodejs@aisdlc-marketplace   # optional, per stack
-copilot plugin install dependency-guardian@aisdlc-marketplace   # optional, npm install guard
+copilot plugin install dependency-guardian@aisdlc-marketplace   # optional, npm dependency scanner (install guard not yet available)
 ```
 
 VS Code picks up plugins that Copilot CLI installed. To install them from VS Code instead (it reads this repository's `.github/plugin/marketplace.json`), make sure `chat.plugins.enabled` is on, and add the repository to the `chat.plugins.marketplaces` setting, as `owner/repo`, a git URL, or a `file:///` URI for a local clone (a plain path isn't accepted). Then search `@agentPlugins` in the Extensions view and install both plugins.

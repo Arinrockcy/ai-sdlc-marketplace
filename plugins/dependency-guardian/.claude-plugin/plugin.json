@@ -1,7 +1,7 @@
 {
   "name": "dependency-guardian",
   "version": "0.4.0",
-  "description": "Detects vulnerable, deprecated and discouraged npm packages, blocks unsafe agent-issued installs, and provides a dependency-free scanner for CI.",
+  "description": "Detects vulnerable, deprecated and discouraged npm packages with a dependency-free scanner for CI. Blocking unsafe agent-issued installs is planned, not yet available.",
   "author": {
     "name": "arin"
   }
