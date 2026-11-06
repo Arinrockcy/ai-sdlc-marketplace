@@ -117,6 +117,13 @@ See [`plugins/aisdlc/docs/stack-plugin-contract.md`](plugins/aisdlc/docs/stack-p
 
 Each plugin keeps a changelog: [`aisdlc`](plugins/aisdlc/CHANGELOG.md), [`aisdlc-nodejs`](plugins/aisdlc-nodejs/CHANGELOG.md). Breaking changes are listed there with their upgrade step.
 
+### 0.19.x → 0.20.0 (`aisdlc`)
+
+Linked ADRs are scanned for open questions too.
+
+- Run `$AISDLC question list <G-id>` on unfinished goals. Anything under `adrs` (an `Open:` line, `TBD`, `TODO`, `???`, "to be decided" inside a linked ADR) now blocks govern. Ask what it should say and edit the ADR.
+- `goal overlap` and `dag write` now also flag goals whose tasks list the same files; no action is needed unless a warning appears.
+
 ### 0.18.x → 0.19.0 (`aisdlc`)
 
 Questions can no longer hide by their wording, and a passing test run has to run tests.

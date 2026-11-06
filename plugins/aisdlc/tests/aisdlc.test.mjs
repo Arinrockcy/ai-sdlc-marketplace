@@ -823,6 +823,48 @@ test('cli: questions-resolved fails while Risks & Unknowns lists open questions'
   assert.equal(gov05().ok, true, 'a plain risk is not an open question');
 });
 
+test('cli: questions-resolved also scans the ADRs the goal links', () => {
+  const { run, dir } = project();
+  run(['init']);
+  plannedGoal(run, dir, [['A']]);
+  const adr = path.join(dir, run(['adr', 'new', 'Pick', 'a', 'queue', '--goal', 'G-001']).json.file);
+  const gov05 = () => run(['governance', 'checks', 'G-001']).json.find((c) => c.rule === 'GOV-05');
+  assert.equal(gov05().ok, true);
+  edit(adr, (s) => s.replace('## Decision\n', '## Decision\n\nUse SQS. Retention: TBD.\n- **Open:** Which region?\n'));
+  assert.deepEqual(gov05().problems, ['open question in ADR-001: Use SQS. Retention: TBD.; ask the user, then edit the ADR to state the answer', 'open question in ADR-001: Which region?; ask the user, then edit the ADR to state the answer']);
+  const list = run(['question', 'list', 'G-001']).json;
+  assert.equal(list.adrs.length, 2);
+  assert.equal(list.blocking, true);
+  edit(adr, (s) => s.replace('Use SQS. Retention: TBD.\n- **Open:** Which region?\n', 'Use SQS in eu-west-1.\n'));
+  assert.equal(gov05().ok, true);
+});
+
+test('cli: goal overlap and dag write compare the files tasks expect to change across unfinished goals', () => {
+  const { run, dir } = project();
+  run(['init']);
+  const files = (goal, id, text) => {
+    const f = path.join(dir, run(['goal', 'show', goal]).json.tasks.find((x) => x.id === id).file);
+    edit(f, (s) => s.replace('## Files (expected)\n', `## Files (expected)\n\n${text}\n`));
+  };
+  plannedGoal(run, dir, [['Parse']], 'Alpha thing');
+  run(['goal', 'new', 'Zebra widget']);
+  run(['task', 'new', 'G-002', 'Render', '--verify', REAL_VERIFY]);
+  files('G-001', 'T-01', '- `src/cli.mjs`');
+  assert.deepEqual(run(['goal', 'overlap', 'G-001']).json.overlaps, [], 'no shared files or words yet');
+  assert.deepEqual(run(['dag', 'write', 'G-001']).json.warnings, []);
+
+  files('G-002', 'T-01', '- ./src/cli.mjs\n- src/zebra.mjs');
+  const o = run(['goal', 'overlap', 'G-001']).json;
+  assert.deepEqual(o.overlaps.map((x) => [x.id, x.shared_files, x.likely]), [['G-002', ['src/cli.mjs'], true]]);
+  assert.deepEqual(o.likely, ['G-002']);
+  // Changing the plan re-runs the check: dag write reports it in the response and in tasks.md.
+  const w = run(['dag', 'write', 'G-001']).json;
+  assert.match(w.warnings[0], /^G-002 \(pending\) also lists src\/cli\.mjs under Files\./);
+  assert.match(fs.readFileSync(path.join(dir, w.file), 'utf8'), /## Warnings\n\n- G-002 \(pending\)/);
+  run(['state', 'move', 'G-002', 'cancelled', '--reason', 'no']);
+  assert.deepEqual(run(['dag', 'write', 'G-001']).json.warnings, []);
+});
+
 test('cli: criteria-met needs every goal and done-task criterion ticked; skipped tasks do not count', () => {
   const { run, dir } = project();
   run(['init']);

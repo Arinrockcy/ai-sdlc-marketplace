@@ -359,6 +359,16 @@ function sharedFiles(tasks, waves) {
   });
 }
 
+// Unfinished goals whose tasks expect to change files this goal's tasks also list. Task changes and merged scope all
+// end in `dag write`, so this re-checks the overlap each time the plan changes, not only at create-goal and govern.
+function otherGoalFileWarnings(goal, tasks) {
+  const root = findRoot(goal.dir, false);
+  const mine = [...new Set(tasks.flatMap(taskFiles))];
+  if (!root || !mine.length) return [];
+  return goalOverlap(root, [], goal.id, mine).filter((o) => o.shared_files.length).map((o) =>
+    `${o.id} (${o.status}) also lists ${o.shared_files.join(', ')} under Files. Ask the user whether to merge, sequence or separate the two goals (\`goal overlap ${goal.id}\`).`);
+}
+
 function writeTasksMd(goal) {
   const tasks = listTasks(goal);
   const dag = analyzeDag(tasks);
@@ -368,7 +378,7 @@ function writeTasksMd(goal) {
     const t = byId.get(id);
     return `| ${i + 1} | ${t.id} | ${t.title} | ${t.risk || 'medium'} | ${t.depends_on.join(', ') || '-'} | ${t.status} |`;
   }));
-  const warnings = sharedFiles(tasks, dag.waves);
+  const warnings = [...sharedFiles(tasks, dag.waves), ...otherGoalFileWarnings(goal, tasks)];
   const text = [
     `# ${goal.id} Tasks`,
     '',
@@ -665,6 +675,9 @@ const OVERLAP_STOPWORDS = new Set([...STOPWORDS, 'not', 'are', 'can', 'will', 's
 const OVERLAP_SECTIONS = [/^problem\b/i, /^outcome\b/i, /^scope\b/i];
 const wordsOf = (text) => [...new Set(String(text).toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length > 2 && !OVERLAP_STOPWORDS.has(w)))];
 
+// Files a goal's tasks expect to change (`## Files`), for overlap by file rather than by wording.
+const goalFiles = (goal) => [...new Set(listTasks(goal).flatMap(taskFiles))];
+
 function goalWords(goal) {
   const body = readDoc(goal.file).body;
   const parts = [goal.title, ...OVERLAP_SECTIONS.map((re) => section(body, re)), ...listTasks(goal).map((t) => t.title)];
@@ -674,18 +687,20 @@ function goalWords(goal) {
 // The unfinished goals whose text shares words with `subject` (a goal's words, or typed keywords), best first.
 // `likely` marks a real overlap: at least 3 shared words covering a third of the smaller side. A word matches by
 // prefix, so "limit" finds "limiting". The script only measures wording; the skill asks the user what to do.
-function goalOverlap(root, words, selfId) {
+function goalOverlap(root, words, selfId, files = []) {
   const OPEN = ['pending', 'in-progress', 'blocked'];
   const matches = [];
   for (const g of listGoals(root)) {
     if (g.id === selfId || !OPEN.includes(g.status)) continue;
     const theirs = goalWords(g);
     const shared = words.filter((w) => theirs.some((t) => t.startsWith(w) || w.startsWith(t)));
-    if (!shared.length) continue;
+    const theirFiles = files.length ? goalFiles(g) : [];
+    const sharedFiles = files.filter((f) => theirFiles.includes(f));
+    if (!shared.length && !sharedFiles.length) continue;
     const ratio = shared.length / Math.max(1, Math.min(words.length, theirs.length));
-    matches.push({ id: g.id, title: g.title, status: g.status, shared, score: Number(ratio.toFixed(2)), likely: shared.length >= 3 && ratio >= 0.34 });
+    matches.push({ id: g.id, title: g.title, status: g.status, shared, shared_files: sharedFiles, score: Number(ratio.toFixed(2)), likely: sharedFiles.length > 0 || (shared.length >= 3 && ratio >= 0.34) });
   }
-  matches.sort((a, b) => b.score - a.score || b.shared.length - a.shared.length);
+  matches.sort((a, b) => b.shared_files.length - a.shared_files.length || b.score - a.score || b.shared.length - a.shared.length);
   return matches;
 }
 
@@ -1147,8 +1162,8 @@ const trivialVerifyProblem = (id, verify) => `${id} verify command \`${verify}\`
 // and TBD-style placeholders in the planned text. `line` is the index in the file's body lines.
 const OPEN_LINE = /^(\s*[-*]\s+)(?:\*\*)?Open:(?:\*\*)?\s*(?:(Q-\d+):\s*)?(.*)$/i;
 const PLACEHOLDER = /\b(?:TBD|TODO)\b|\?\?\?|\bto be (?:decided|determined)\b/i;
-function questionScan(goal) {
-  const found = { open: [], stray: [], unmarked: [], placeholders: [] };
+function questionScan(goal, root) {
+  const found = { open: [], stray: [], unmarked: [], placeholders: [], adrs: [] };
   const sources = [{ where: goal.id, file: goal.file, isGoal: true }, ...listTasks(goal).map((t) => ({ where: t.id, file: t.file }))];
   for (const src of sources) {
     // Comments hold template instructions; blanking them keeps the line numbers.
@@ -1165,6 +1180,19 @@ function questionScan(goal) {
       const planned = src.isGoal ? /^(problem|outcome|scope)\b/i.test(heading) : !TASK_PROGRESS_SECTIONS.test(heading);
       if (planned && PLACEHOLDER.test(line)) found.placeholders.push({ text: line.trim(), where: src.where });
     });
+  }
+  // An accepted ADR can't carry an open question either. Linked ADRs are scanned whole, since an ADR has no fixed
+  // place for questions; they are answered by editing the ADR, so `question` leaves them alone.
+  if (root && Array.isArray(goal.data.adrs)) {
+    for (const adr of listAdrs(root).filter((a) => goal.data.adrs.includes(a.id))) {
+      const body = readDoc(adr.file).body.replace(/<!--[\s\S]*?-->/g, '');
+      for (const line of bodyLines(body)) {
+        if (/^#/.test(line)) continue;
+        const m = line.match(OPEN_LINE);
+        if (m) found.adrs.push({ where: adr.id, text: m[3].trim() });
+        else if (PLACEHOLDER.test(line)) found.adrs.push({ where: adr.id, text: line.trim() });
+      }
+    }
   }
   return found;
 }
@@ -1192,13 +1220,14 @@ const CHECKS = {
   'adr-recorded': ({ root, goal }) => adrProblems(root, readDoc(goal.file).data),
   // Unresolved questions are recorded under Risks & Unknowns as `- **Open:** Q-n: <question>` (`question add`). Open
   // items elsewhere, unmarked questions and TBD-style placeholders count too, so a question can't hide by its wording.
-  'questions-resolved': ({ goal }) => {
-    const scan = questionScan(goal);
+  'questions-resolved': ({ root, goal }) => {
+    const scan = questionScan(goal, root);
     return [
       ...scan.open.map((q) => `open question: ${q.id ? `${q.id}: ` : ''}${q.text}; ask the user, then \`question resolve\``),
       ...scan.stray.map((q) => `open question in ${q.where}: ${q.text}; \`question number\` moves it to Risks & Unknowns`),
       ...scan.unmarked.map((q) => `unmarked question in Risks & Unknowns: ${q.text}; \`question number\` tracks it`),
       ...scan.placeholders.map((p) => `placeholder in ${p.where}: ${p.text}; ask the user what it should say`),
+      ...scan.adrs.map((q) => `open question in ${q.where}: ${q.text}; ask the user, then edit the ADR to state the answer`),
     ];
   },
   // Every acceptance criterion of the goal and of each done task is ticked. Skipped tasks don't count.
@@ -1281,7 +1310,7 @@ function requireStep(root, goal, step) {
   // Challenge and the ADR may run with open questions, since that is where they get answered. From govern on,
   // nothing moves ahead until each one is answered (or removed from Risks & Unknowns), whatever the rules say.
   if (['govern', 'implement', 'final'].includes(step) && goal.status !== 'cancelled') {
-    problems.push(...CHECKS['questions-resolved']({ goal }));
+    problems.push(...CHECKS['questions-resolved']({ root, goal }));
   }
   return problems;
 }
@@ -1498,8 +1527,8 @@ const commands = {
       const own = /^G-\d+$/.test(subject) ? getGoal(root, subject) : null;
       const terms = own ? goalWords(own) : wordsOf(subject);
       if (!terms.length) fail('goal overlap needs words of 3 or more letters.');
-      const overlaps = goalOverlap(root, terms, own?.id);
-      return out({ subject: own ? own.id : 'keywords', terms, overlaps, likely: overlaps.filter((o) => o.likely).map((o) => o.id) });
+      const overlaps = goalOverlap(root, terms, own?.id, own ? goalFiles(own) : []);
+      return out({ subject: own ? own.id : 'keywords', terms, files: own ? goalFiles(own) : [], overlaps, likely: overlaps.filter((o) => o.likely).map((o) => o.id) });
     }
     if (action === 'preflight') {
       const g = getGoal(root, rest[0]);
@@ -1835,10 +1864,10 @@ const commands = {
     const answered = (id, text, answer) => appendToSection(doc.body, /^clarifications\b/i, 'Clarifications', `- **Q:** ${id}: ${text} **A:** ${answer}`);
     const answer = typeof opts.answer === 'string' ? opts.answer.trim().replace(/\s*\n\s*/g, ' ') : '';
     if (action === 'list') {
-      const scan = questionScan(g);
+      const scan = questionScan(g, root);
       const strip = ({ id, text, where }) => ({ id, text, where });
-      const blocking = scan.open.length + scan.stray.length + scan.unmarked.length + scan.placeholders.length > 0;
-      return out({ goal: g.id, open: scan.open.map(({ id, text }) => ({ id, text })), unnumbered: scan.open.filter((q) => !q.id).length, elsewhere: scan.stray.map(strip), unmarked: scan.unmarked.map(({ text, where }) => ({ text, where })), placeholders: scan.placeholders, blocking });
+      const blocking = scan.open.length + scan.stray.length + scan.unmarked.length + scan.placeholders.length + scan.adrs.length > 0;
+      return out({ goal: g.id, open: scan.open.map(({ id, text }) => ({ id, text })), unnumbered: scan.open.filter((q) => !q.id).length, elsewhere: scan.stray.map(strip), unmarked: scan.unmarked.map(({ text, where }) => ({ text, where })), placeholders: scan.placeholders, adrs: scan.adrs, blocking });
     }
     assertOpen(g);
     if (action === 'add') {

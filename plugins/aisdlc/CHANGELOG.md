@@ -2,6 +2,16 @@
 
 All notable changes to the `aisdlc` plugin. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/). Until 1.0.0, a minor version may include breaking changes; each one is listed under **Breaking** with its upgrade step.
 
+## [0.20.0] - 2026-11-06
+
+### Added
+- `goal overlap <G-id>` also compares the files each goal's tasks list under `## Files (expected)`. Each overlap carries `shared_files`, and a goal sharing a file is `likely` whatever its wording.
+- `dag write` warns when an unfinished goal's tasks list a file this goal's tasks also list, in its output and in `tasks.md`. Every task change and every merge of scope ends in `dag write`, so the overlap is re-checked as the plan changes, not only at `/aisdlc:create-goal` and govern.
+- `question list` and the `questions-resolved` check (GOV-05) scan the ADRs the goal links: an `Open:` item, `TBD`, `TODO`, `???` or "to be decided" in an ADR blocks govern onward. `question list` reports them under `adrs`; they are answered by editing the ADR.
+
+### Breaking
+- A linked ADR with an open question or placeholder now fails GOV-05. See [Upgrading to 0.20.0](../../README.md#upgrading).
+
 ## [0.19.0] - 2026-11-06
 
 ### Added
