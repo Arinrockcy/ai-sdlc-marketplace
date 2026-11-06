@@ -2,6 +2,17 @@
 
 All notable changes to the `aisdlc` plugin. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/). Until 1.0.0, a minor version may include breaking changes; each one is listed under **Breaking** with its upgrade step.
 
+## [0.22.0] - 2026-11-06
+
+### Added
+- `task verify` refuses a `verify` command that points at nothing real, checked when the task is verified because its files may not exist when the plan is written:
+  - Inline code (`node -e`, `python -c`, `ruby -e`, `perl -e`, `sh -c`) must name a file or folder that exists in the project.
+  - An explicit test target (`node --test <file>`, `pytest <file>`, `jest`, `vitest`, `mocha`, `go test`, `cargo test`) must exist. Globs are left alone.
+  - A chain passes if any part is a real command, such as `npm test`.
+
+### Breaking
+- A task whose `verify` is inline code with no project path, or a test runner aimed at a missing file, now fails `task verify`. See [Upgrading to 0.22.0](../../README.md#upgrading).
+
 ## [0.21.0] - 2026-11-06
 
 ### Added

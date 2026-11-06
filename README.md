@@ -117,6 +117,12 @@ See [`plugins/aisdlc/docs/stack-plugin-contract.md`](plugins/aisdlc/docs/stack-p
 
 Each plugin keeps a changelog: [`aisdlc`](plugins/aisdlc/CHANGELOG.md), [`aisdlc-nodejs`](plugins/aisdlc-nodejs/CHANGELOG.md). Breaking changes are listed there with their upgrade step.
 
+### 0.21.x → 0.22.0 (`aisdlc`)
+
+A `verify` command has to point at something that exists.
+
+- `task verify` now fails inline code that names no file of the project (`node -e "console.log(1)"`) and a test runner aimed at a missing file (`node --test tests/gone.test.mjs`). Change the command with `$AISDLC task edit <G-id> <T-id> verify "<command>"`: run the project's test command, or have the code check a file the task changes.
+
 ### 0.20.x → 0.21.0 (`aisdlc`)
 
 Recorded answers say they came from the user.

@@ -1155,6 +1155,29 @@ export function trivialVerify(command) {
   return SWALLOWED_FAILURE.test(c) || c.split(/&&|;/).map((x) => x.trim()).filter(Boolean).every((x) => TRIVIAL_VERIFY.test(x));
 }
 
+// The blocklist above only stops commands known to be empty. This one checks that the command points at something
+// real, and runs at `task verify` because a task's files may not exist when the plan is written. Inline code
+// (`node -e`, `python -c`, …) has to name a file or folder of the project, and a test runner's explicit target has
+// to exist. Returns the problem, or null.
+const INLINE_CODE = /^(?:node\s+(?:-e|--eval|-p|--print)|python3?\s+-c|ruby\s+-e|perl\s+-e|(?:ba|z)?sh\s+-c)\b/;
+const TEST_RUNNER = /^(?:node\s+--test|(?:npx\s+)?(?:jest|vitest(?:\s+run)?|mocha)|(?:python3?\s+-m\s+)?pytest|go\s+test|cargo\s+test)\b/;
+const pathTokens = (text) => (text.match(/[\w@.\/-]*[\w.\/-]/g) || []).filter((tok) => /[\/.]/.test(tok) && !/^\.+$/.test(tok) && !/^-/.test(tok));
+export function unanchoredVerify(root, command) {
+  const c = String(command ?? '').trim();
+  if (!c || /^manual:/i.test(c)) return null;
+  const exists = (tok) => fs.existsSync(path.join(root, tok.replace(/^\.\//, '')));
+  const parts = c.split(/&&|;|\|\|/).map((x) => x.trim()).filter(Boolean);
+  for (const part of parts) {
+    if (!TEST_RUNNER.test(part)) continue;
+    const missing = pathTokens(part.replace(TEST_RUNNER, '')).filter((tok) => !/[*?{}\[\]]/.test(tok) && /\.\w+$|\//.test(tok) && !exists(tok));
+    if (missing.length) return `test target ${missing[0]} does not exist; fix the path in \`verify\``;
+  }
+  if (parts.every((x) => INLINE_CODE.test(x)) && !pathTokens(c).some(exists)) {
+    return 'inline code that names no file or folder of the project proves nothing about the work; run the project\'s test command, or have the code check a file the task changes';
+  }
+  return null;
+}
+
 const trivialVerifyProblem = (id, verify) => `${id} verify command \`${verify}\` cannot fail; use a command that checks the work, or \`manual: <check>\``;
 
 // Every place an unanswered question can hide: `- **Open:**` items in the goal's Risks & Unknowns (the tracked
@@ -1782,6 +1805,8 @@ const commands = {
       const evidence = typeof opts.evidence === 'string' && opts.evidence.trim() ? opts.evidence : '';
       // With no verify command and no after_task hook nothing would run, so a pass needs evidence like a manual check.
       if (trivialVerify(verify)) fail(`${trivialVerifyProblem(taskId, verify)}. Change it with \`task edit ${g.id} ${taskId} verify "<command>"\`.`);
+      const unanchored = unanchoredVerify(root, verify);
+      if (unanchored) fail(`${taskId} verify command \`${verify}\`: ${unanchored}. Change it with \`task edit ${g.id} ${taskId} verify "<command>"\`.`);
       const byHand = manual || (!verify && !hook.commands.length);
       if (byHand && !evidence) {
         fail(manual

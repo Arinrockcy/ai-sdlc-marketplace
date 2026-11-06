@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { trivialVerify, ranNoTests, analyzeDag, goalProgress, resolveHook, mergeStackHooks, parseDoc, formatDoc, testCounts, nodeVersionError } from '../scripts/aisdlc.mjs';
+import { trivialVerify, unanchoredVerify, ranNoTests, analyzeDag, goalProgress, resolveHook, mergeStackHooks, parseDoc, formatDoc, testCounts, nodeVersionError } from '../scripts/aisdlc.mjs';
 
 const SCRIPT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../scripts/aisdlc.mjs');
 
@@ -23,7 +23,7 @@ function project() {
 }
 
 // A verify command that can pass and fail, unlike a no-op the verify check refuses.
-const REAL_VERIFY = 'node -e "console.log(\'ok\')"';
+const REAL_VERIFY = 'node -e "require(\'fs\').statSync(\'.aisdlc\')"';
 
 const t = (id, depends_on = [], extra = {}) => ({ id, depends_on, status: 'pending', risk: 'medium', ...extra });
 
@@ -505,7 +505,7 @@ test('cli: task verify runs verify then after_task, records the result, and need
   const { run, dir } = project();
   run(['init']);
   run(['config', 'set', 'hooks.after_task', '{"run":"echo after {task_id}"}']);
-  governedGoal(run, dir, [['Pass', '--verify', 'node -e "console.log(\'checked\')"'], ['Fail', '--verify', 'exit 4'], ['Manual', '--verify', 'manual: open /health and see 200']]);
+  governedGoal(run, dir, [['Pass', '--verify', 'node -e "console.log(\'checked\'); require(\'fs\').statSync(\'.aisdlc\')"'], ['Fail', '--verify', 'exit 4'], ['Manual', '--verify', 'manual: open /health and see 200']]);
   run(['state', 'move', 'G-001', 'in-progress']);
   for (const id of ['T-01', 'T-02', 'T-03']) run(['task', 'set', 'G-001', id, 'in-progress']);
 
@@ -1372,13 +1372,13 @@ test('cli: task verify records a one-line summary of what ran', () => {
   const { run, dir } = project();
   run(['init']);
   run(['config', 'set', 'hooks.after_task', '{"run":"echo \'Tests:       3 passed, 3 total\'"}']);
-  governedGoal(run, dir, [['A', '--verify', 'node -e "console.log(\'# tests 2\\\\n# pass 2\\\\n# fail 0\')"'], ['B', '--verify', 'manual: open it']]);
+  governedGoal(run, dir, [['A', '--verify', 'node -e "console.log(\'# tests 2\\\\n# pass 2\\\\n# fail 0\'); require(\'fs\').statSync(\'.aisdlc\')"'], ['B', '--verify', 'manual: open it']]);
   run(['state', 'move', 'G-001', 'in-progress']);
   run(['task', 'set', 'G-001', 'T-01', 'in-progress']);
   const v = run(['task', 'verify', 'G-001', 'T-01']);
   assert.match(v.stdout, /# pass 2[\s\S]*Tests: {7}3 passed[\s\S]*verify T-01: pass/, 'output is still printed');
   const task = (id) => parseDoc(fs.readFileSync(path.join(dir, run(['goal', 'show', 'G-001']).json.tasks.find((x) => x.id === id).file), 'utf8')).data;
-  assert.equal(task('T-01').verify_evidence, 'node -e "console.log(\'# tests 2\\\\n# pass 2\\\\n# fail 0\')": exit 0 (tests 2, pass 2, fail 0); echo \'Tests:       3 passed, 3 total\': exit 0 (Tests: 3 passed, 3 total)');
+  assert.equal(task('T-01').verify_evidence, 'node -e "console.log(\'# tests 2\\\\n# pass 2\\\\n# fail 0\'); require(\'fs\').statSync(\'.aisdlc\')": exit 0 (tests 2, pass 2, fail 0); echo \'Tests:       3 passed, 3 total\': exit 0 (Tests: 3 passed, 3 total)');
   run(['task', 'set', 'G-001', 'T-02', 'in-progress']);
   run(['task', 'verify', 'G-001', 'T-02', '--evidence', 'page loads']);
   assert.equal(task('T-02').verify_evidence, 'page loads; echo \'Tests:       3 passed, 3 total\': exit 0 (Tests: 3 passed, 3 total)');
@@ -1471,6 +1471,25 @@ test('cli: a task needs a passing review after its verification before it is don
   assert.equal(run(['task', 'set', 'G-001', 'T-01', 'done']).code, 0);
   assert.equal(data().reviewed, 'pass', 'done keeps the review');
   assert.ok(fs.existsSync(path.join(dir, run(['goal', 'show', 'G-001']).json.dir, 'code-review.md')));
+});
+
+test('cli: task verify refuses inline code that names no project file, and test targets that do not exist', () => {
+  const { run, dir } = project();
+  run(['init']);
+  governedGoal(run, dir, [['A', '--verify', 'node -e "console.log(1)"'], ['B', '--verify', 'node --test tests/missing.test.mjs'], ['C', '--verify', 'node --test tests/real.test.mjs'], ['D', '--verify', 'node -e "require(\'fs\').statSync(\'src/a.js\')"']]);
+  fs.mkdirSync(path.join(dir, 'tests'));
+  fs.mkdirSync(path.join(dir, 'src'));
+  fs.writeFileSync(path.join(dir, 'src/a.js'), '1\n');
+  fs.writeFileSync(path.join(dir, 'tests/real.test.mjs'), "import {test} from 'node:test';\ntest('x', () => {});\n");
+  run(['state', 'move', 'G-001', 'in-progress']);
+  for (const id of ['T-01', 'T-02', 'T-03', 'T-04']) run(['task', 'set', 'G-001', id, 'in-progress']);
+  assert.match(run(['task', 'verify', 'G-001', 'T-01']).stderr, /inline code that names no file or folder of the project/);
+  assert.match(run(['task', 'verify', 'G-001', 'T-02']).stderr, /test target tests\/missing\.test\.mjs does not exist/);
+  assert.equal(run(['task', 'verify', 'G-001', 'T-03']).code, 0);
+  assert.equal(run(['task', 'verify', 'G-001', 'T-04']).code, 0);
+  assert.equal(unanchoredVerify(dir, 'npm test'), null);
+  assert.equal(unanchoredVerify(dir, 'manual: look'), null);
+  assert.equal(unanchoredVerify(dir, 'cd src && node -e "1+1"'), null, 'a part that is not inline code is a real command');
 });
 
 test('cli: goal overlap finds unfinished goals that share wording, by goal or by keywords', () => {
@@ -1603,7 +1622,7 @@ test('verify: a command that passes but runs no tests does not verify the task',
 
   const { run, dir } = project();
   run(['init']);
-  governedGoal(run, dir, [['A', '--verify', 'node -e "console.log(\'# tests 0\')"']]);
+  governedGoal(run, dir, [['A', '--verify', 'node -e "console.log(\'# tests 0\'); require(\'fs\').statSync(\'.aisdlc\')"']]);
   run(['state', 'move', 'G-001', 'in-progress']);
   run(['task', 'set', 'G-001', 'T-01', 'in-progress']);
   const v = run(['task', 'verify', 'G-001', 'T-01']);
