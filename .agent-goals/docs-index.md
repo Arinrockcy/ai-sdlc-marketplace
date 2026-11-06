@@ -156,17 +156,17 @@ sub-task's files.
 
 ### 3. Skills call it
 
-- **Status:** pending
+- **Status:** done, 2026-11-06
 - **Scope:** `create-goal`, `challenge`, `adr`, `implement` and `govern` gain one instruction each: run `$AISDLC docs search <keywords>` before reading project documentation or opening ADRs by title alone, and read only the sections it returns. `init` offers the documentation index next to Graphify: it asks for the paths, passes them to `$AISDLC docs paths <path>...`, and leaves `docs.paths` unset if the user declines. Wording stays agent-neutral.
 - **Areas:** `plugins/aisdlc/skills/{init,create-goal,challenge,adr,implement,govern}/SKILL.md`, `plugins/aisdlc/tests/skills.test.mjs`
 - **Changes a screen:** no
 - **Depends on:** 2
 - **Acceptance:** the skills tests pass, including the check that every `$AISDLC …` span runs; no skill tells the agent to read the index file; `init` asks and never sets `docs.paths` without an answer; `docs paths <path>` appears in `init` as a complete, runnable invocation
 - **Governor notes:** AGENTS.md: every `$AISDLC` span must be a complete, runnable invocation.
-- **Review:**
-- **Verification:**
-- **Commit:**
-- **Task detail:**
+- **Review:** none run; the author checked the acceptance list against the tests only
+- **Verification:** `npm test` exits 0 with 156 tests, 154 pass, 0 fail, 2 skipped (the ESLint template tests); `npm run validate` passes. The skills test ran every new `$AISDLC` span, and `skill-contracts.test.mjs` now pins the `docs search` line in the five skills and the `docs paths` ask in `init`.
+- **Commit:** the commit on branch `docs-index` that holds this line
+- **Task detail:** `init` gets a new step 4b after the knowledge graph, so the later step numbers are unchanged. Every other skill got one sentence in the place it already looks things up. No skill reads the index; each says never to.
 
 ### 4. Measure it
 

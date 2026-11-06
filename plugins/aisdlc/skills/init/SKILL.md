@@ -1,6 +1,6 @@
 ---
 name: init
-description: Initialize the AI-SDLC workflow in the current project. Creates .aisdlc/ (goals state folders, registry.md, governance.md, config.json, adr/, stacks/, cache/), detects the tech stack, registers a stack plugin, optionally sets up Graphify, and offers to set up governance rules. Use when the user runs /aisdlc:init or wants to start using the aisdlc workflow in a repo.
+description: Initialize the AI-SDLC workflow in the current project. Creates .aisdlc/ (goals state folders, registry.md, governance.md, config.json, adr/, stacks/, cache/), detects the tech stack, registers a stack plugin, optionally sets up Graphify and a documentation index, and offers to set up governance rules. Use when the user runs /aisdlc:init or wants to start using the aisdlc workflow in a repo.
 argument-hint: "[--base-branch <branch>]"
 ---
 
@@ -35,6 +35,10 @@ Init is idempotent. It only creates what is missing and never overwrites existin
      3. If setup returns `warnings`, show them to the user. They name files Graphify left out of the graph, often with the install that fixes it (for example its SQL extra). Offer to run that install, only with the user's approval, then run `$AISDLC graph setup` again to rebuild with those files.
      4. Run `$AISDLC graph check`. `ok` means the graph is usable. For `degraded`, show the `problems` (for example a low share of source files in the graph) and keep the graph. For `unusable`, show them and ask whether to fix the cause or run `$AISDLC config set graph.provider none`.
    - **No graph.** Run `$AISDLC config set graph.provider none`. Skills then find code by searching and reading files directly. `.aisdlc/registry.md` is still kept either way, but it indexes goals and ADRs, not code, so it doesn't replace a graph.
+
+4b. **Documentation index.** Project documentation (architecture notes, runbooks, domain knowledge in Markdown) is not in the code graph. A separate index finds the right section without reading whole files; it is built locally with no model calls. ADR bodies are searchable already, so this only adds the project's own documentation. Ask the user whether to index it, and which files and folders hold it:
+   - **Yes.** Run `$AISDLC docs paths <path>...` with the project-relative files and folders they name (a folder is searched recursively for `*.md`; no globs). Show any error it names and ask again. Then run `$AISDLC docs sync` and tell the user how many files and sections it indexed.
+   - **No.** Change nothing. `docs.paths` stays unset, and `$AISDLC docs search <keywords>` finds ADR bodies only. They can run `$AISDLC docs paths <path>...` any time. Never set `docs.paths` without an answer.
 
 5. **Git hygiene.** `.aisdlc/` is meant to be committed; `.aisdlc/cache/` ignores itself. If Graphify was chosen, suggest adding `graphify-out/` to `.gitignore` and committing `.graphifyignore`. Do this only if the user agrees.
 

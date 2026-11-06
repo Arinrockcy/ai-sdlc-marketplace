@@ -29,6 +29,12 @@ const MUST = [
   ['govern', /fresh eyes/i, 'the review runs in a sub-agent or fresh session'],
   ['govern', /\$AISDLC question add <G-id> "<question>" --answer "<the user's answer>" --by user/, 'govern records answers as the user\'s'],
   ['govern', /\$AISDLC goal overlap <G-id>/, 'govern checks overlap'],
+  ...['create-goal', 'challenge', 'adr', 'implement', 'govern'].flatMap((skill) => [
+    [skill, /\$AISDLC docs search <keywords>/, 'documentation is searched before it is read'],
+    [skill, /never read the index in `\.aisdlc\/cache\/`/i, 'the documentation index is never read whole'],
+  ]),
+  ['init', /\$AISDLC docs paths <path>\.\.\./, 'init sets the documentation paths through the script'],
+  ['init', /Never set `docs\.paths` without an answer/, 'init asks before it sets docs.paths'],
   ['implement', /\$AISDLC task review <G-id> <T-id> pass --evidence/, 'implement records a passing code review with evidence'],
   ['implement', /\$AISDLC task review <G-id> <T-id> fail --evidence/, 'implement records a failing code review with evidence'],
   ['implement', /\$AISDLC task verify <G-id> <T-id>/, 'implement records verification'],
