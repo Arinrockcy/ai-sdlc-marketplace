@@ -795,7 +795,7 @@ const docWords = (text) => [...new Set(String(text).toLowerCase().split(/[^a-z0-
 // What decides whether the index is fresh: the configured entries and each file's size and modification time.
 // No file is read to check it. An edit that keeps the size within one file-system clock tick is not seen.
 function docsStamp(root, entries, files) {
-  return { paths: entries || [], files: files.map((f) => { const st = fs.statSync(path.join(root, f.file)); return [f.file, st.size, st.mtimeMs]; }) };
+  return { paths: entries || [], files: files.map((f) => { const st = fs.statSync(path.join(root, f.file)); return [f.file, st.size, Math.floor(st.mtimeMs)]; }) };
 }
 
 function docsIndexRead(root) {
@@ -821,7 +821,7 @@ function docsSync(root, force = false) {
     return markdownSections(text, front).map((s) => ({
       path: file, heading: s.heading, trail: s.trail, start: s.start, end: s.end,
       ...(adr ? { adr: adr.id, status: adr.status ?? '' } : {}),
-      heading_words: docWords(s.trail || s.heading), words: docWords(s.body),
+      heading_words: docWords(s.heading), words: docWords(s.body),
     }));
   });
   const index = { version: 1, stamp: state.stamp, sections };
@@ -829,6 +829,34 @@ function docsSync(root, force = false) {
   fs.mkdirSync(path.dirname(file), { recursive: true });
   fs.writeFileSync(file, JSON.stringify(index));
   return { ...state, index, stale: false, rebuilt: true };
+}
+
+// Sections that match the keywords, best first, within a token budget. A keyword matches a word it starts, as in
+// `registry search`. A heading match counts 2 and a body match 1, so a section named for the keyword outranks one
+// that only mentions it; ties go to the section matching more keywords, then to file order. Bodies are never printed.
+function docsSearch(root, words, budget) {
+  const terms = [...new Set(docWords(words.join(' ')))];
+  if (!terms.length) fail('Usage: docs search <keywords> [--budget N] (words of 3 or more letters)');
+  const synced = docsSync(root);
+  const hit = (list, t) => list.some((w) => w.startsWith(t));
+  const ranked = synced.index.sections.map((sec, order) => {
+    const inHeading = terms.filter((t) => hit(sec.heading_words, t));
+    const inBody = terms.filter((t) => !inHeading.includes(t) && hit(sec.words, t));
+    return { sec, order, score: inHeading.length * 2 + inBody.length, matched: inHeading.length + inBody.length };
+  }).filter((r) => r.matched).sort((a, b) => b.score - a.score || b.matched - a.matched || a.order - b.order);
+  const matches = [];
+  let used = 0;
+  for (const { sec } of ranked) {
+    const m = { path: sec.path, lines: `${sec.start}-${sec.end}`, heading: sec.trail || sec.heading || '(no heading)', ...(sec.adr ? { adr: sec.adr, status: sec.status } : {}) };
+    const cost = Math.ceil(JSON.stringify(m).length / 4);
+    if (matches.length && used + cost > budget) break;
+    matches.push(m);
+    used += cost;
+  }
+  return {
+    terms, matches, more: ranked.length - matches.length, tokens: used, refreshed: synced.rebuilt,
+    ...(synced.entries ? {} : { note: 'Project documentation is not configured, so only ADR bodies were searched. Search the documentation files directly, or set `docs paths <path>...`.' }),
+  };
 }
 
 // ---------- graph ----------
@@ -2258,7 +2286,7 @@ const commands = {
     out({ ...registrySync(root), file: rel('registry.md'), archive: rel('registry-archive.md') });
   },
 
-  docs([action, ...rest]) {
+  docs([action, ...rest], opts) {
     const root = findRoot();
     if (action === 'paths') {
       if (!rest.length) return out({ paths: docsPaths(root) });
@@ -2285,7 +2313,12 @@ const commands = {
         sections: state.index ? state.index.sections.length : 0,
       });
     }
-    fail('Usage: docs paths [<path>...] | sync | status');
+    if (action === 'search') {
+      const budget = opts.budget === undefined ? DEFAULT_BUDGET : Number(opts.budget);
+      if (!Number.isInteger(budget) || budget < 100) fail('--budget must be a whole number of tokens, 100 or more');
+      return out(docsSearch(root, rest, budget));
+    }
+    fail('Usage: docs paths [<path>...] | sync | status | search <keywords> [--budget N]');
   },
 
   graph([action, ...words], opts) {

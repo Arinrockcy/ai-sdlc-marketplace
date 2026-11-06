@@ -1601,6 +1601,67 @@ test('cli: docs reports a bad docs.paths in config by name, and an unknown subco
   }
 });
 
+test('cli: docs search ranks headings above bodies, cuts at the budget, covers ADR bodies and refreshes a stale index', () => {
+  const { run, dir } = project();
+  run(['init']);
+  const write = (rel, text) => { fs.mkdirSync(path.dirname(path.join(dir, rel)), { recursive: true }); fs.writeFileSync(path.join(dir, rel), text); };
+  const search = (...a) => run(['docs', 'search', ...a]);
+
+  // With docs.paths unset the ADR bodies are searchable, and the note says documentation is not.
+  const goal = run(['goal', 'new', 'Cache']).json;
+  const adr = path.join(dir, run(['adr', 'new', 'Use', 'Redis', '--goal', goal.id]).json.file);
+  edit(adr, (s) => s.replace('## Context\n', '## Context\n\nSessions need a shared eviction policy.\n'));
+  const unset = search('eviction').json;
+  assert.equal(unset.matches.length, 1);
+  assert.deepEqual([unset.matches[0].adr, unset.matches[0].status, unset.matches[0].heading], ['ADR-001', 'proposed', 'ADR-001: Use Redis > Context']);
+  assert.match(unset.note, /not configured/);
+  assert.equal(unset.refreshed, true);
+
+  write('docs/limits.md', '# Rate limiting\nrequests per client\n\n## Notes\nthe throttle is documented elsewhere\n');
+  write('docs/ops.md', '# Operations\nwe mention rate limiting once here\n\n## Throttle\ntext\n');
+  run(['docs', 'paths', 'docs']);
+  const r = search('rate', 'limiting').json;
+  assert.equal(r.refreshed, true, 'a stale index is rebuilt by the search');
+  assert.equal(r.note, undefined);
+  assert.deepEqual(r.matches.map((m) => `${m.path}|${m.heading}|${m.lines}`), ['docs/limits.md|Rate limiting|1-2', 'docs/ops.md|Operations|1-2'], 'heading match above body match');
+  assert.equal(search('limiting').json.refreshed, false);
+  // A prefix matches, a miss matches nothing, and the output has no section text.
+  assert.equal(search('limit').json.matches[0].heading, 'Rate limiting');
+  assert.deepEqual(search('zebra').json.matches, []);
+  assert.doesNotMatch(JSON.stringify(r), /requests per client|mention/);
+  assert.equal(search('throttle').json.matches[0].heading, 'Operations > Throttle', 'the heading trail is printed');
+
+  // An edit shows up in the next search; stopwords-only and short words are refused.
+  write('docs/limits.md', '# Rate limiting\nrequests per client\n\n## Quota\nbursts are allowed\n');
+  assert.equal(search('quota').json.matches[0].path, 'docs/limits.md');
+  assert.match(search('the', 'and').stderr, /Usage: docs search/);
+
+  // The stamp is size and mtime, so a same-size edit that keeps the mtime is not seen. This pins the limit
+  // the README states; changing it should be a deliberate choice.
+  const quota = path.join(dir, 'docs/limits.md');
+  const when = 1_700_000_000; // whole seconds, so the restored time is exact
+  fs.utimesSync(quota, when, when);
+  assert.equal(search('bursts').json.matches.length, 1);
+  const size = fs.statSync(quota).size;
+  fs.writeFileSync(quota, fs.readFileSync(quota, 'utf8').replace('bursts', 'floods'));
+  fs.utimesSync(quota, when, when);
+  assert.equal(fs.statSync(quota).size, size);
+  assert.deepEqual(search('floods').json.matches, []);
+  assert.equal(search('bursts').json.matches.length, 1);
+  edit(quota, (x) => `${x}\nmore text added\n`);
+  assert.equal(search('floods').json.matches.length, 1, 'any change that moves the size or time is picked up');
+
+  // The budget cuts the list and counts what is left.
+  for (let i = 0; i < 30; i++) write(`docs/many/p${i}.md`, `# Retry policy ${i}\nbody\n`);
+  run(['docs', 'paths', 'docs']);
+  const all = search('retry', '--budget', '100000').json;
+  assert.deepEqual([all.matches.length, all.more], [30, 0]);
+  const cut = search('retry', '--budget', '100').json;
+  assert.ok(cut.matches.length >= 1 && cut.matches.length < 30 && cut.more === 30 - cut.matches.length);
+  assert.ok(cut.tokens <= 100);
+  for (const bad of ['abc', '99', '1.5', '-5']) assert.match(search('retry', '--budget', bad).stderr, /--budget must be a whole number of tokens, 100 or more/, bad);
+});
+
 test('cli: goal overlap finds unfinished goals that share wording, by goal or by keywords', () => {
   const { run, dir } = project();
   run(['init']);

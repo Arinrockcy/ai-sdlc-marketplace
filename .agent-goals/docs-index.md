@@ -142,17 +142,17 @@ sub-task's files.
 
 ### 2. Search it: `docs search <keywords> [--budget N]`
 
-- **Status:** pending
+- **Status:** done, 2026-11-06
 - **Scope:** Refresh the index when stale, as `graph query` does. Rank sections for the keywords and print path, line range and heading for the best matches, stopping at the budget and reporting how many more matched. An ADR match also prints its ID and status. Reuse the keyword and `STOPWORDS` handling of `registry search`. Rank by the number of matched keywords, a heading match counting above a body match. With `docs.paths` unset it searches ADR bodies and adds a note that project documentation is not configured, so the skill searches those files directly.
 - **Areas:** `plugins/aisdlc/scripts/aisdlc.mjs`, `plugins/aisdlc/tests/aisdlc.test.mjs`
 - **Changes a screen:** no
 - **Depends on:** 1
 - **Acceptance:** tests cover a heading match ranking above a body match, a prefix match, no match, the budget cutting the output, a word found only in an ADR body, an ADR found with `docs.paths` unset, a stale index refreshed by the search, a bad `--budget`, and a same-size edit within one clock tick staying unseen until the next sync (the limit in Decided, pinned so a change to it is deliberate); output never includes section bodies
 - **Governor notes:** `--budget` is already in `OPTIONS`.
-- **Review:**
-- **Verification:**
-- **Commit:**
-- **Task detail:**
+- **Review:** none run; the author checked the acceptance list against the tests only
+- **Verification:** `npm test` exits 0 with 156 tests, 154 pass, 0 fail, 2 skipped (the ESLint template tests); `npm run validate` passes. One new test covers the acceptance list, including the pinned same-size edit.
+- **Commit:** the commit on branch `docs-index` that holds this line
+- **Task detail:** `docs search <keywords> [--budget N]`. A heading match counts 2 and a body match 1, ties go to more matched keywords then file order. The heading weight uses the section's own heading, not its trail, so a child of a matching section does not match on the parent's name; the trail is printed. `--budget` is whole tokens, 100 or more, default 1500 (the graph query default). The stamp now floors mtime to whole milliseconds.
 
 ### 3. Skills call it
 
