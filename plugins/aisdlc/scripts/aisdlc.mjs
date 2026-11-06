@@ -1122,10 +1122,17 @@ function scopeSides(body) {
   return { in: side('In'), out: side('Out') };
 }
 
-// A verify command that cannot fail proves nothing: `true`, `echo ok`, or a real command whose failure is swallowed
-// with `|| true`. A chain is trivial only when every part is. The check can't tell a clever no-op, so it stops the
-// obvious ones and the reviewer judges the rest.
-const TRIVIAL_VERIFY = /^(?:true|:|exit\s+0|(?:echo|printf)\b.*|(?:\/usr)?\/bin\/true)$/;
+// A verify command that cannot fail proves nothing. Trivial are: `true`, `echo ok`, a listing or a clock
+// (`ls`, `date`), only asking for a version or help (`node --version`), a constant test (`test 1`), inline code with
+// no body (`node -e 0`), and a real command whose failure is swallowed with `|| true`. A chain is trivial only when
+// every part is. It stops the obvious ones; the reviewer judges whether a command exercises the task's criteria.
+const TRIVIAL_VERIFY = new RegExp([
+  String.raw`true|:|exit\s+0|(?:\/usr)?\/bin\/true`,
+  String.raw`(?:echo|printf|ls|pwd|date|whoami|hostname|sleep|cd|env)\b.*`,
+  String.raw`\S+\s+(?:--version|-v|-V|--help|-h)`,
+  String.raw`test\s+1|\[\s+1\s+\]|\[\s+1\s*=\s*1\s+\]`,
+  String.raw`(?:node\s+(?:-e|--eval)|python3?\s+-c|ruby\s+-e|perl\s+-e)\s+(['"]?)(?:0|1|pass|process\.exit\(0\)|sys\.exit\(0\)|exit\(0\)|exit 0)?\1`,
+].map((x) => `(?:${x})`).join('|').replace(/^/, '^(?:').replace(/$/, ')$'));
 const SWALLOWED_FAILURE = /\|\|\s*(?:true|:|exit\s+0)\s*$/;
 export function trivialVerify(command) {
   const c = String(command ?? '').trim();
@@ -1134,6 +1141,33 @@ export function trivialVerify(command) {
 }
 
 const trivialVerifyProblem = (id, verify) => `${id} verify command \`${verify}\` cannot fail; use a command that checks the work, or \`manual: <check>\``;
+
+// Every place an unanswered question can hide: `- **Open:**` items in the goal's Risks & Unknowns (the tracked
+// list) or anywhere else in the goal or a task, list items in Risks & Unknowns that end in `?` without the marker,
+// and TBD-style placeholders in the planned text. `line` is the index in the file's body lines.
+const OPEN_LINE = /^(\s*[-*]\s+)(?:\*\*)?Open:(?:\*\*)?\s*(?:(Q-\d+):\s*)?(.*)$/i;
+const PLACEHOLDER = /\b(?:TBD|TODO)\b|\?\?\?|\bto be (?:decided|determined)\b/i;
+function questionScan(goal) {
+  const found = { open: [], stray: [], unmarked: [], placeholders: [] };
+  const sources = [{ where: goal.id, file: goal.file, isGoal: true }, ...listTasks(goal).map((t) => ({ where: t.id, file: t.file }))];
+  for (const src of sources) {
+    // Comments hold template instructions; blanking them keeps the line numbers.
+    const lines = bodyLines(readDoc(src.file).body.replace(/<!--[\s\S]*?-->/g, (c) => c.replace(/[^\n]/g, '')));
+    let heading = '';
+    lines.forEach((line, i) => {
+      if (/^##\s/.test(line)) heading = line.replace(/^##\s+/, '').trim();
+      const inRisks = src.isGoal && /^risks\b/i.test(heading);
+      const m = line.match(OPEN_LINE);
+      if (m) { (inRisks ? found.open : found.stray).push({ id: m[2] || null, text: m[3].trim(), where: src.where, file: src.file, line: i, prefix: m[1] }); return; }
+      if (inRisks && /^\s*[-*]\s+\S/.test(line) && /\?\s*$/.test(line)) {
+        found.unmarked.push({ text: line.replace(/^\s*[-*]\s+/, '').trim(), where: src.where, file: src.file, line: i, prefix: line.match(/^(\s*[-*]\s+)/)[1] });
+      }
+      const planned = src.isGoal ? /^(problem|outcome|scope)\b/i.test(heading) : !TASK_PROGRESS_SECTIONS.test(heading);
+      if (planned && PLACEHOLDER.test(line)) found.placeholders.push({ text: line.trim(), where: src.where });
+    });
+  }
+  return found;
+}
 
 const CHECKS = {
   'goal-defined': ({ goal }) => {
@@ -1156,10 +1190,17 @@ const CHECKS = {
   }) : ['goal has no tasks']),
   'dag-valid': ({ tasks }) => analyzeDag(tasks).errors,
   'adr-recorded': ({ root, goal }) => adrProblems(root, readDoc(goal.file).data),
-  // Unresolved questions are recorded under Risks & Unknowns as `- **Open:** <question>`.
-  'questions-resolved': ({ goal }) => listItems(section(readDoc(goal.file).body, /^risks\b/i))
-    .filter((item) => /^open:/i.test(item.replace(/\*/g, '')))
-    .map((item) => `open question: ${item.replace(/\*/g, '').replace(/^open:\s*/i, '')}`),
+  // Unresolved questions are recorded under Risks & Unknowns as `- **Open:** Q-n: <question>` (`question add`). Open
+  // items elsewhere, unmarked questions and TBD-style placeholders count too, so a question can't hide by its wording.
+  'questions-resolved': ({ goal }) => {
+    const scan = questionScan(goal);
+    return [
+      ...scan.open.map((q) => `open question: ${q.id ? `${q.id}: ` : ''}${q.text}; ask the user, then \`question resolve\``),
+      ...scan.stray.map((q) => `open question in ${q.where}: ${q.text}; \`question number\` moves it to Risks & Unknowns`),
+      ...scan.unmarked.map((q) => `unmarked question in Risks & Unknowns: ${q.text}; \`question number\` tracks it`),
+      ...scan.placeholders.map((p) => `placeholder in ${p.where}: ${p.text}; ask the user what it should say`),
+    ];
+  },
   // Every acceptance criterion of the goal and of each done task is ticked. Skipped tasks don't count.
   'criteria-met': ({ goal, tasks }) => [
     ...unticked(readDoc(goal.file).body).map((c) => `goal criterion not met: ${c}`),
@@ -1240,7 +1281,7 @@ function requireStep(root, goal, step) {
   // Challenge and the ADR may run with open questions, since that is where they get answered. From govern on,
   // nothing moves ahead until each one is answered (or removed from Risks & Unknowns), whatever the rules say.
   if (['govern', 'implement', 'final'].includes(step) && goal.status !== 'cancelled') {
-    problems.push(...CHECKS['questions-resolved']({ goal }).map((q) => `${q}; answer it under Clarifications and remove it from Risks & Unknowns`));
+    problems.push(...CHECKS['questions-resolved']({ goal }));
   }
   return problems;
 }
@@ -1355,7 +1396,7 @@ function setGate(root, goal, gate, value) {
   if (stage && value !== 'pending') {
     const { invalid, blocking, review } = reviewProblems(root, goal, stage);
     if (value === 'passed') {
-      const problems = [...(gate === 'final' ? requireStep(root, goal, 'final') : requireStep(root, goal, 'govern').filter((p) => /^open question/.test(p))), ...invalid, ...blocking];
+      const problems = [...(gate === 'final' ? requireStep(root, goal, 'final') : requireStep(root, goal, 'govern').filter((p) => /^(?:open question|unmarked question|placeholder)/.test(p))), ...invalid, ...blocking];
       if (problems.length) fail(`Cannot mark ${gate} passed:\n- ${problems.join('\n- ')}`);
     }
     const warnings = [...invalid, ...(value === 'failed' && review?.data.result === 'pass' ? [`${REVIEW_FILE[stage]} says \`result: pass\`; set it to \`fail\``] : [])];
@@ -1786,7 +1827,7 @@ const commands = {
     const root = findRoot();
     const g = getGoal(root, goalId);
     const doc = readDoc(g.file);
-    const OPEN_ITEM = /^(\s*[-*]\s+)\*\*Open:\*\*\s*(?:(Q-\d+):\s*)?(.*)$/;
+    const OPEN_ITEM = OPEN_LINE;
     const risks = () => { const r = sectionRange(bodyLines(doc.body), /^risks\b/i); return r ? bodyLines(doc.body).slice(r[0] + 1, r[1]) : []; };
     const openItems = () => risks().map((line) => line.match(OPEN_ITEM)).filter(Boolean).map((m) => ({ id: m[2] || null, text: m[3].trim() }));
     const nextQ = () => `Q-${Math.max(0, ...[...doc.body.matchAll(/\bQ-(\d+)\b/g)].map((m) => Number(m[1]))) + 1}`;
@@ -1794,8 +1835,10 @@ const commands = {
     const answered = (id, text, answer) => appendToSection(doc.body, /^clarifications\b/i, 'Clarifications', `- **Q:** ${id}: ${text} **A:** ${answer}`);
     const answer = typeof opts.answer === 'string' ? opts.answer.trim().replace(/\s*\n\s*/g, ' ') : '';
     if (action === 'list') {
-      const open = openItems();
-      return out({ goal: g.id, open, unnumbered: open.filter((q) => !q.id).length, blocking: open.length > 0 });
+      const scan = questionScan(g);
+      const strip = ({ id, text, where }) => ({ id, text, where });
+      const blocking = scan.open.length + scan.stray.length + scan.unmarked.length + scan.placeholders.length > 0;
+      return out({ goal: g.id, open: scan.open.map(({ id, text }) => ({ id, text })), unnumbered: scan.open.filter((q) => !q.id).length, elsewhere: scan.stray.map(strip), unmarked: scan.unmarked.map(({ text, where }) => ({ text, where })), placeholders: scan.placeholders, blocking });
     }
     assertOpen(g);
     if (action === 'add') {
@@ -1821,18 +1864,34 @@ const commands = {
       return out({ goal: g.id, id, status: 'answered', still_open: openItems().length });
     }
     if (action === 'number') {
-      // Gives an ID to open items written by hand, so they can be resolved.
-      let n = Math.max(0, ...[...doc.body.matchAll(/\bQ-(\d+)\b/g)].map((m) => Number(m[1])));
-      const lines = bodyLines(doc.body);
-      const r = sectionRange(lines, /^risks\b/i);
+      // Brings every stray question under the script: numbers hand-written Open items, tracks unmarked questions,
+      // and moves Open items found elsewhere in the goal or in a task into Risks & Unknowns, tagged with where they were.
+      const scan = questionScan(g);
+      const tasks = listTasks(g);
+      let n = Math.max(0, ...[doc.body, ...tasks.map((t) => readDoc(t.file).body)].flatMap((b) => [...b.matchAll(/\bQ-(\d+)\b/g)].map((m) => Number(m[1]))));
       const ids = [];
-      for (let i = r ? r[0] + 1 : 0; r && i < r[1]; i++) {
-        const m = lines[i].match(OPEN_ITEM);
-        if (!m || m[2]) continue;
+      const lines = bodyLines(doc.body);
+      const drop = new Set();
+      const move = [];
+      for (const q of [...scan.open.filter((x) => !x.id), ...scan.unmarked]) {
         ids.push(`Q-${++n}`);
-        lines[i] = `${m[1]}**Open:** ${ids.at(-1)}: ${m[3].trim()}`;
+        lines[q.line] = `${q.prefix}**Open:** ${ids.at(-1)}: ${q.text.replace(/^\*\*Open:\*\*\s*/, '')}`;
       }
-      doc.body = lines.join('\n');
+      const byTask = new Map();
+      for (const q of scan.stray) {
+        ids.push(`Q-${++n}`);
+        move.push(`- **Open:** ${ids.at(-1)}: ${q.where === g.id ? '' : `[${q.where}] `}${q.text}`);
+        if (q.where === g.id) drop.add(q.line); else byTask.set(q.file, [...(byTask.get(q.file) || []), q.line]);
+      }
+      for (const [file, at] of byTask) {
+        const td = readDoc(file);
+        const tl = bodyLines(td.body);
+        td.body = tl.filter((_, i) => !at.includes(i)).join('\n');
+        if ('updated' in td.data) td.data.updated = today();
+        writeDoc(file, td);
+      }
+      doc.body = lines.filter((_, i) => !drop.has(i)).join('\n');
+      for (const item of move) doc.body = appendToSection(doc.body, /^risks\b/i, 'Risks & Unknowns', item);
       save();
       return out({ goal: g.id, numbered: ids });
     }
@@ -2099,6 +2158,9 @@ export function testCounts(output) {
 // Runs commands in order with the platform's default shell; returns the first failing exit code, or 0.
 // With `record`, output goes through a file so it can be summarized, then is printed in full; each command's
 // exit code and test count are pushed onto `record`.
+// A test command that passes because it found nothing to run proves nothing either.
+export const ranNoTests = (output) => /^(?:#|ℹ) tests 0$/m.test(output) || /\bNo tests (?:found|ran)\b|\bcollected 0 items\b|\bRan 0 tests\b|^\s*Tests:\s+0 total\b|\b0 passing\b/im.test(output);
+
 function runCommands(root, label, cmds, record) {
   for (const cmd of cmds) {
     process.stdout.write(`[aisdlc] ${label}: ${cmd}\n`);
@@ -2116,6 +2178,10 @@ function runCommands(root, label, cmds, record) {
       const output = fs.readFileSync(log, 'utf8');
       fs.rmSync(tmp, { recursive: true, force: true });
       process.stdout.write(output);
+      if (!code && ranNoTests(output)) {
+        code = 1;
+        process.stderr.write(`[aisdlc] ${label}: the command passed but ran no tests, so it proves nothing: ${cmd}\n`);
+      }
       record.push({ cmd, code, tests: testCounts(output) });
     }
     if (code) {

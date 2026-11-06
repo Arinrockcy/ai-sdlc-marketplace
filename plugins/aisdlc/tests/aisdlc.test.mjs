@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { trivialVerify, analyzeDag, goalProgress, resolveHook, mergeStackHooks, parseDoc, formatDoc, testCounts, nodeVersionError } from '../scripts/aisdlc.mjs';
+import { trivialVerify, ranNoTests, analyzeDag, goalProgress, resolveHook, mergeStackHooks, parseDoc, formatDoc, testCounts, nodeVersionError } from '../scripts/aisdlc.mjs';
 
 const SCRIPT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../scripts/aisdlc.mjs');
 
@@ -21,6 +21,9 @@ function project() {
   };
   return { dir, run };
 }
+
+// A verify command that can pass and fail, unlike a no-op the verify check refuses.
+const REAL_VERIFY = 'node -e "console.log(\'ok\')"';
 
 const t = (id, depends_on = [], extra = {}) => ({ id, depends_on, status: 'pending', risk: 'medium', ...extra });
 
@@ -46,7 +49,7 @@ function plannedGoal(run, dir, tasks, title = 'Feature') {
   const goal = run(['goal', 'new', title]).json;
   fill(path.join(dir, goal.file));
   for (const args of tasks) {
-    const r = run(['task', 'new', goal.id, ...(args.includes('--verify') ? args : [...args, '--verify', 'node --version'])]);
+    const r = run(['task', 'new', goal.id, ...(args.includes('--verify') ? args : [...args, '--verify', REAL_VERIFY])]);
     assert.equal(r.code, 0, r.stderr);
     fill(path.join(dir, r.json.file));
   }
@@ -159,9 +162,9 @@ test('cli: full gated flow from init to completed', () => {
   const goal = run(['goal', 'new', 'User', 'login']).json;
   assert.equal(goal.id, 'G-001');
   fill(path.join(dir, goal.file));
-  const t1 = run(['task', 'new', 'G-001', 'Schema', '--risk', 'high', '--verify', 'node --version']).json;
+  const t1 = run(['task', 'new', 'G-001', 'Schema', '--risk', 'high', '--verify', REAL_VERIFY]).json;
   assert.equal(t1.id, 'T-01');
-  const t2 = run(['task', 'new', 'G-001', 'API', '--depends', 'T-01', '--verify', 'node --version']).json;
+  const t2 = run(['task', 'new', 'G-001', 'API', '--depends', 'T-01', '--verify', REAL_VERIFY]).json;
   assert.equal(t2.id, 'T-02');
   for (const f of [t1.file, t2.file]) fill(path.join(dir, f));
   assert.equal(run(['task', 'new', 'G-001', 'Bad', '--depends', 'T-09']).code, 1);
@@ -653,7 +656,7 @@ test('cli: a plan change after governance passed needs a new review; progress do
   fs.writeFileSync(goalFile, governed);
 
   // A new task resets governance and archives the review without overwriting older archives.
-  const added = run(['task', 'new', 'G-001', 'Extra', '--verify', 'node --version']);
+  const added = run(['task', 'new', 'G-001', 'Extra', '--verify', REAL_VERIFY]);
   assert.deepEqual(added.json.notes, [
     'gate_govern reset to pending; re-run /aisdlc:govern G-001',
     'governance-review.md is now stale (moved to governance-review.stale-1.md)',
@@ -681,10 +684,10 @@ test('cli: linking another ADR after the adr gate reopens it', () => {
 test('cli: task verify needs evidence when nothing would run', () => {
   const { run, dir } = project();
   run(['init']);
-  const goal = plannedGoal(run, dir, [['A', '--verify', 'node --version']]);
+  const goal = plannedGoal(run, dir, [['A', '--verify', REAL_VERIFY]]);
   // Clear the verify command after planning (GOV-02 is retired so the plan still passes).
   run(['governance', 'set', 'GOV-02', 'severity', 'retired']);
-  edit(path.join(dir, run(['goal', 'show', goal.id]).json.tasks[0].file), (s) => s.replace('verify: node --version', 'verify:'));
+  edit(path.join(dir, run(['goal', 'show', goal.id]).json.tasks[0].file), (s) => s.replace(`verify: ${REAL_VERIFY}`, 'verify:'));
   run(['gate', 'set', 'G-001', 'challenge', 'done']);
   run(['adr', 'none', 'G-001', '--reason', 'none']);
   run(['gate', 'set', 'G-001', 'adr', 'done']);
@@ -815,7 +818,7 @@ test('cli: questions-resolved fails while Risks & Unknowns lists open questions'
   assert.equal(gov05().ok, true);
 
   edit(file, (s) => s.replace('## Risks & Unknowns\n', '## Risks & Unknowns\n\n- **Open:** Which regions ship first?\n- Open: Retry limit?\n- Vendor API may be slow.\n'));
-  assert.deepEqual(gov05().problems, ['open question: Which regions ship first?', 'open question: Retry limit?']);
+  assert.deepEqual(gov05().problems, ['open question: Which regions ship first?; ask the user, then `question resolve`', 'open question: Retry limit?; ask the user, then `question resolve`']);
   edit(file, (s) => s.replace(/- \*\*Open:\*\* .*\n- Open: .*\n/, ''));
   assert.equal(gov05().ok, true, 'a plain risk is not an open question');
 });
@@ -1210,7 +1213,7 @@ test('cli: tasks are removed with a reason before the goal starts, edited in pla
   assert.equal(removed.code, 0, removed.stderr);
   assert.deepEqual(run(['goal', 'show', 'G-001']).json.tasks.map((x) => x.id), ['T-01', 'T-02']);
   assert.match(fs.readFileSync(goalFile(), 'utf8'), /## Removed tasks\n\n- \d{4}-\d{2}-\d{2}: T-03 "Docs" removed: docs live elsewhere\n/);
-  const added = run(['task', 'new', 'G-001', 'Tests', '--verify', 'node --version']).json;
+  const added = run(['task', 'new', 'G-001', 'Tests', '--verify', REAL_VERIFY]).json;
   assert.equal(added.id, 'T-04', 'a removed ID is not allocated again');
   fill(path.join(dir, added.file));
 
@@ -1383,7 +1386,7 @@ test('cli: goal diff lists committed, uncommitted and untracked changes, and pre
 test('cli: a task needs a passing review after its verification before it is done', () => {
   const { run, dir } = project();
   run(['init']);
-  governedGoal(run, dir, [['A', '--verify', 'node --version']]);
+  governedGoal(run, dir, [['A', '--verify', REAL_VERIFY]]);
   run(['state', 'move', 'G-001', 'in-progress']);
   const file = path.join(dir, run(['goal', 'show', 'G-001']).json.tasks[0].file);
   const data = () => parseDoc(fs.readFileSync(file, 'utf8')).data;
@@ -1458,7 +1461,7 @@ test('checks: goal-defined needs both sides of Scope, and tasks-verifiable needs
   run(['init']);
   const g = run(['goal', 'new', 'Scoped']).json;
   const file = path.join(dir, g.file);
-  const t1 = run(['task', 'new', g.id, 'Do it', '--verify', 'node --version']).json;
+  const t1 = run(['task', 'new', g.id, 'Do it', '--verify', REAL_VERIFY]).json;
   const review = () => { run(['gate', 'set', g.id, 'challenge', 'done']); return run(['governance', 'review', g.id]).json; };
   const problems = (rule) => JSON.stringify(review().rules?.find((r) => r.id === rule) ?? review());
 
@@ -1500,15 +1503,15 @@ test('gates: an open question blocks govern, implement and completion, but not c
 });
 
 test('verify: commands that cannot fail are rejected by the check and by task verify', () => {
-  for (const c of ['true', ':', 'exit 0', 'echo ok', 'printf done', 'true && true', 'npm test || true', 'npm test || :', '/bin/true']) assert.equal(trivialVerify(c), true, c);
-  for (const c of ['npm test', 'node --test', 'exit 4', 'manual: open it', '', 'echo ok && npm test', 'test -f a.js']) assert.equal(trivialVerify(c), false, c);
+  for (const c of ['true', ':', 'exit 0', 'echo ok', 'printf done', 'true && true', 'npm test || true', 'npm test || :', '/bin/true', 'node --version', 'npm -v', 'ls -la', 'date', 'test 1', '[ 1 ]', 'node -e 0', 'node -e "process.exit(0)"', 'python3 -c pass', 'cd src && true']) assert.equal(trivialVerify(c), true, c);
+  for (const c of ['npm test', 'node --test', 'exit 4', 'manual: open it', '', 'echo ok && npm test', 'test -f a.js', REAL_VERIFY, 'node --test', 'pytest -q']) assert.equal(trivialVerify(c), false, c);
 
   const { run, dir } = project();
   run(['init']);
   const goal = plannedGoal(run, dir, [['A', '--verify', 'echo ok']]);
   const checks = run(['governance', 'review', goal.id]).json.rules.find((r) => r.id === 'GOV-02');
   assert.match(JSON.stringify(checks.problems), /T-01 verify command `echo ok` cannot fail/);
-  run(['task', 'edit', goal.id, 'T-01', 'verify', 'node --version']);
+  run(['task', 'edit', goal.id, 'T-01', 'verify', REAL_VERIFY]);
   assert.deepEqual(run(['governance', 'review', goal.id]).json.rules.find((r) => r.id === 'GOV-02').problems ?? [], []);
 });
 
@@ -1546,4 +1549,51 @@ test('question: the script keeps open questions, numbers them, and resolving mov
   // Cancelled goals refuse changes.
   run(['state', 'move', g.id, 'cancelled', '--reason', 'dropped']);
   assert.notEqual(run(['question', 'add', g.id, 'More?']).code, 0);
+});
+
+test('verify: a command that passes but runs no tests does not verify the task', () => {
+  for (const out of ['# tests 0\n# pass 0\n', 'ℹ tests 0\nℹ pass 0\n', 'No tests found, exiting with code 0', 'collected 0 items', 'Ran 0 tests in 0.0s', 'Tests:       0 total', '  0 passing (2ms)']) assert.equal(ranNoTests(out), true, out);
+  for (const out of ['# tests 3\n# pass 3\n', '5 passing', 'Tests: 3 passed, 3 total', '']) assert.equal(ranNoTests(out), false, out);
+
+  const { run, dir } = project();
+  run(['init']);
+  governedGoal(run, dir, [['A', '--verify', 'node -e "console.log(\'# tests 0\')"']]);
+  run(['state', 'move', 'G-001', 'in-progress']);
+  run(['task', 'set', 'G-001', 'T-01', 'in-progress']);
+  const v = run(['task', 'verify', 'G-001', 'T-01']);
+  assert.notEqual(v.code, 0);
+  assert.match(v.stderr, /ran no tests, so it proves nothing/);
+});
+
+test('question: open items in tasks, unmarked questions and placeholders block, and question number brings them under the script', () => {
+  const { run, dir } = project();
+  run(['init']);
+  const g = plannedGoal(run, dir, [['A']]);
+  const goalFile = path.join(dir, g.file);
+  const taskFile = path.join(dir, run(['goal', 'show', g.id]).json.tasks[0].file);
+  const problems = () => run(['governance', 'checks', g.id]).json.find((c) => c.rule === 'GOV-05').problems;
+  assert.deepEqual(problems(), []);
+
+  edit(taskFile, (s) => s.replace('## Notes\n', '## Notes\n\n- **Open:** Which table does it write to?\n'));
+  edit(goalFile, (s) => s.replace('## Risks & Unknowns\n', '## Risks & Unknowns\n\n- Should retries be capped?\n').replace('## Problem\n\nSomething is missing.', '## Problem\n\nSomething is missing, TBD which users.'));
+  const found = problems().join('\n');
+  assert.match(found, /open question in T-01: Which table does it write to\?/);
+  assert.match(found, /unmarked question in Risks & Unknowns: Should retries be capped\?/);
+  assert.match(found, /placeholder in G-001: .*TBD which users/);
+  assert.equal(run(['gate', 'require', g.id, 'govern']).code, 1);
+
+  const list = run(['question', 'list', g.id]).json;
+  assert.deepEqual([list.blocking, list.elsewhere.length, list.unmarked.length, list.placeholders.length], [true, 1, 1, 1]);
+
+  assert.deepEqual(run(['question', 'number', g.id]).json.numbered, ['Q-1', 'Q-2']);
+  assert.doesNotMatch(fs.readFileSync(taskFile, 'utf8'), /Open:/);
+  const text = fs.readFileSync(goalFile, 'utf8');
+  assert.match(text, /- \*\*Open:\*\* Q-1: Should retries be capped\?/);
+  assert.match(text, /- \*\*Open:\*\* Q-2: \[T-01\] Which table does it write to\?/);
+
+  run(['question', 'resolve', g.id, 'Q-1', '--answer', 'Yes, three']);
+  run(['question', 'resolve', g.id, 'Q-2', '--answer', 'orders']);
+  edit(goalFile, (s) => s.replace(', TBD which users', ' for admins'));
+  assert.deepEqual(problems(), []);
+  assert.equal(run(['question', 'list', g.id]).json.blocking, false);
 });

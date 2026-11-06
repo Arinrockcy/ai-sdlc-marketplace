@@ -2,6 +2,19 @@
 
 All notable changes to the `aisdlc` plugin. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/). Until 1.0.0, a minor version may include breaking changes; each one is listed under **Breaking** with its upgrade step.
 
+## [0.19.0] - 2026-11-06
+
+### Added
+- A test command that passes but ran nothing no longer verifies a task: `task verify` and the `after_task` hook fail it when the output says `tests 0`, `No tests found`, `collected 0 items`, `Ran 0 tests`, `Tests: 0 total` or `0 passing`.
+- `question list` and the `questions-resolved` check (GOV-05) look for questions wherever they hide: `- **Open:**` items in a task or in another section of the goal, list items in Risks & Unknowns that end in `?` without the marker, and `TBD`, `TODO`, `???` or "to be decided" in the goal's Problem, Outcome and Scope or in a task's planned text. `question number <G-id>` now also numbers unmarked questions and moves `Open` items from tasks and other sections into Risks & Unknowns, tagged with the task, so `question resolve` can close them.
+- `/aisdlc:govern` reads each task's `verify` against its acceptance criteria and fails the rule for a command that would still pass if the criteria were not met.
+
+### Changed
+- The `verify` no-op check also refuses listings and clocks (`ls`, `date`, `sleep`), commands that only ask for a version or help (`node --version`), constant tests (`test 1`, `[ 1 ]`) and inline code with no body (`node -e 0`).
+
+### Breaking
+- A goal or task with a placeholder, an unmarked question or an `Open` item outside Risks & Unknowns now fails GOV-05 and blocks govern, implement and completion until it is answered or reworded. A test command that ran no tests now fails `task verify`. See [Upgrading to 0.19.0](../../README.md#upgrading).
+
 ## [0.18.0] - 2026-11-06
 
 ### Added

@@ -117,6 +117,14 @@ See [`plugins/aisdlc/docs/stack-plugin-contract.md`](plugins/aisdlc/docs/stack-p
 
 Each plugin keeps a changelog: [`aisdlc`](plugins/aisdlc/CHANGELOG.md), [`aisdlc-nodejs`](plugins/aisdlc-nodejs/CHANGELOG.md). Breaking changes are listed there with their upgrade step.
 
+### 0.18.x → 0.19.0 (`aisdlc`)
+
+Questions can no longer hide by their wording, and a passing test run has to run tests.
+
+- Run `$AISDLC question list <G-id>` on goals that are not finished. Anything under `elsewhere`, `unmarked` or `placeholders` now blocks govern. `question number <G-id>` tracks the first two; for a placeholder (`TBD`, `TODO`, `???`, "to be decided"), ask what it should say and reword it.
+- A verify or `after_task` command that exits 0 but reports no tests (`tests 0`, `No tests found`, `0 passing`) now fails. Check that the test pattern matches your files.
+- `ls`, `date`, `sleep`, `node --version`, `test 1` and `node -e 0` are no-ops as `verify` commands now.
+
 ### 0.17.x → 0.18.0 (`aisdlc`)
 
 A task's `verify` command must be able to fail.
