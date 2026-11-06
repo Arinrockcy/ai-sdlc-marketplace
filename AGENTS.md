@@ -19,7 +19,7 @@ Skills must stay agent-neutral markdown, because GitHub Copilot loads the same p
 - Single test: `node --test --test-name-pattern "hooks: precedence" plugins/aisdlc/tests/aisdlc.test.mjs`
 - `npm run validate`: runs `claude plugin validate` on the marketplace and on each plugin.
 - `AISDLC_ESLINT=<dir> npm test`: also checks `aisdlc-nodejs`'s ESLint template against a real ESLint 9+ that resolves from `<dir>` (any project with ESLint installed). Without it those tests are skipped, because this repo has no dependencies. Run it when the template changes.
-- `npm run bench [-- 10,100,500]`: measures what skills read and what commands print (approximate tokens) as a project grows. Run it when a change touches what skills read or what the script prints.
+- `npm run bench [-- 10,100,500] [--docs 1000,10000,100000]`: measures what skills read and what commands print (approximate tokens) as a project grows, and what the documentation index costs at those sizes of documentation. Run it when a change touches what skills read or what the script prints.
 - Try the script by hand: `node plugins/aisdlc/scripts/aisdlc.mjs <cmd>` from inside any scratch project.
 
 There is no build step and there are no npm dependencies. Keep it that way.
@@ -43,6 +43,7 @@ Each plugin has its own version and `CHANGELOG.md` (Keep a Changelog format).
 - registry regeneration and search
 - review scaffolds (`governance review`), pre-switch checks (`goal preflight`), a goal's changes (`goal diff`) and pushing its branch (`goal push`)
 - the code graph: Graphify setup, freshness and queries
+- the documentation index: `docs paths|sync|status|search`, the heading-section index of the project's Markdown and of ADR bodies
 - the coverage check (`coverage check`) against the report each active stack's manifest declares
 
 Skills call the script (written `$AISDLC` in the skill files) and should never hand-edit state the script owns. Every `$AISDLC …` span in a skill must be a complete, runnable invocation. Write placeholders as `<G-id>`, `<T-id>`, `<ADR-id>`, `<GOV-id>`, `<keywords>` or `<name>`, alternatives as `a|b`, optional parts as `[...]`, and `…` only as an option's value. `tests/skills.test.mjs` runs each one and fails if the script no longer understands it. The script rejects unknown options, so every option must be in `OPTIONS`. The state the script owns: `status`, `gate_*`, `govern_fingerprint` and `cancel_reason` fields, a task's `verified`, `verify_evidence`, `reviewed` and `review_evidence` fields and its `## Review` section, the goal's `code-review.md`, the `## Cancellations` and `## Removed tasks` logs in `goal.md`, the rules table in `governance.md`, `registry.md`, `registry-archive.md`, `tasks.md`, and goal folder moves. When adding workflow behavior, put invariants in the script with tests, and keep instructions in the skill.
@@ -52,7 +53,7 @@ Skills call the script (written `$AISDLC` in the skill files) and should never h
 - Gates are the `gate_challenge`, `gate_adr` and `gate_govern` fields in `goal.md`.
 - Tasks are `tasks/T-NN-*.md` files with `depends_on` and `risk`. They change only through `task new|edit|remove`, and a task ID is never reused.
 - `registry.md`, `registry-archive.md` and `tasks.md` are generated views. Rebuild them rather than editing them. `registry.md` holds unfinished goals and every ADR. Finished goals go to the archive, so the file skills read whole only grows with open work.
-- Skills must not read an index that grows without bound (the archive, `GRAPH_REPORT.md`, unfiltered `goal list`) in full. Filter it with the script, search it, or query it.
+- Skills must not read an index that grows without bound (the archive, `GRAPH_REPORT.md`, the documentation index in `.aisdlc/cache/`, unfiltered `goal list`) in full. Filter it with the script, search it, or query it.
 
 **Strict gating** (`requireStep`/`setGate`): challenge → adr → govern → implement.
 - `adr done` requires a linked ADR that is `accepted` (or `superseded`), or `adrs: none` plus `adr_reason`.
@@ -110,4 +111,5 @@ These were settled with the repo owner:
 - A goal auto-completes once all tasks pass.
 - Stacks are detected, not chosen. Init registers every detected stack whose plugin is installed without asking, and `/aisdlc:create-goal` and `/aisdlc:implement` register a stack plugin installed later (mid-goal, implement asks first). A repository can have several active stacks.
 - Graphify is optional and used only to save tokens. Init offers it. The script runs it code-only (no model calls), and `graph query` rebuilds it whenever the code changed, so no skill asks about rebuilding. A missing or failing Graphify never blocks the workflow: skills fall back to searching the code. `registry.md` indexes goals and ADRs, never code.
+- The documentation index is optional and used only to save tokens. ADR bodies are always searchable; the project's own documentation is indexed only once `docs.paths` is set, and `/aisdlc:init` asks before it sets it. It is built locally with no model calls, lives in `.aisdlc/cache/`, and is searched with `docs search`, never read whole. `registry.md` still indexes only goals and ADRs.
 - When a skill step is deterministic (a lookup, a git check, a scaffold, a mapping), it goes in the script. Skills keep only judgment and user interaction.

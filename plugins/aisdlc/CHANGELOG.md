@@ -2,6 +2,18 @@
 
 All notable changes to the `aisdlc` plugin. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/). Until 1.0.0, a minor version may include breaking changes; each one is listed under **Breaking** with its upgrade step.
 
+## [0.24.0] - 2026-11-06
+
+### Added
+- A documentation index: a model-free, dependency-free index of the project's Markdown, one entry per heading section, kept in `.aisdlc/cache/` (never committed). It also covers ADR bodies, which were findable only by title.
+  - `docs paths [<path>...]` stores the files and folders to index in `docs.paths` (folders are searched recursively for `*.md`; no globs) and prints the list when called with none. It refuses a missing path, an absolute path, a `..` path and a non-Markdown file, naming it.
+  - `docs sync` builds the index; `docs status` says whether it is configured, built and stale.
+  - `docs search <keywords> [--budget N]` returns the best sections as path, line range and heading (ADRs also give ID and status), never section text. A heading match ranks above a body match. The output stops at the budget (default 1500 tokens, counted on what is printed) and says how many matches were left. It rebuilds a stale index first.
+  - ADR bodies are always indexed. Project documentation is indexed only once `docs.paths` is set, and `docs search` says so when it is not.
+  - Freshness is the files' sizes and modification times, so no file is read to check it. An edit that keeps both unchanged is not seen until `docs sync`.
+- `/aisdlc:init` offers the documentation index after the knowledge graph and never sets `docs.paths` without an answer. `create-goal`, `challenge`, `adr`, `implement` and `govern` run `docs search` before reading documentation or ADR bodies, and none reads the index file.
+- `npm run bench -- --docs <line counts>` measures build time, search time and what a search prints at 1K, 10K and 100K lines of documentation.
+
 ## [0.23.0] - 2026-11-06
 
 ### Changed

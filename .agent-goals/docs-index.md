@@ -1,7 +1,7 @@
 # Goal: a model-free index and search for project documentation in `aisdlc`
 
 - **Slug:** `docs-index`
-- **Status:** draft
+- **Status:** built on branch `docs-index`, awaiting review and merge
 - **Requested:** 2026-10-12, source: user request "draft the docs-index goal", after the question "what if we have 100K lines of knowledge documentation in MD files"
 - **Revised:** 2026-11-06, against `master` at `d7851eb` (`aisdlc` 0.23.0), after a review found the draft stale and `docs.paths` undefined; the three answers of that date are in Decided
 - **Branch:** `docs-index`, off `master` at `d7851eb`; not created yet
@@ -201,17 +201,17 @@ sub-task's files.
 
 ### 5. Documentation and release
 
-- **Status:** pending
+- **Status:** done, 2026-11-06
 - **Scope:** README section for the documentation index and its config; AGENTS.md architecture and product-decision lines (the script owns the index; it is never read whole; `registry.md` still indexes only goals and ADRs); `aisdlc` changelog entry; version bump in the plugin manifest and both marketplace files.
 - **Areas:** `README.md`, `AGENTS.md`, `plugins/aisdlc/CHANGELOG.md`, `plugins/aisdlc/.claude-plugin/plugin.json`, `.claude-plugin/marketplace.json`, `.github/plugin/marketplace.json`
 - **Changes a screen:** no
 - **Depends on:** 3, 4
 - **Acceptance:** the release tests pass; the two marketplace files are identical; the README states that ADR bodies are always searchable, that project documentation is indexed only once `docs.paths` is set (with `docs paths`), what an entry may be, and the same-size-edit limit of the stamp, and quotes only the bench numbers from sub-task 4
 - **Governor notes:** AGENTS.md Releases section.
-- **Review:**
-- **Verification:**
-- **Commit:**
-- **Task detail:**
+- **Review:** none run; the author checked the acceptance list only. A `/code-review` of the whole branch is the open step before merging
+- **Verification:** `npm test` exits 0 with 156 tests, 154 pass, 0 fail, 2 skipped (the ESLint template tests); `npm run validate` passes; the release tests pass and the two marketplace files are identical (`diff` clean). The README quotes only the bench numbers from sub-task 4.
+- **Commit:** the commit on branch `docs-index` that holds this line
+- **Task detail:** `aisdlc` 0.24.0. No **Breaking** entry and no Upgrading step, since nothing existing changes meaning. Not tagged, not pushed, not merged.
 
 ## Decision log
 

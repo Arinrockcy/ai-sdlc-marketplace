@@ -46,7 +46,7 @@ node <plugin>/scripts/nodejs.mjs manifest scans --package-manager npm --sonar on
 
 This appends the dependency audit and Sonar analysis after lint/coverage. Missing scripts are refused, nonzero scan exits fail verification, and re-registration retains enabled scans. The Sonar script must wait for the remote quality gate; an upload alone is insufficient. Supply credentials through the environment or CI secrets. The skills explain scanner setup, audit severity semantics, and hook overrides that can shadow the manifest. Use `--sonar off` or `--vulnerabilities off` only when intentionally removing that local gate. No scanner packages are installed by the plugin itself.
 
-Requires Node.js 24+. Graphify is optional; `/aisdlc:init` offers to set it up.
+Requires Node.js 24+. Graphify and the documentation index are optional; `/aisdlc:init` offers both.
 
 ## Workflow (strict and gated)
 
@@ -89,6 +89,27 @@ Governance is tied to what it reviewed:
   goals/{pending,in-progress,blocked,completed,cancelled}/G-001-slug/
     goal.md  tasks.md  tasks/T-01-slug.md  governance-review.md  governance-final.md
 ```
+
+## Documentation index
+
+`registry.md` indexes goals and ADRs, and the code graph indexes code. A project's own Markdown documentation (architecture notes, runbooks, domain knowledge) is in neither, so on a large docs folder skills would search and read whole files. The documentation index closes that gap. The script builds it locally, with no model calls and no dependencies: one entry per heading section, kept in `.aisdlc/cache/` (never committed).
+
+- **Which files:** `$AISDLC docs paths <path>...` stores a list of project-relative files and folders in `docs.paths` (`/aisdlc:init` offers it). A folder is searched recursively for `*.md`; there are no globs. A missing path, an absolute path, a `..` path or a non-Markdown file is refused by name. The list is replaced each time, duplicate and overlapping entries index a file once, and `.git`, `node_modules`, symlinks and workflow state under `.aisdlc/` (except `adr/`) are skipped.
+- **ADRs are always searchable.** Their bodies are indexed whether or not `docs.paths` is set. Only the project's own documentation waits for it, and `docs search` says so when it is unset.
+- **Search:** `docs search <keywords> [--budget N]` returns the best sections as path, line range and heading (an ADR also gives its ID and status), never the section text, so a skill reads a section instead of a file. A heading match ranks above a body match, a keyword matches any word it starts, and the output stops at the budget (whole tokens, 100 or more, default 1500) and says how many matches were left. The count includes the indentation that is printed.
+- **Freshness:** the index is rebuilt by `docs sync` or by the next search when the list of files, their sizes or their modification times changed. No file is read to check. An edit that keeps a file's size and its modification time to the same millisecond is not seen until something else changes; run `docs sync` after such an edit. `docs status` shows what is configured, built and stale.
+
+What it costs, from `npm run bench` on a synthetic corpus (200 lines per file, a heading every ~12 lines, a query that matches about one section in forty):
+
+| | 1,000 lines | 10,000 lines | 100,000 lines |
+|---|---|---|---|
+| corpus | ~24,216 tokens | ~242,000 | ~2,422,668 |
+| first build | 36 ms | 59 ms | 290 ms |
+| search, index fresh | 33 ms | 39 ms | 99 ms |
+| search after one edit | 37 ms | 66 ms | 316 ms |
+| search output | ~1,473 tokens | ~1,457 | ~1,475 |
+
+The search output is the default budget at work. A rebuild after an edit re-parses every file, since the index is rebuilt whole.
 
 ## Hooks
 
@@ -316,7 +337,7 @@ Goal files from 0.1.0 need no edits. Missing `gate_final` and `govern_fingerprin
 
 ```
 npm test            # node:test suite for scripts/aisdlc.mjs
-npm run bench       # token cost of registry files and command output at 10/100/500 goals
+npm run bench       # token cost of registry files and command output at 10/100/500 goals, and of the documentation index at 1K/10K/100K lines
 npm run validate    # claude plugin validate (marketplace and both plugins)
 ```
 
