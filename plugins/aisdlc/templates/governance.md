@@ -11,7 +11,7 @@ Edit via `/aisdlc:govern` (no argument), which uses `aisdlc.mjs governance add|s
 
 | ID | Rule | Severity | Stage | Check |
 |----|----|----|----|----|
-| GOV-01 | Goal has a clear problem statement and measurable acceptance criteria. | must | plan | goal-defined |
+| GOV-01 | Goal has a clear problem statement, measurable acceptance criteria and a stated scope (in and out). | must | plan | goal-defined |
 | GOV-02 | Every task has its own acceptance criteria and a verify command (or a `manual: <check>` when no command exists). | must | plan | tasks-verifiable |
 | GOV-03 | Task DAG is valid (no cycles, no unknown dependencies). | must | plan | dag-valid |
 | GOV-04 | Architectural decisions are recorded as ADRs, or `adrs: none` has a reason. | must | plan | adr-recorded |

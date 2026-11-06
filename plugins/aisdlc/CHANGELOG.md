@@ -2,6 +2,15 @@
 
 All notable changes to the `aisdlc` plugin. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/). Until 1.0.0, a minor version may include breaking changes; each one is listed under **Breaking** with its upgrade step.
 
+## [0.17.0] - 2026-11-06
+
+### Changed
+- The plan review no longer settles gaps itself. Whatever the goal, tasks, ADRs, Clarifications and standards leave open becomes a question for the user under `## Questions for the user`, with the reviewer's recommendation when it has one, and GOV-05 fails until it is answered. `## Readings` only restates what the files already settle. Expect more questions from `/aisdlc:govern` than before.
+
+### Breaking
+- An open question (`- **Open:** …` under Risks & Unknowns) now blocks the govern, implement and final steps, whatever the governance rules say. `gate require <G-id> govern|implement|final`, `gate set <G-id> govern passed`, `state move <G-id> in-progress|completed` and starting a task fail while one remains. Challenge and the ADR still run, because that is where questions get answered. Before, only the `questions-resolved` check on GOV-05 caught it, so retiring or rewording that rule lifted the block.
+- `goal-defined` (GOV-01 in the baseline) also fails a goal whose Scope has nothing under `**In:**` or under `**Out:**`. Write "None" under Out when nothing is excluded. See [Upgrading to 0.17.0](../../README.md#upgrading).
+
 ## [0.16.0] - 2026-11-06
 
 ### Added

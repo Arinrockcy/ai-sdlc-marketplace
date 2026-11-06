@@ -117,6 +117,13 @@ See [`plugins/aisdlc/docs/stack-plugin-contract.md`](plugins/aisdlc/docs/stack-p
 
 Each plugin keeps a changelog: [`aisdlc`](plugins/aisdlc/CHANGELOG.md), [`aisdlc-nodejs`](plugins/aisdlc-nodejs/CHANGELOG.md). Breaking changes are listed there with their upgrade step.
 
+### 0.16.x → 0.17.0 (`aisdlc`)
+
+Two checks got stricter, so a goal that passed before may stop at govern.
+
+- A goal with an open question (`- **Open:** …` under Risks & Unknowns) can't pass govern, start a task or complete until the question is answered under Clarifications and removed from Risks & Unknowns. Challenge and the ADR are unaffected. Rewording or retiring GOV-05 no longer lifts this.
+- `goal-defined` (GOV-01) now needs text under both `**In:**` and `**Out:**` in the goal's Scope. Write `None` under Out when nothing is excluded. Goals already in progress are unaffected until their plan changes and they are re-governed.
+
 ### 0.11.x → 0.12.0 (`aisdlc`)
 
 A task now needs a passing review before it can be done.

@@ -1115,12 +1115,22 @@ function adrProblems(root, d) {
 
 // Checks a rule can name in its Check column. Each returns problems; an empty list means the rule holds.
 // They only test what is mechanical (presence, structure); whether content is good stays with the review.
+// The text under `**In:**` and `**Out:**` in a goal's Scope section; an empty string when a side has nothing.
+function scopeSides(body) {
+  const text = section(body, /^scope\b/i) || '';
+  const side = (label) => (text.match(new RegExp(`\\*\\*${label}:?\\*\\*:?([\\s\\S]*?)(?=\\*\\*(?:In|Out):?\\*\\*|$)`, 'i'))?.[1] || '').trim();
+  return { in: side('In'), out: side('Out') };
+}
+
 const CHECKS = {
   'goal-defined': ({ goal }) => {
     const { body } = readDoc(goal.file);
+    const scope = scopeSides(body);
     return [
       ...(section(body, /^problem\b/i) ? [] : ['goal has no Problem statement']),
       ...(listItems(section(body, /acceptance criteria/i)).length ? [] : ['goal has no acceptance criteria']),
+      ...(scope.in ? [] : ['goal has no Scope (In): say what the goal covers']),
+      ...(scope.out ? [] : ['goal has no Scope (Out): say what it leaves out, or write "None" if nothing']),
     ];
   },
   'tasks-verifiable': ({ tasks }) => (tasks.length ? tasks.flatMap((t) => {
@@ -1213,6 +1223,11 @@ function requireStep(root, goal, step) {
       if (!activeRules(root, 'final').length) problems.push('governance.md has no active final-stage rules, so there is nothing to review');
     }
   } else fail(`Unknown step "${step}". Valid: challenge, adr, govern, implement, final`);
+  // Challenge and the ADR may run with open questions, since that is where they get answered. From govern on,
+  // nothing moves ahead until each one is answered (or removed from Risks & Unknowns), whatever the rules say.
+  if (['govern', 'implement', 'final'].includes(step) && goal.status !== 'cancelled') {
+    problems.push(...CHECKS['questions-resolved']({ goal }).map((q) => `${q}; answer it under Clarifications and remove it from Risks & Unknowns`));
+  }
   return problems;
 }
 
@@ -1326,7 +1341,7 @@ function setGate(root, goal, gate, value) {
   if (stage && value !== 'pending') {
     const { invalid, blocking, review } = reviewProblems(root, goal, stage);
     if (value === 'passed') {
-      const problems = [...(gate === 'final' ? requireStep(root, goal, 'final') : []), ...invalid, ...blocking];
+      const problems = [...(gate === 'final' ? requireStep(root, goal, 'final') : requireStep(root, goal, 'govern').filter((p) => /^open question/.test(p))), ...invalid, ...blocking];
       if (problems.length) fail(`Cannot mark ${gate} passed:\n- ${problems.join('\n- ')}`);
     }
     const warnings = [...invalid, ...(value === 'failed' && review?.data.result === 'pass' ? [`${REVIEW_FILE[stage]} says \`result: pass\`; set it to \`fail\``] : [])];

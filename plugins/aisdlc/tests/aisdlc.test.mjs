@@ -35,8 +35,8 @@ function writeReview(dir, goalId, results = {}, result = 'pass', { rules = BASEL
 
 const edit = (file, fn) => fs.writeFileSync(file, fn(fs.readFileSync(file, 'utf8')));
 
-// Fills the Problem and first acceptance criterion, which the goal-defined and tasks-verifiable checks look for.
-const fill = (file) => edit(file, (s) => s.replace('## Problem\n', '## Problem\n\nSomething is missing.\n').replace('- [ ] \n', '- [ ] It works\n'));
+// Fills the Problem, first acceptance criterion and Scope, which the goal-defined and tasks-verifiable checks look for.
+const fill = (file) => edit(file, (s) => s.replace('## Problem\n', '## Problem\n\nSomething is missing.\n').replace('- [ ] \n', '- [ ] It works\n').replace('**In:**\n', '**In:** the feature\n').replace('**Out:**\n', '**Out:** None\n'));
 
 // Ticks every acceptance criterion in a goal or task file, as the criteria-met check expects.
 const tick = (file) => edit(file, (s) => s.replace(/- \[ \] (?=\S)/g, '- [x] '));
@@ -953,9 +953,9 @@ test('cli: governance review writes one row per active rule and fills in failed 
   const r = run(['governance', 'review', 'G-001']);
   assert.equal(r.code, 0, r.stderr);
   assert.deepEqual(r.json.rules.map((x) => x.id), BASELINE_RULES);
-  assert.deepEqual(r.json.rules[0].problems, ['goal has no Problem statement', 'goal has no acceptance criteria']);
+  assert.deepEqual(r.json.rules[0].problems, ['goal has no Problem statement', 'goal has no acceptance criteria', 'goal has no Scope (In): say what the goal covers', 'goal has no Scope (Out): say what it leaves out, or write "None" if nothing']);
   const text = fs.readFileSync(path.join(dir, r.json.file), 'utf8');
-  assert.match(text, /\| GOV-01 \| fail \| check goal-defined: goal has no Problem statement; goal has no acceptance criteria \|/);
+  assert.match(text, /\| GOV-01 \| fail \| check goal-defined: goal has no Problem statement; goal has no acceptance criteria; goal has no Scope \(In\)/);
   assert.match(text, /\| GOV-05 \| {2}\| {2}\|/);
   assert.match(run(['governance', 'review', 'G-001']).stderr, /already exists\. Run `gate set G-001 govern pending` first/);
   assert.equal(run(['governance', 'review', 'G-001', '--stage', 'final']).json.rules[0].id, 'GOV-06');
@@ -1451,4 +1451,50 @@ test('cli: goal overlap finds unfinished goals that share wording, by goal or by
   run(['state', 'move', b.id, 'cancelled', '--reason', 'not needed']);
   assert.deepEqual(run(['goal', 'overlap', a.id]).json.overlaps, []);
   assert.notEqual(run(['goal', 'overlap']).code, 0);
+});
+
+test('checks: goal-defined needs both sides of Scope, and tasks-verifiable needs criteria on every task', () => {
+  const { run, dir } = project();
+  run(['init']);
+  const g = run(['goal', 'new', 'Scoped']).json;
+  const file = path.join(dir, g.file);
+  const t1 = run(['task', 'new', g.id, 'Do it', '--verify', 'true']).json;
+  const review = () => { run(['gate', 'set', g.id, 'challenge', 'done']); return run(['governance', 'review', g.id]).json; };
+  const problems = (rule) => JSON.stringify(review().rules?.find((r) => r.id === rule) ?? review());
+
+  edit(file, (s) => s.replace('## Problem\n', '## Problem\n\nSomething is missing.\n').replace('- [ ] \n', '- [ ] It works\n'));
+  assert.match(problems('GOV-01'), /no Scope \(In\)/);
+  assert.match(problems('GOV-01'), /no Scope \(Out\)/);
+  assert.match(problems('GOV-02'), new RegExp(`${t1.id} has no acceptance criteria`));
+
+  edit(file, (s) => s.replace('**In:**\n', '**In:** the feature\n'));
+  assert.doesNotMatch(problems('GOV-01'), /Scope \(In\)/);
+  assert.match(problems('GOV-01'), /no Scope \(Out\)/);
+
+  edit(file, (s) => s.replace('**Out:**\n', '**Out:**\n- None\n'));
+  assert.doesNotMatch(problems('GOV-01'), /Scope/);
+});
+
+test('gates: an open question blocks govern, implement and completion, but not challenge or the ADR', () => {
+  const { run, dir } = project();
+  run(['init']);
+  const g = plannedGoal(run, dir, [['Do it']]);
+  edit(path.join(dir, g.file), (s) => s.replace('## Risks & Unknowns\n', '## Risks & Unknowns\n\n- **Open:** Which clock does it use?\n'));
+
+  assert.equal(run(['gate', 'require', g.id, 'challenge']).code, 0);
+  assert.equal(run(['gate', 'set', g.id, 'challenge', 'done']).code, 0);
+  assert.equal(run(['adr', 'none', g.id, '--reason', 'no architectural change']).code, 0);
+  assert.equal(run(['gate', 'set', g.id, 'adr', 'done']).code, 0);
+  for (const step of ['govern', 'implement']) {
+    const r = run(['gate', 'require', g.id, step]);
+    assert.equal(r.code, 1, step);
+    assert.match(JSON.stringify(r.json.problems), /open question: Which clock does it use\?/);
+  }
+  // Retiring the rule that names the check doesn't lift the block.
+  run(['governance', 'set', 'GOV-05', 'severity', 'retired']);
+  assert.match(JSON.stringify(run(['gate', 'require', g.id, 'govern']).json.problems), /open question/);
+
+  edit(path.join(dir, g.file), (s) => s.replace('- **Open:** Which clock does it use?', '- Which clock does it use? Answered under Clarifications.'));
+  const last = run(['gate', 'require', g.id, 'govern']);
+  assert.equal(last.code, 0, last.stdout);
 });
