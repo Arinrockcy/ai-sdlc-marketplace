@@ -1661,4 +1661,10 @@ test('question: open items in tasks, unmarked questions and placeholders block, 
   edit(goalFile, (s) => s.replace(', TBD which users', ' for admins'));
   assert.deepEqual(problems(), []);
   assert.equal(run(['question', 'list', g.id]).json.blocking, false);
+
+  // A placeholder word written as code is something the work talks about, not a gap in the plan.
+  edit(taskFile, (s) => s.replace('## What\n', '## What\n\n- Remove every `TODO` and `???` marker from src/.\n'));
+  assert.deepEqual(problems(), []);
+  edit(taskFile, (s) => s.replace('Remove every `TODO` and `???` marker', 'Remove every TODO marker'));
+  assert.match(problems().join('\n'), /placeholder in T-01: .*TODO marker.*or put the word in backticks/);
 });

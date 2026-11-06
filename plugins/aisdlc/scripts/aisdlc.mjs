@@ -1201,7 +1201,8 @@ function questionScan(goal, root) {
         found.unmarked.push({ text: line.replace(/^\s*[-*]\s+/, '').trim(), where: src.where, file: src.file, line: i, prefix: line.match(/^(\s*[-*]\s+)/)[1] });
       }
       const planned = src.isGoal ? /^(problem|outcome|scope)\b/i.test(heading) : !TASK_PROGRESS_SECTIONS.test(heading);
-      if (planned && PLACEHOLDER.test(line)) found.placeholders.push({ text: line.trim(), where: src.where });
+      // A placeholder written as code (`TODO`) is something the work talks about, not a gap in the plan.
+      if (planned && PLACEHOLDER.test(line.replace(/`[^`]*`/g, ''))) found.placeholders.push({ text: line.trim(), where: src.where });
     });
   }
   // An accepted ADR can't carry an open question either. Linked ADRs are scanned whole, since an ADR has no fixed
@@ -1249,7 +1250,7 @@ const CHECKS = {
       ...scan.open.map((q) => `open question: ${q.id ? `${q.id}: ` : ''}${q.text}; ask the user, then \`question resolve\``),
       ...scan.stray.map((q) => `open question in ${q.where}: ${q.text}; \`question number\` moves it to Risks & Unknowns`),
       ...scan.unmarked.map((q) => `unmarked question in Risks & Unknowns: ${q.text}; \`question number\` tracks it`),
-      ...scan.placeholders.map((p) => `placeholder in ${p.where}: ${p.text}; ask the user what it should say`),
+      ...scan.placeholders.map((p) => `placeholder in ${p.where}: ${p.text}; ask the user what it should say, or put the word in backticks if the work is about it`),
       ...scan.adrs.map((q) => `open question in ${q.where}: ${q.text}; ask the user, then edit the ADR to state the answer`),
     ];
   },

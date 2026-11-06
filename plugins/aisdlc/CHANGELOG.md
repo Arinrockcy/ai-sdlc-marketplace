@@ -2,6 +2,11 @@
 
 All notable changes to the `aisdlc` plugin. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/). Until 1.0.0, a minor version may include breaking changes; each one is listed under **Breaking** with its upgrade step.
 
+## [0.23.0] - 2026-11-06
+
+### Changed
+- A `TBD`, `TODO`, `???` or "to be decided" written in backticks no longer counts as a placeholder, so a task can say "remove every `TODO` marker" without blocking govern. The message for a real placeholder says so.
+
 ## [0.22.0] - 2026-11-06
 
 ### Added
