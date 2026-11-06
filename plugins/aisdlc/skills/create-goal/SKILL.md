@@ -22,7 +22,7 @@ Input: `$ARGUMENTS` (the text after the skill's name) is the goal description. I
 ## 1. Unfinished goals (before anything else)
 Run `$AISDLC goal list --status pending,in-progress,blocked` to get the unfinished goals. If there are none, go to section 2. If the archive search found a `cancelled` goal that overlaps the new description, tell the user and offer **Reopen `<G-id>`** below.
 
-Otherwise tell the user which goals are unfinished: ID, title, status and gates. Say whether the new description overlaps any of them. Then ask what to do, one question, with these choices:
+Otherwise tell the user which goals are unfinished: ID, title, status and gates. Run `$AISDLC goal overlap <keywords>` with the main words of the new description. It lists the unfinished goals that share wording with it, with the shared words, and `likely` names the ones that overlap strongly. It only measures wording, so read those goals yourself before you say whether the new description overlaps any of them, and name the shared words. Then ask what to do, one question, with these choices:
 
 - **Merge into `<G-id>`.** Offer this only for `pending` goals, with one choice per pending goal. An in-progress or blocked goal can't be challenged again, so it can't take on new scope.
 - **Finish `<G-id>` first.** Don't create anything. Tell the user the next command for that goal: `/aisdlc:<next> <G-id>`, where `<next>` is the goal's `next` field from `goal list`. They re-run `/aisdlc:create-goal` afterwards. Run `$AISDLC hooks run post_create_goal` and stop.

@@ -659,6 +659,36 @@ function registrySearch(root, words) {
   return { terms, matches: rows.slice(0, 10).map((r) => r.line), more: Math.max(0, rows.length - 10) };
 }
 
+// Words that carry a goal's meaning: its title, Problem, Outcome, Scope and task titles. Template labels and
+// Clarifications are left out, so two unrelated goals don't match on boilerplate.
+const OVERLAP_STOPWORDS = new Set([...STOPWORDS, 'not', 'are', 'can', 'will', 'should', 'must', 'has', 'have', 'its', 'any', 'out', 'than', 'then', 'only', 'each', 'one', 'user', 'users']);
+const OVERLAP_SECTIONS = [/^problem\b/i, /^outcome\b/i, /^scope\b/i];
+const wordsOf = (text) => [...new Set(String(text).toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length > 2 && !OVERLAP_STOPWORDS.has(w)))];
+
+function goalWords(goal) {
+  const body = readDoc(goal.file).body;
+  const parts = [goal.title, ...OVERLAP_SECTIONS.map((re) => section(body, re)), ...listTasks(goal).map((t) => t.title)];
+  return wordsOf(parts.filter(Boolean).join(' '));
+}
+
+// The unfinished goals whose text shares words with `subject` (a goal's words, or typed keywords), best first.
+// `likely` marks a real overlap: at least 3 shared words covering a third of the smaller side. A word matches by
+// prefix, so "limit" finds "limiting". The script only measures wording; the skill asks the user what to do.
+function goalOverlap(root, words, selfId) {
+  const OPEN = ['pending', 'in-progress', 'blocked'];
+  const matches = [];
+  for (const g of listGoals(root)) {
+    if (g.id === selfId || !OPEN.includes(g.status)) continue;
+    const theirs = goalWords(g);
+    const shared = words.filter((w) => theirs.some((t) => t.startsWith(w) || w.startsWith(t)));
+    if (!shared.length) continue;
+    const ratio = shared.length / Math.max(1, Math.min(words.length, theirs.length));
+    matches.push({ id: g.id, title: g.title, status: g.status, shared, score: Number(ratio.toFixed(2)), likely: shared.length >= 3 && ratio >= 0.34 });
+  }
+  matches.sort((a, b) => b.score - a.score || b.shared.length - a.shared.length);
+  return matches;
+}
+
 // ---------- graph ----------
 
 // Graphify is only here to cut the tokens the workflow spends finding code. It runs code-only (local parsing, no
@@ -1391,6 +1421,16 @@ const commands = {
         gates: gatesOf(g), next: nextStep(root, g),
       })));
     }
+    if (action === 'overlap') {
+      // `goal overlap <G-id>` compares a goal with the other unfinished goals; keywords do the same for a goal not yet written.
+      const subject = rest.join(' ').trim();
+      if (!subject) fail('Usage: goal overlap <G-id>|<keywords>');
+      const own = /^G-\d+$/.test(subject) ? getGoal(root, subject) : null;
+      const terms = own ? goalWords(own) : wordsOf(subject);
+      if (!terms.length) fail('goal overlap needs words of 3 or more letters.');
+      const overlaps = goalOverlap(root, terms, own?.id);
+      return out({ subject: own ? own.id : 'keywords', terms, overlaps, likely: overlaps.filter((o) => o.likely).map((o) => o.id) });
+    }
     if (action === 'preflight') {
       const g = getGoal(root, rest[0]);
       const base = loadConfig(root).git?.base_branch || 'develop';
@@ -1472,7 +1512,7 @@ const commands = {
       updateDoc(g.file, { [key]: parseScalar(value, key) });
       return out({ id, [key]: parseScalar(value, key) });
     }
-    fail('Usage: goal new|list|show|diff|preflight|push|set');
+    fail('Usage: goal new|list|show|diff|overlap|preflight|push|set');
   },
 
   state([action, id, status], opts) {

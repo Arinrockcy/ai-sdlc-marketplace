@@ -2,6 +2,12 @@
 
 All notable changes to the `aisdlc` plugin. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/). Until 1.0.0, a minor version may include breaking changes; each one is listed under **Breaking** with its upgrade step.
 
+## [0.16.0] - 2026-11-06
+
+### Added
+- `goal overlap <G-id>|<keywords>` compares a goal, or the words of a goal not yet written, with the other unfinished goals (pending, in-progress, blocked). It matches the words of each goal's title, Problem, Outcome, Scope and task titles, and returns the goals that share any, with the shared words, a `score`, and `likely` for the ones with at least 3 shared words covering a third of the smaller side. Finished goals are left to `registry search`. It measures wording only.
+- `/aisdlc:create-goal` runs it before asking what to do with unfinished goals, so the question names the overlapping goals and the shared words. `/aisdlc:govern` runs it in the plan review and turns a likely overlap into a question for the user (merge, sequence or keep apart) instead of deciding it.
+
 ## [0.15.0] - 2026-10-07
 
 ### Added

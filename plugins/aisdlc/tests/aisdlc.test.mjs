@@ -1427,3 +1427,28 @@ test('cli: a task needs a passing review after its verification before it is don
   assert.equal(data().reviewed, 'pass', 'done keeps the review');
   assert.ok(fs.existsSync(path.join(dir, run(['goal', 'show', 'G-001']).json.dir, 'code-review.md')));
 });
+
+test('cli: goal overlap finds unfinished goals that share wording, by goal or by keywords', () => {
+  const { run, dir } = project();
+  run(['init']);
+  const a = run(['goal', 'new', 'Rate limiting for the public API']).json;
+  edit(path.join(dir, a.file), (s) => s.replace('## Problem\n', '## Problem\n\nThe public API has no rate limiting per client.\n'));
+  const b = run(['goal', 'new', 'Add API rate limiting per client']).json;
+  edit(path.join(dir, b.file), (s) => s.replace('## Problem\n', '## Problem\n\nClients can flood the public API.\n'));
+  const c = run(['goal', 'new', 'Dark theme for the settings page']).json;
+
+  const byGoal = run(['goal', 'overlap', a.id]);
+  assert.equal(byGoal.code, 0, byGoal.stderr);
+  assert.deepEqual(byGoal.json.overlaps.map((o) => o.id), [b.id]);
+  assert.deepEqual(byGoal.json.likely, [b.id]);
+  assert.ok(byGoal.json.overlaps[0].shared.includes('rate'));
+
+  const byWords = run(['goal', 'overlap', 'dark', 'theme', 'toggle']).json;
+  assert.deepEqual([byWords.subject, byWords.overlaps.map((o) => o.id)], ['keywords', [c.id]]);
+  assert.deepEqual(run(['goal', 'overlap', 'billing invoices']).json.overlaps, []);
+
+  // Finished goals are not compared: the archive is searched with `registry search`.
+  run(['state', 'move', b.id, 'cancelled', '--reason', 'not needed']);
+  assert.deepEqual(run(['goal', 'overlap', a.id]).json.overlaps, []);
+  assert.notEqual(run(['goal', 'overlap']).code, 0);
+});
