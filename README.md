@@ -117,6 +117,13 @@ See [`plugins/aisdlc/docs/stack-plugin-contract.md`](plugins/aisdlc/docs/stack-p
 
 Each plugin keeps a changelog: [`aisdlc`](plugins/aisdlc/CHANGELOG.md), [`aisdlc-nodejs`](plugins/aisdlc-nodejs/CHANGELOG.md). Breaking changes are listed there with their upgrade step.
 
+### 0.17.x → 0.18.0 (`aisdlc`)
+
+A task's `verify` command must be able to fail.
+
+- A task whose `verify` is a no-op (`true`, `echo …`, `… || true`) now fails GOV-02 and `task verify`, whatever its status. Replace it with `$AISDLC task edit <G-id> <T-id> verify "<command>"`, or `manual: <check>` and pass `--evidence`.
+- Open questions are now kept with `question add|resolve|number` instead of hand-edited lines. Hand-written `- **Open:** …` items still block the gates; run `question number <G-id>` to give them IDs so `question resolve` can close them.
+
 ### 0.16.x → 0.17.0 (`aisdlc`)
 
 Two checks got stricter, so a goal that passed before may stop at govern.

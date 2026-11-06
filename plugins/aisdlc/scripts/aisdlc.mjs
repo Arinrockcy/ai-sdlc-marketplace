@@ -174,7 +174,7 @@ function setPath(obj, dotted, value) {
 
 // Every option takes a value, even one that starts with "--" (e.g. --verify "--version").
 // Unknown options fail, so a typo in a skill can't be silently ignored.
-export const OPTIONS = new Set(['depends', 'risk', 'verify', 'reason', 'evidence', 'goal', 'task', 'status', 'stack', 'graph', 'base-branch', 'dir', 'severity', 'stage', 'check', 'budget']);
+export const OPTIONS = new Set(['depends', 'risk', 'verify', 'reason', 'evidence', 'goal', 'task', 'status', 'stack', 'graph', 'base-branch', 'dir', 'severity', 'stage', 'check', 'budget', 'answer']);
 
 function parseArgs(argv) {
   const pos = [];
@@ -1122,6 +1122,19 @@ function scopeSides(body) {
   return { in: side('In'), out: side('Out') };
 }
 
+// A verify command that cannot fail proves nothing: `true`, `echo ok`, or a real command whose failure is swallowed
+// with `|| true`. A chain is trivial only when every part is. The check can't tell a clever no-op, so it stops the
+// obvious ones and the reviewer judges the rest.
+const TRIVIAL_VERIFY = /^(?:true|:|exit\s+0|(?:echo|printf)\b.*|(?:\/usr)?\/bin\/true)$/;
+const SWALLOWED_FAILURE = /\|\|\s*(?:true|:|exit\s+0)\s*$/;
+export function trivialVerify(command) {
+  const c = String(command ?? '').trim();
+  if (!c || /^manual:/i.test(c)) return false;
+  return SWALLOWED_FAILURE.test(c) || c.split(/&&|;/).map((x) => x.trim()).filter(Boolean).every((x) => TRIVIAL_VERIFY.test(x));
+}
+
+const trivialVerifyProblem = (id, verify) => `${id} verify command \`${verify}\` cannot fail; use a command that checks the work, or \`manual: <check>\``;
+
 const CHECKS = {
   'goal-defined': ({ goal }) => {
     const { body } = readDoc(goal.file);
@@ -1137,6 +1150,7 @@ const CHECKS = {
     const verify = String(t.verify ?? '').trim();
     return [
       ...(verify && !/^manual:\s*$/i.test(verify) ? [] : [`${t.id} has no verify command or manual check`]),
+      ...(trivialVerify(verify) ? [trivialVerifyProblem(t.id, verify)] : []),
       ...(listItems(section(readDoc(t.file).body, /acceptance criteria/i)).length ? [] : [`${t.id} has no acceptance criteria`]),
     ];
   }) : ['goal has no tasks']),
@@ -1697,6 +1711,7 @@ const commands = {
       const hook = resolveHookFor(root, 'after_task', { goal: g.id, task: taskId });
       const evidence = typeof opts.evidence === 'string' && opts.evidence.trim() ? opts.evidence : '';
       // With no verify command and no after_task hook nothing would run, so a pass needs evidence like a manual check.
+      if (trivialVerify(verify)) fail(`${trivialVerifyProblem(taskId, verify)}. Change it with \`task edit ${g.id} ${taskId} verify "<command>"\`.`);
       const byHand = manual || (!verify && !hook.commands.length);
       if (byHand && !evidence) {
         fail(manual
@@ -1763,6 +1778,65 @@ const commands = {
       return out({ goal: g.id, task: taskId, files: listed });
     }
     fail('Usage: task new|edit|remove|set|verify|review|explore');
+  },
+
+  // The goal's open questions, kept by the script so none hides: `- **Open:** Q-n: text` under Risks & Unknowns until
+  // the user answers, then `- **Q:** Q-n: text **A:** answer` under Clarifications. IDs are never reused.
+  question([action, goalId, ...rest], opts) {
+    const root = findRoot();
+    const g = getGoal(root, goalId);
+    const doc = readDoc(g.file);
+    const OPEN_ITEM = /^(\s*[-*]\s+)\*\*Open:\*\*\s*(?:(Q-\d+):\s*)?(.*)$/;
+    const risks = () => { const r = sectionRange(bodyLines(doc.body), /^risks\b/i); return r ? bodyLines(doc.body).slice(r[0] + 1, r[1]) : []; };
+    const openItems = () => risks().map((line) => line.match(OPEN_ITEM)).filter(Boolean).map((m) => ({ id: m[2] || null, text: m[3].trim() }));
+    const nextQ = () => `Q-${Math.max(0, ...[...doc.body.matchAll(/\bQ-(\d+)\b/g)].map((m) => Number(m[1]))) + 1}`;
+    const save = () => { if ('updated' in doc.data) doc.data.updated = today(); writeDoc(g.file, doc); };
+    const answered = (id, text, answer) => appendToSection(doc.body, /^clarifications\b/i, 'Clarifications', `- **Q:** ${id}: ${text} **A:** ${answer}`);
+    const answer = typeof opts.answer === 'string' ? opts.answer.trim().replace(/\s*\n\s*/g, ' ') : '';
+    if (action === 'list') {
+      const open = openItems();
+      return out({ goal: g.id, open, unnumbered: open.filter((q) => !q.id).length, blocking: open.length > 0 });
+    }
+    assertOpen(g);
+    if (action === 'add') {
+      // Without --answer the question stays open and blocks govern. With it, the user already answered: it is recorded as settled.
+      const text = rest.join(' ').trim().replace(/\s*\n\s*/g, ' ');
+      if (!text) fail('Usage: question add <G-id> <question> [--answer "<the user\'s answer>"]');
+      const id = nextQ();
+      doc.body = answer ? answered(id, text, answer) : appendToSection(doc.body, /^risks\b/i, 'Risks & Unknowns', `- **Open:** ${id}: ${text}`);
+      save();
+      return out({ goal: g.id, id, status: answer ? 'answered' : 'open' });
+    }
+    if (action === 'resolve') {
+      const [id] = rest;
+      if (!/^Q-\d+$/.test(id || '') || !answer) fail('Usage: question resolve <G-id> <Q-id> --answer "<the user\'s answer>"');
+      const lines = bodyLines(doc.body);
+      const r = sectionRange(lines, /^risks\b/i);
+      const at = r ? lines.findIndex((l, i) => i > r[0] && i < r[1] && l.match(OPEN_ITEM)?.[2] === id) : -1;
+      if (at < 0) fail(`${g.id} has no open question ${id}. \`question list ${g.id}\` shows them.`);
+      const text = lines[at].match(OPEN_ITEM)[3].trim();
+      lines.splice(at, 1);
+      doc.body = appendToSection(lines.join('\n'), /^clarifications\b/i, 'Clarifications', `- **Q:** ${id}: ${text} **A:** ${answer}`);
+      save();
+      return out({ goal: g.id, id, status: 'answered', still_open: openItems().length });
+    }
+    if (action === 'number') {
+      // Gives an ID to open items written by hand, so they can be resolved.
+      let n = Math.max(0, ...[...doc.body.matchAll(/\bQ-(\d+)\b/g)].map((m) => Number(m[1])));
+      const lines = bodyLines(doc.body);
+      const r = sectionRange(lines, /^risks\b/i);
+      const ids = [];
+      for (let i = r ? r[0] + 1 : 0; r && i < r[1]; i++) {
+        const m = lines[i].match(OPEN_ITEM);
+        if (!m || m[2]) continue;
+        ids.push(`Q-${++n}`);
+        lines[i] = `${m[1]}**Open:** ${ids.at(-1)}: ${m[3].trim()}`;
+      }
+      doc.body = lines.join('\n');
+      save();
+      return out({ goal: g.id, numbered: ids });
+    }
+    fail('Usage: question list <G-id> | add <G-id> <question> [--answer "…"] | resolve <G-id> <Q-id> --answer "…" | number <G-id>');
   },
 
   dag([action, goalId]) {

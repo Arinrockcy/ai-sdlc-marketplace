@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { analyzeDag, goalProgress, resolveHook, mergeStackHooks, parseDoc, formatDoc, testCounts, nodeVersionError } from '../scripts/aisdlc.mjs';
+import { trivialVerify, analyzeDag, goalProgress, resolveHook, mergeStackHooks, parseDoc, formatDoc, testCounts, nodeVersionError } from '../scripts/aisdlc.mjs';
 
 const SCRIPT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../scripts/aisdlc.mjs');
 
@@ -41,12 +41,12 @@ const fill = (file) => edit(file, (s) => s.replace('## Problem\n', '## Problem\n
 // Ticks every acceptance criterion in a goal or task file, as the criteria-met check expects.
 const tick = (file) => edit(file, (s) => s.replace(/- \[ \] (?=\S)/g, '- [x] '));
 
-// Creates a goal whose goal.md and tasks pass the automatic checks. Tasks without --verify get `--verify true`.
+// Creates a goal whose goal.md and tasks pass the automatic checks. Tasks without --verify get `--verify node --version`.
 function plannedGoal(run, dir, tasks, title = 'Feature') {
   const goal = run(['goal', 'new', title]).json;
   fill(path.join(dir, goal.file));
   for (const args of tasks) {
-    const r = run(['task', 'new', goal.id, ...(args.includes('--verify') ? args : [...args, '--verify', 'true'])]);
+    const r = run(['task', 'new', goal.id, ...(args.includes('--verify') ? args : [...args, '--verify', 'node --version'])]);
     assert.equal(r.code, 0, r.stderr);
     fill(path.join(dir, r.json.file));
   }
@@ -159,9 +159,9 @@ test('cli: full gated flow from init to completed', () => {
   const goal = run(['goal', 'new', 'User', 'login']).json;
   assert.equal(goal.id, 'G-001');
   fill(path.join(dir, goal.file));
-  const t1 = run(['task', 'new', 'G-001', 'Schema', '--risk', 'high', '--verify', 'true']).json;
+  const t1 = run(['task', 'new', 'G-001', 'Schema', '--risk', 'high', '--verify', 'node --version']).json;
   assert.equal(t1.id, 'T-01');
-  const t2 = run(['task', 'new', 'G-001', 'API', '--depends', 'T-01', '--verify', 'true']).json;
+  const t2 = run(['task', 'new', 'G-001', 'API', '--depends', 'T-01', '--verify', 'node --version']).json;
   assert.equal(t2.id, 'T-02');
   for (const f of [t1.file, t2.file]) fill(path.join(dir, f));
   assert.equal(run(['task', 'new', 'G-001', 'Bad', '--depends', 'T-09']).code, 1);
@@ -502,7 +502,7 @@ test('cli: task verify runs verify then after_task, records the result, and need
   const { run, dir } = project();
   run(['init']);
   run(['config', 'set', 'hooks.after_task', '{"run":"echo after {task_id}"}']);
-  governedGoal(run, dir, [['Pass', '--verify', 'echo checked'], ['Fail', '--verify', 'exit 4'], ['Manual', '--verify', 'manual: open /health and see 200']]);
+  governedGoal(run, dir, [['Pass', '--verify', 'node -e "console.log(\'checked\')"'], ['Fail', '--verify', 'exit 4'], ['Manual', '--verify', 'manual: open /health and see 200']]);
   run(['state', 'move', 'G-001', 'in-progress']);
   for (const id of ['T-01', 'T-02', 'T-03']) run(['task', 'set', 'G-001', id, 'in-progress']);
 
@@ -653,7 +653,7 @@ test('cli: a plan change after governance passed needs a new review; progress do
   fs.writeFileSync(goalFile, governed);
 
   // A new task resets governance and archives the review without overwriting older archives.
-  const added = run(['task', 'new', 'G-001', 'Extra', '--verify', 'true']);
+  const added = run(['task', 'new', 'G-001', 'Extra', '--verify', 'node --version']);
   assert.deepEqual(added.json.notes, [
     'gate_govern reset to pending; re-run /aisdlc:govern G-001',
     'governance-review.md is now stale (moved to governance-review.stale-1.md)',
@@ -681,10 +681,10 @@ test('cli: linking another ADR after the adr gate reopens it', () => {
 test('cli: task verify needs evidence when nothing would run', () => {
   const { run, dir } = project();
   run(['init']);
-  const goal = plannedGoal(run, dir, [['A', '--verify', 'true']]);
+  const goal = plannedGoal(run, dir, [['A', '--verify', 'node --version']]);
   // Clear the verify command after planning (GOV-02 is retired so the plan still passes).
   run(['governance', 'set', 'GOV-02', 'severity', 'retired']);
-  edit(path.join(dir, run(['goal', 'show', goal.id]).json.tasks[0].file), (s) => s.replace('verify: true', 'verify:'));
+  edit(path.join(dir, run(['goal', 'show', goal.id]).json.tasks[0].file), (s) => s.replace('verify: node --version', 'verify:'));
   run(['gate', 'set', 'G-001', 'challenge', 'done']);
   run(['adr', 'none', 'G-001', '--reason', 'none']);
   run(['gate', 'set', 'G-001', 'adr', 'done']);
@@ -1210,7 +1210,7 @@ test('cli: tasks are removed with a reason before the goal starts, edited in pla
   assert.equal(removed.code, 0, removed.stderr);
   assert.deepEqual(run(['goal', 'show', 'G-001']).json.tasks.map((x) => x.id), ['T-01', 'T-02']);
   assert.match(fs.readFileSync(goalFile(), 'utf8'), /## Removed tasks\n\n- \d{4}-\d{2}-\d{2}: T-03 "Docs" removed: docs live elsewhere\n/);
-  const added = run(['task', 'new', 'G-001', 'Tests', '--verify', 'true']).json;
+  const added = run(['task', 'new', 'G-001', 'Tests', '--verify', 'node --version']).json;
   assert.equal(added.id, 'T-04', 'a removed ID is not allocated again');
   fill(path.join(dir, added.file));
 
@@ -1327,13 +1327,13 @@ test('cli: task verify records a one-line summary of what ran', () => {
   const { run, dir } = project();
   run(['init']);
   run(['config', 'set', 'hooks.after_task', '{"run":"echo \'Tests:       3 passed, 3 total\'"}']);
-  governedGoal(run, dir, [['A', '--verify', 'printf "# tests 2\\n# pass 2\\n# fail 0\\n"'], ['B', '--verify', 'manual: open it']]);
+  governedGoal(run, dir, [['A', '--verify', 'node -e "console.log(\'# tests 2\\\\n# pass 2\\\\n# fail 0\')"'], ['B', '--verify', 'manual: open it']]);
   run(['state', 'move', 'G-001', 'in-progress']);
   run(['task', 'set', 'G-001', 'T-01', 'in-progress']);
   const v = run(['task', 'verify', 'G-001', 'T-01']);
   assert.match(v.stdout, /# pass 2[\s\S]*Tests: {7}3 passed[\s\S]*verify T-01: pass/, 'output is still printed');
   const task = (id) => parseDoc(fs.readFileSync(path.join(dir, run(['goal', 'show', 'G-001']).json.tasks.find((x) => x.id === id).file), 'utf8')).data;
-  assert.equal(task('T-01').verify_evidence, 'printf "# tests 2\\n# pass 2\\n# fail 0\\n": exit 0 (tests 2, pass 2, fail 0); echo \'Tests:       3 passed, 3 total\': exit 0 (Tests: 3 passed, 3 total)');
+  assert.equal(task('T-01').verify_evidence, 'node -e "console.log(\'# tests 2\\\\n# pass 2\\\\n# fail 0\')": exit 0 (tests 2, pass 2, fail 0); echo \'Tests:       3 passed, 3 total\': exit 0 (Tests: 3 passed, 3 total)');
   run(['task', 'set', 'G-001', 'T-02', 'in-progress']);
   run(['task', 'verify', 'G-001', 'T-02', '--evidence', 'page loads']);
   assert.equal(task('T-02').verify_evidence, 'page loads; echo \'Tests:       3 passed, 3 total\': exit 0 (Tests: 3 passed, 3 total)');
@@ -1383,7 +1383,7 @@ test('cli: goal diff lists committed, uncommitted and untracked changes, and pre
 test('cli: a task needs a passing review after its verification before it is done', () => {
   const { run, dir } = project();
   run(['init']);
-  governedGoal(run, dir, [['A', '--verify', 'true']]);
+  governedGoal(run, dir, [['A', '--verify', 'node --version']]);
   run(['state', 'move', 'G-001', 'in-progress']);
   const file = path.join(dir, run(['goal', 'show', 'G-001']).json.tasks[0].file);
   const data = () => parseDoc(fs.readFileSync(file, 'utf8')).data;
@@ -1458,7 +1458,7 @@ test('checks: goal-defined needs both sides of Scope, and tasks-verifiable needs
   run(['init']);
   const g = run(['goal', 'new', 'Scoped']).json;
   const file = path.join(dir, g.file);
-  const t1 = run(['task', 'new', g.id, 'Do it', '--verify', 'true']).json;
+  const t1 = run(['task', 'new', g.id, 'Do it', '--verify', 'node --version']).json;
   const review = () => { run(['gate', 'set', g.id, 'challenge', 'done']); return run(['governance', 'review', g.id]).json; };
   const problems = (rule) => JSON.stringify(review().rules?.find((r) => r.id === rule) ?? review());
 
@@ -1497,4 +1497,53 @@ test('gates: an open question blocks govern, implement and completion, but not c
   edit(path.join(dir, g.file), (s) => s.replace('- **Open:** Which clock does it use?', '- Which clock does it use? Answered under Clarifications.'));
   const last = run(['gate', 'require', g.id, 'govern']);
   assert.equal(last.code, 0, last.stdout);
+});
+
+test('verify: commands that cannot fail are rejected by the check and by task verify', () => {
+  for (const c of ['true', ':', 'exit 0', 'echo ok', 'printf done', 'true && true', 'npm test || true', 'npm test || :', '/bin/true']) assert.equal(trivialVerify(c), true, c);
+  for (const c of ['npm test', 'node --test', 'exit 4', 'manual: open it', '', 'echo ok && npm test', 'test -f a.js']) assert.equal(trivialVerify(c), false, c);
+
+  const { run, dir } = project();
+  run(['init']);
+  const goal = plannedGoal(run, dir, [['A', '--verify', 'echo ok']]);
+  const checks = run(['governance', 'review', goal.id]).json.rules.find((r) => r.id === 'GOV-02');
+  assert.match(JSON.stringify(checks.problems), /T-01 verify command `echo ok` cannot fail/);
+  run(['task', 'edit', goal.id, 'T-01', 'verify', 'node --version']);
+  assert.deepEqual(run(['governance', 'review', goal.id]).json.rules.find((r) => r.id === 'GOV-02').problems ?? [], []);
+});
+
+test('question: the script keeps open questions, numbers them, and resolving moves them to Clarifications', () => {
+  const { run, dir } = project();
+  run(['init']);
+  const g = run(['goal', 'new', 'Asked']).json;
+  const file = path.join(dir, g.file);
+  const text = () => fs.readFileSync(file, 'utf8');
+
+  assert.equal(run(['question', 'add', g.id, 'Which clock?']).json.id, 'Q-1');
+  assert.match(text(), /- \*\*Open:\*\* Q-1: Which clock\?/);
+  const settled = run(['question', 'add', g.id, 'Which format?', '--answer', 'ISO 8601']).json;
+  assert.deepEqual([settled.id, settled.status], ['Q-2', 'answered']);
+  assert.match(text(), /- \*\*Q:\*\* Q-2: Which format\? \*\*A:\*\* ISO 8601/);
+  assert.doesNotMatch(text(), /Open:\*\* Q-2/);
+
+  assert.deepEqual(run(['question', 'list', g.id]).json.open, [{ id: 'Q-1', text: 'Which clock?' }]);
+  assert.equal(run(['question', 'list', g.id]).json.blocking, true);
+  assert.notEqual(run(['question', 'resolve', g.id, 'Q-1']).code, 0, 'an answer is required');
+  assert.notEqual(run(['question', 'resolve', g.id, 'Q-9', '--answer', 'x']).code, 0);
+
+  // A hand-written item gets an ID, and IDs are not reused after a question is answered.
+  edit(file, (s) => s.replace('## Risks & Unknowns\n', '## Risks & Unknowns\n\n- **Open:** Retry on timeout?\n'));
+  assert.equal(run(['question', 'list', g.id]).json.unnumbered, 1);
+  assert.deepEqual(run(['question', 'number', g.id]).json.numbered, ['Q-3']);
+  const r = run(['question', 'resolve', g.id, 'Q-1', '--answer', 'The server clock']);
+  assert.deepEqual([r.json.status, r.json.still_open], ['answered', 1]);
+  assert.match(text(), /- \*\*Q:\*\* Q-1: Which clock\? \*\*A:\*\* The server clock/);
+  assert.equal(run(['question', 'add', g.id, 'Another?']).json.id, 'Q-4');
+  run(['question', 'resolve', g.id, 'Q-3', '--answer', 'Yes, twice']);
+  run(['question', 'resolve', g.id, 'Q-4', '--answer', 'No']);
+  assert.equal(run(['question', 'list', g.id]).json.blocking, false);
+
+  // Cancelled goals refuse changes.
+  run(['state', 'move', g.id, 'cancelled', '--reason', 'dropped']);
+  assert.notEqual(run(['question', 'add', g.id, 'More?']).code, 0);
 });

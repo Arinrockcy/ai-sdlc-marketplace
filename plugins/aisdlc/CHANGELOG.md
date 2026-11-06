@@ -2,6 +2,15 @@
 
 All notable changes to the `aisdlc` plugin. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/). Until 1.0.0, a minor version may include breaking changes; each one is listed under **Breaking** with its upgrade step.
 
+## [0.18.0] - 2026-11-06
+
+### Added
+- `question list|add|resolve|number <G-id>` keeps the goal's open questions in the script's hands. `question add` records `- **Open:** Q-n: …` under Risks & Unknowns, or with `--answer` records an answer the user already gave under Clarifications. `question resolve <G-id> <Q-id> --answer "…"` moves an open question to Clarifications. `question number` gives IDs to items written by hand. IDs are never reused, and a cancelled or completed goal refuses changes. `/aisdlc:challenge` and `/aisdlc:govern` use it instead of editing the lines.
+- A `verify` command that cannot fail is refused: `true`, `:`, `exit 0`, `echo …`, `printf …`, or anything ending in `|| true`. `tasks-verifiable` (GOV-02) fails it, and `task verify` refuses to run it, naming `task edit … verify` or a `manual:` check as the way out.
+
+### Breaking
+- A task whose `verify` command cannot fail now fails GOV-02 and cannot be verified. See [Upgrading to 0.18.0](../../README.md#upgrading).
+
 ## [0.17.0] - 2026-11-06
 
 ### Changed
