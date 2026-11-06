@@ -844,19 +844,20 @@ function docsSearch(root, words, budget) {
     const inBody = terms.filter((t) => !inHeading.includes(t) && hit(sec.words, t));
     return { sec, order, score: inHeading.length * 2 + inBody.length, matched: inHeading.length + inBody.length };
   }).filter((r) => r.matched).sort((a, b) => b.score - a.score || b.matched - a.matched || a.order - b.order);
+  const note = synced.entries ? {} : { note: 'Project documentation is not configured, so only ADR bodies were searched. Search the documentation files directly, or set `docs paths <path>...`.' };
+  // The budget counts what is printed: the fixed fields first (with room for the counts), then each match as it is
+  // indented inside the list, so the output stays within it.
+  const bytes = (v) => Buffer.byteLength(JSON.stringify(v, null, 2));
+  let used = Math.ceil((bytes({ terms, matches: [], more: 99999, tokens: 99999, refreshed: false, ...note })) / 4);
   const matches = [];
-  let used = 0;
   for (const { sec } of ranked) {
     const m = { path: sec.path, lines: `${sec.start}-${sec.end}`, heading: sec.trail || sec.heading || '(no heading)', ...(sec.adr ? { adr: sec.adr, status: sec.status } : {}) };
-    const cost = Math.ceil(JSON.stringify(m).length / 4);
+    const cost = Math.ceil((bytes(m) + 4 * (Object.keys(m).length + 2) + 1) / 4);
     if (matches.length && used + cost > budget) break;
     matches.push(m);
     used += cost;
   }
-  return {
-    terms, matches, more: ranked.length - matches.length, tokens: used, refreshed: synced.rebuilt,
-    ...(synced.entries ? {} : { note: 'Project documentation is not configured, so only ADR bodies were searched. Search the documentation files directly, or set `docs paths <path>...`.' }),
-  };
+  return { terms, matches, more: ranked.length - matches.length, tokens: used, refreshed: synced.rebuilt, ...note };
 }
 
 // ---------- graph ----------

@@ -1659,6 +1659,8 @@ test('cli: docs search ranks headings above bodies, cuts at the budget, covers A
   const cut = search('retry', '--budget', '100').json;
   assert.ok(cut.matches.length >= 1 && cut.matches.length < 30 && cut.more === 30 - cut.matches.length);
   assert.ok(cut.tokens <= 100);
+  // The budget counts what is printed, indentation included, not a compact form of it.
+  for (const budget of ['400', '1500']) assert.ok(Buffer.byteLength(search('retry', '--budget', budget).stdout) / 4 <= Number(budget), `budget ${budget}`);
   for (const bad of ['abc', '99', '1.5', '-5']) assert.match(search('retry', '--budget', bad).stderr, /--budget must be a whole number of tokens, 100 or more/, bad);
 });
 

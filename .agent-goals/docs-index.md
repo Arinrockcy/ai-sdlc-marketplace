@@ -170,17 +170,34 @@ sub-task's files.
 
 ### 4. Measure it
 
-- **Status:** pending
+- **Status:** done, 2026-11-06
 - **Scope:** `scripts/bench.mjs` keeps its positional goal counts and gains `--docs <line counts>` (default `1000,10000,100000`). For each size it builds a documentation corpus and reports build time, search time, and the approximate tokens a search prints against the tokens of the corpus. The numbers are recorded in this ledger.
 - **Areas:** `scripts/bench.mjs`, this ledger
 - **Changes a screen:** no
 - **Depends on:** 2
 - **Acceptance:** `npm run bench` exits 0 and prints the three rows, and `npm run bench -- 10,100,500` prints the same goal-scaling output as before this goal (compared with the baseline run); search output at 100K lines stays within the default budget; the recorded numbers are the ones the run printed
 - **Governor notes:** These are the first measured figures for the "lower token cost" claim. Nothing is claimed before this runs.
-- **Review:**
-- **Verification:**
-- **Commit:**
-- **Task detail:**
+- **Review:** none run; the author checked the acceptance list only
+- **Verification:** `npm test` exits 0 with 156 tests, 154 pass, 0 fail, 2 skipped (the ESLint template tests); `npm run validate` passes; `npm run bench` exits 0 and prints the three rows below; the goal-scaling rows are unchanged from the baseline run (`create-goal up front` ~651, ~1,386, ~4,645). A bad argument prints the usage and exits 1.
+- **Commit:** the commit on branch `docs-index` that holds this line
+- **Task detail:** `bench.mjs` gained `--docs <line counts>`. The numbers below are the ones the run printed on this machine (times vary run to run; the token figures are exact for this corpus). The corpus is synthetic, 200 lines per file with a heading every ~12 lines, and the query `retention policy` matches about one section in forty, so a search always has more matches than the budget holds.
+
+  ```
+  measure | 1,000 lines | 10,000 lines | 100,000 lines
+  files / sections | 5 / 85 | 50 / 850 | 500 / 8500
+  corpus (tokens) | ~24,216 | ~242,000 | ~2,422,668
+  index file (tokens, never read) | ~28,543 | ~285,337 | ~2,872,123
+  docs sync, first build | 36 ms | 59 ms | 290 ms
+  docs search, index fresh | 33 ms | 39 ms | 99 ms
+  docs search after one edit | 37 ms | 66 ms | 316 ms
+  search output (tokens) | ~1,473 | ~1,457 | ~1,475
+  matches printed / more | 43 / 34 | 41 / 750 | 41 / 7764
+  search output vs corpus | 6.08% | 0.60% | 0.06%
+  ```
+
+  Reading the numbers: a search prints about 1,470 tokens at every size, which is the default budget of 1,500 working, not a property of the index; at 1,000 lines that is 6% of the corpus, at 100,000 lines 0.06%. A rebuild after one edit re-parses every file (0.3 s at 100K lines), because the index is rebuilt whole. The index file is larger than the corpus and is never read by a skill.
+
+  **Defect found by this sub-task:** the first run printed ~2,000 tokens against the 1,500 budget, because `docs search` counted each match as compact JSON while the output is indented. The cost now counts the printed form (fixed fields plus each match as indented), and a test checks that the printed output stays within the budget.
 
 ### 5. Documentation and release
 
