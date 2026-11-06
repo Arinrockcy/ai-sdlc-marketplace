@@ -174,7 +174,7 @@ function setPath(obj, dotted, value) {
 
 // Every option takes a value, even one that starts with "--" (e.g. --verify "--version").
 // Unknown options fail, so a typo in a skill can't be silently ignored.
-export const OPTIONS = new Set(['depends', 'risk', 'verify', 'reason', 'evidence', 'goal', 'task', 'status', 'stack', 'graph', 'base-branch', 'dir', 'severity', 'stage', 'check', 'budget', 'answer']);
+export const OPTIONS = new Set(['depends', 'risk', 'verify', 'reason', 'evidence', 'goal', 'task', 'status', 'stack', 'graph', 'base-branch', 'dir', 'severity', 'stage', 'check', 'budget', 'answer', 'by']);
 
 function parseArgs(argv) {
   const pos = [];
@@ -1851,7 +1851,7 @@ const commands = {
   },
 
   // The goal's open questions, kept by the script so none hides: `- **Open:** Q-n: text` under Risks & Unknowns until
-  // the user answers, then `- **Q:** Q-n: text **A:** answer` under Clarifications. IDs are never reused.
+  // the user answers, then `- **Q:** Q-n: text **A (user):** answer` under Clarifications. IDs are never reused.
   question([action, goalId, ...rest], opts) {
     const root = findRoot();
     const g = getGoal(root, goalId);
@@ -1861,8 +1861,11 @@ const commands = {
     const openItems = () => risks().map((line) => line.match(OPEN_ITEM)).filter(Boolean).map((m) => ({ id: m[2] || null, text: m[3].trim() }));
     const nextQ = () => `Q-${Math.max(0, ...[...doc.body.matchAll(/\bQ-(\d+)\b/g)].map((m) => Number(m[1]))) + 1}`;
     const save = () => { if ('updated' in doc.data) doc.data.updated = today(); writeDoc(g.file, doc); };
-    const answered = (id, text, answer) => appendToSection(doc.body, /^clarifications\b/i, 'Clarifications', `- **Q:** ${id}: ${text} **A:** ${answer}`);
+    const answered = (id, text, answer) => appendToSection(doc.body, /^clarifications\b/i, 'Clarifications', `- **Q:** ${id}: ${text} **A (user):** ${answer}`);
     const answer = typeof opts.answer === 'string' ? opts.answer.trim().replace(/\s*\n\s*/g, ' ') : '';
+    // Only the user's answer settles a question. The script can't tell who typed it, so the caller has to say so:
+    // `--by user` attests that the user gave this answer in this session, and the record shows it.
+    if (answer && opts.by !== 'user') fail('--answer needs --by user: it attests the user gave this answer. A recommendation or your own reading is not an answer; ask the user.');
     if (action === 'list') {
       const scan = questionScan(g, root);
       const strip = ({ id, text, where }) => ({ id, text, where });
@@ -1873,7 +1876,7 @@ const commands = {
     if (action === 'add') {
       // Without --answer the question stays open and blocks govern. With it, the user already answered: it is recorded as settled.
       const text = rest.join(' ').trim().replace(/\s*\n\s*/g, ' ');
-      if (!text) fail('Usage: question add <G-id> <question> [--answer "<the user\'s answer>"]');
+      if (!text) fail('Usage: question add <G-id> <question> [--answer "<the user\'s answer>" --by user]');
       const id = nextQ();
       doc.body = answer ? answered(id, text, answer) : appendToSection(doc.body, /^risks\b/i, 'Risks & Unknowns', `- **Open:** ${id}: ${text}`);
       save();
@@ -1881,14 +1884,14 @@ const commands = {
     }
     if (action === 'resolve') {
       const [id] = rest;
-      if (!/^Q-\d+$/.test(id || '') || !answer) fail('Usage: question resolve <G-id> <Q-id> --answer "<the user\'s answer>"');
+      if (!/^Q-\d+$/.test(id || '') || !answer) fail('Usage: question resolve <G-id> <Q-id> --answer "<the user\'s answer>" --by user');
       const lines = bodyLines(doc.body);
       const r = sectionRange(lines, /^risks\b/i);
       const at = r ? lines.findIndex((l, i) => i > r[0] && i < r[1] && l.match(OPEN_ITEM)?.[2] === id) : -1;
       if (at < 0) fail(`${g.id} has no open question ${id}. \`question list ${g.id}\` shows them.`);
       const text = lines[at].match(OPEN_ITEM)[3].trim();
       lines.splice(at, 1);
-      doc.body = appendToSection(lines.join('\n'), /^clarifications\b/i, 'Clarifications', `- **Q:** ${id}: ${text} **A:** ${answer}`);
+      doc.body = appendToSection(lines.join('\n'), /^clarifications\b/i, 'Clarifications', `- **Q:** ${id}: ${text} **A (user):** ${answer}`);
       save();
       return out({ goal: g.id, id, status: 'answered', still_open: openItems().length });
     }
@@ -1924,7 +1927,7 @@ const commands = {
       save();
       return out({ goal: g.id, numbered: ids });
     }
-    fail('Usage: question list <G-id> | add <G-id> <question> [--answer "…"] | resolve <G-id> <Q-id> --answer "…" | number <G-id>');
+    fail('Usage: question list <G-id> | add <G-id> <question> [--answer "…" --by user] | resolve <G-id> <Q-id> --answer "…" --by user | number <G-id>');
   },
 
   dag([action, goalId]) {

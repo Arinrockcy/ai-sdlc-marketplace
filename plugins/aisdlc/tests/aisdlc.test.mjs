@@ -1566,26 +1566,30 @@ test('question: the script keeps open questions, numbers them, and resolving mov
 
   assert.equal(run(['question', 'add', g.id, 'Which clock?']).json.id, 'Q-1');
   assert.match(text(), /- \*\*Open:\*\* Q-1: Which clock\?/);
-  const settled = run(['question', 'add', g.id, 'Which format?', '--answer', 'ISO 8601']).json;
+  const settled = run(['question', 'add', g.id, 'Which format?', '--answer', 'ISO 8601', '--by', 'user']).json;
   assert.deepEqual([settled.id, settled.status], ['Q-2', 'answered']);
-  assert.match(text(), /- \*\*Q:\*\* Q-2: Which format\? \*\*A:\*\* ISO 8601/);
+  assert.match(text(), /- \*\*Q:\*\* Q-2: Which format\? \*\*A \(user\):\*\* ISO 8601/);
   assert.doesNotMatch(text(), /Open:\*\* Q-2/);
 
   assert.deepEqual(run(['question', 'list', g.id]).json.open, [{ id: 'Q-1', text: 'Which clock?' }]);
   assert.equal(run(['question', 'list', g.id]).json.blocking, true);
   assert.notEqual(run(['question', 'resolve', g.id, 'Q-1']).code, 0, 'an answer is required');
-  assert.notEqual(run(['question', 'resolve', g.id, 'Q-9', '--answer', 'x']).code, 0);
+  const unattested = run(['question', 'resolve', g.id, 'Q-1', '--answer', 'my own reading']);
+  assert.match(unattested.stderr, /--answer needs --by user/);
+  assert.notEqual(run(['question', 'add', g.id, 'Sneaky?', '--answer', 'x', '--by', 'model']).code, 0);
+  assert.match(text(), /Open:\*\* Q-1/, 'a refused answer leaves the question open');
+  assert.notEqual(run(['question', 'resolve', g.id, 'Q-9', '--answer', 'x', '--by', 'user']).code, 0);
 
   // A hand-written item gets an ID, and IDs are not reused after a question is answered.
   edit(file, (s) => s.replace('## Risks & Unknowns\n', '## Risks & Unknowns\n\n- **Open:** Retry on timeout?\n'));
   assert.equal(run(['question', 'list', g.id]).json.unnumbered, 1);
   assert.deepEqual(run(['question', 'number', g.id]).json.numbered, ['Q-3']);
-  const r = run(['question', 'resolve', g.id, 'Q-1', '--answer', 'The server clock']);
+  const r = run(['question', 'resolve', g.id, 'Q-1', '--answer', 'The server clock', '--by', 'user']);
   assert.deepEqual([r.json.status, r.json.still_open], ['answered', 1]);
-  assert.match(text(), /- \*\*Q:\*\* Q-1: Which clock\? \*\*A:\*\* The server clock/);
+  assert.match(text(), /- \*\*Q:\*\* Q-1: Which clock\? \*\*A \(user\):\*\* The server clock/);
   assert.equal(run(['question', 'add', g.id, 'Another?']).json.id, 'Q-4');
-  run(['question', 'resolve', g.id, 'Q-3', '--answer', 'Yes, twice']);
-  run(['question', 'resolve', g.id, 'Q-4', '--answer', 'No']);
+  run(['question', 'resolve', g.id, 'Q-3', '--answer', 'Yes, twice', '--by', 'user']);
+  run(['question', 'resolve', g.id, 'Q-4', '--answer', 'No', '--by', 'user']);
   assert.equal(run(['question', 'list', g.id]).json.blocking, false);
 
   // Cancelled goals refuse changes.
@@ -1633,8 +1637,8 @@ test('question: open items in tasks, unmarked questions and placeholders block, 
   assert.match(text, /- \*\*Open:\*\* Q-1: Should retries be capped\?/);
   assert.match(text, /- \*\*Open:\*\* Q-2: \[T-01\] Which table does it write to\?/);
 
-  run(['question', 'resolve', g.id, 'Q-1', '--answer', 'Yes, three']);
-  run(['question', 'resolve', g.id, 'Q-2', '--answer', 'orders']);
+  run(['question', 'resolve', g.id, 'Q-1', '--answer', 'Yes, three', '--by', 'user']);
+  run(['question', 'resolve', g.id, 'Q-2', '--answer', 'orders', '--by', 'user']);
   edit(goalFile, (s) => s.replace(', TBD which users', ' for admins'));
   assert.deepEqual(problems(), []);
   assert.equal(run(['question', 'list', g.id]).json.blocking, false);

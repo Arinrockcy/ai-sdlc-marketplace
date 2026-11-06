@@ -57,7 +57,7 @@ Before you write anything, find the gaps in the description and ask the user abo
 
 ## 3. Goal
 - Run `$AISDLC goal new <short title>`. Open the `file` it returns.
-- Record each intake answer with `$AISDLC question add <G-id> "<question>" --answer "<the user's answer>"`, which writes it under `## Clarifications`, so `/aisdlc:challenge` doesn't ask it again.
+- Record each intake answer with `$AISDLC question add <G-id> "<question>" --answer "<the user's answer>" --by user`, which writes it under `## Clarifications`, so `/aisdlc:challenge` doesn't ask it again.
 - Fill in Problem, Outcome / Acceptance Criteria (measurable), Scope In/Out, and Risks & Unknowns, using only the description, the answers and what the code shows. Anything the user deferred or couldn't answer is recorded with `$AISDLC question add <G-id> "<question>"`, which keeps it under Risks & Unknowns. Do **not** guess answers; `/aisdlc:challenge` resolves them, and governance rule GOV-05 fails while any `**Open:**` item remains.
 
 ## 4. Split into tasks

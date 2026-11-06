@@ -18,7 +18,7 @@ const NOT_UNDERSTOOD = /Usage:|Unknown |Invalid |needs a value/;
 
 // Values for placeholders. `<name>` placeholders are keyed by name; `…` after an option by the option.
 const PLACEHOLDERS = { 'G-id': 'G-001', 'T-id': 'T-01', 'ADR-id': 'ADR-001', 'GOV-id': 'GOV-01', 'Q-id': 'Q-1', keywords: 'rate limiting' };
-const OPTION_SAMPLES = { risk: 'medium', depends: 'T-01', verify: 'true', answer: 'x', stage: 'plan', severity: 'must' };
+const OPTION_SAMPLES = { risk: 'medium', depends: 'T-01', verify: 'true', answer: 'x', by: 'user', stage: 'plan', severity: 'must' };
 
 function skillFiles() {
   const plugins = path.join(REPO, 'plugins');

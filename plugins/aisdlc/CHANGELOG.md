@@ -2,6 +2,14 @@
 
 All notable changes to the `aisdlc` plugin. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/). Until 1.0.0, a minor version may include breaking changes; each one is listed under **Breaking** with its upgrade step.
 
+## [0.21.0] - 2026-11-06
+
+### Added
+- `question add --answer` and `question resolve --answer` need `--by user`, which attests that the user gave the answer. The script can't tell who typed it, so this stops a model from recording its own words by accident, not by intent. Clarifications now read `**A (user):** …`, so a reviewer can tell a recorded answer from a hand-written line. The skills pass it, and tell the agent that a recommendation is not an answer.
+
+### Breaking
+- Scripts or notes calling `question add|resolve` with `--answer` and no `--by user` now fail. See [Upgrading to 0.21.0](../../README.md#upgrading).
+
 ## [0.20.0] - 2026-11-06
 
 ### Added

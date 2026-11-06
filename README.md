@@ -117,6 +117,12 @@ See [`plugins/aisdlc/docs/stack-plugin-contract.md`](plugins/aisdlc/docs/stack-p
 
 Each plugin keeps a changelog: [`aisdlc`](plugins/aisdlc/CHANGELOG.md), [`aisdlc-nodejs`](plugins/aisdlc-nodejs/CHANGELOG.md). Breaking changes are listed there with their upgrade step.
 
+### 0.20.x → 0.21.0 (`aisdlc`)
+
+Recorded answers say they came from the user.
+
+- Add `--by user` to any `question add|resolve … --answer "…"` call of your own (hooks, scripts, notes). Answers already in Clarifications keep working as written.
+
 ### 0.19.x → 0.20.0 (`aisdlc`)
 
 Linked ADRs are scanned for open questions too.
