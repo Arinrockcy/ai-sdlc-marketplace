@@ -2,6 +2,20 @@
 
 All notable changes to the `aisdlc` plugin. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/). Until 1.0.0, a minor version may include breaking changes; each one is listed under **Breaking** with its upgrade step.
 
+## [0.24.1] - 2026-11-06
+
+### Fixed
+- `docs sync` no longer drops the start of a document that opens with `---`: front matter now needs a closing `---` and `key: value` lines between, so a horizontal rule at the top is indexed.
+- CRLF files are read correctly: their front matter is skipped, not indexed as text.
+- Words are matched across all scripts (`Überblick`, Cyrillic, CJK), not just ASCII.
+- A heading keeps a trailing `#` that is part of its text (`## C#`); only a closing sequence after a space is removed.
+- A `docs.paths` entry that is a symlink is followed instead of indexing zero files.
+- `docs status` and `docs search` no longer read every ADR to check freshness; an ADR's ID and status are read only when the index is rebuilt.
+- The error for a search with no usable keyword names the common words that are dropped.
+
+### Added
+- `docs clear` unsets `docs.paths`, leaving only ADR bodies indexed.
+
 ## [0.24.0] - 2026-11-06
 
 ### Added

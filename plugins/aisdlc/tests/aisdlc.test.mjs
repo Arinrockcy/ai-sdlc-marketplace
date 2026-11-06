@@ -1840,3 +1840,37 @@ test('question: open items in tasks, unmarked questions and placeholders block, 
   edit(taskFile, (s) => s.replace('Remove every `TODO` and `???` marker', 'Remove every TODO marker'));
   assert.match(problems().join('\n'), /placeholder in T-01: .*TODO marker.*or put the word in backticks/);
 });
+
+test('cli: docs index handles a leading rule, CRLF, symlinked entries, non-ASCII words, "C#" headings and clear', () => {
+  const { run, dir } = project();
+  run(['init']);
+  const write = (rel, text) => { fs.mkdirSync(path.dirname(path.join(dir, rel)), { recursive: true }); fs.writeFileSync(path.join(dir, rel), text); };
+  const sections = () => JSON.parse(fs.readFileSync(path.join(dir, '.aisdlc/cache/docs-index.json'), 'utf8')).sections;
+
+  write('docs/hr.md', '---\n\n# Intro\nalpha content\n\n---\n\n# Second\nbeta\n');
+  write('docs/crlf.md', '---\r\ntitle: x\r\nstatus: draft\r\n---\r\n# Body\r\ngamma\r\n');
+  write('docs/uni.md', '# Überblick\nпривет мир\n\n## C#\ntext\n\n## Title ##\ntext\n');
+  fs.symlinkSync(path.join(dir, 'docs/hr.md'), path.join(dir, 'link.md'));
+  run(['docs', 'paths', 'docs', 'link.md']);
+  run(['docs', 'sync']);
+  const all = sections();
+  assert.ok(all.some((s) => s.path === 'docs/hr.md' && s.heading === 'Intro'), 'a leading rule is not front matter');
+  assert.equal(run(['docs', 'search', 'alpha']).json.matches[0].path, 'docs/hr.md');
+  const crlf = all.filter((s) => s.path === 'docs/crlf.md');
+  assert.deepEqual(crlf.map((s) => s.heading), ['Body'], 'CRLF front matter is skipped');
+  assert.equal(run(['docs', 'search', 'draft']).json.matches.length, 0);
+  assert.ok(run(['docs', 'search', 'überblick']).json.matches.length > 0, 'non-ASCII words are indexed');
+  assert.ok(run(['docs', 'search', 'привет']).json.matches.length > 0);
+  assert.ok(all.some((s) => s.heading === 'C#') && all.some((s) => s.heading === 'Title'));
+  fs.rmSync(path.join(dir, 'docs'), { recursive: true });
+  fs.mkdirSync(path.join(dir, 'real'));
+  write('real/n.md', '# Linked\ndelta\n');
+  fs.symlinkSync(path.join(dir, 'real'), path.join(dir, 'ln'));
+  assert.equal(run(['docs', 'paths', 'ln']).json.files, 1, 'a symlinked entry is followed');
+
+  const cleared = run(['docs', 'clear']);
+  assert.equal(cleared.code, 0);
+  assert.equal(run(['docs', 'paths']).json.paths, null);
+  assert.match(run(['docs', 'search', 'delta']).json.note, /not configured/);
+  assert.match(run(['docs', 'search', 'use']).stderr, /common words/);
+});

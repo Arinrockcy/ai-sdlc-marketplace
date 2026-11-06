@@ -734,35 +734,48 @@ function normalizeDocsEntry(root, entry) {
   return rel;
 }
 
-// Markdown files under a folder, in a stable order. Symlinks are not followed, so a loop cannot hang the walk.
-function markdownUnder(root, rel) {
+// Markdown files under a folder, in a stable order. A configured entry may itself be a symlink (it is followed,
+// as the check that accepted it did), but symlinks found while walking are not, so a loop cannot hang the walk.
+function markdownUnder(root, rel, entry = true) {
   const full = path.join(root, rel);
-  const stat = fs.lstatSync(full);
+  const stat = entry ? fs.statSync(full) : fs.lstatSync(full);
   if (stat.isFile()) return [rel];
   if (!stat.isDirectory()) return [];
   return fs.readdirSync(full, { withFileTypes: true }).sort((a, b) => (a.name < b.name ? -1 : 1)).flatMap((d) => {
     const child = rel === '.' ? d.name : `${rel}/${d.name}`;
     // Under .aisdlc/ only the ADRs are documentation; goals, the registry and the cache are workflow state.
     if (child.startsWith('.aisdlc/') && child !== '.aisdlc/adr' && !child.startsWith('.aisdlc/adr/')) return [];
-    if (d.isDirectory()) return DOCS_SKIPPED_DIRS.has(d.name) ? [] : markdownUnder(root, child);
+    if (d.isDirectory()) return DOCS_SKIPPED_DIRS.has(d.name) ? [] : markdownUnder(root, child, false);
     return d.isFile() && /\.md$/i.test(d.name) ? [child] : [];
   });
 }
 
 // Every file the index covers: ADRs (always) and documentation (when configured). A file is listed once, and an
-// ADR reached through a documentation entry stays an ADR.
+// ADR reached through a documentation entry stays an ADR. Only names are listed here; an ADR's ID and status are
+// read when the index is rebuilt, so checking freshness reads no file.
 function docsFiles(root, entries) {
-  const adrs = new Map(listAdrs(root).map((a) => [toPosix(path.relative(root, a.file)), a]));
+  const dir = path.join(aisdlcDir(root), 'adr');
+  const adrs = new Set(fs.existsSync(dir) ? fs.readdirSync(dir).filter((f) => /^ADR-\d+.*\.md$/.test(f)).sort().map((f) => toPosix(path.relative(root, path.join(dir, f)))) : []);
   const docs = [];
   for (const entry of entries || []) for (const f of markdownUnder(root, entry)) if (!adrs.has(f) && !docs.includes(f)) docs.push(f);
-  return [...[...adrs.keys()].map((f) => ({ file: f, adr: adrs.get(f) })), ...docs.map((f) => ({ file: f }))];
+  return [...[...adrs].map((f) => ({ file: f, adr: true })), ...docs.map((f) => ({ file: f }))];
+}
+
+// Index of the line after a leading front-matter block, or 0 when there is none. A leading `---` counts only when
+// a closing `---` follows and everything between reads as `key: value`, list items or indented lines, so a
+// horizontal rule at the top of a document is not mistaken for front matter.
+function frontMatterEnd(lines) {
+  if (lines[0]?.trimEnd() !== '---') return 0;
+  const close = lines.findIndex((l, i) => i > 0 && l.trimEnd() === '---');
+  if (close < 0) return 0;
+  return lines.slice(1, close).every((l) => !l.trim() || /^[A-Za-z_][\w-]*\s*:/.test(l) || /^\s/.test(l) || /^- /.test(l)) ? close + 1 : 0;
 }
 
 // Heading sections of a Markdown text: `{ heading, trail, start, end }` with 1-based inclusive line numbers. Headings
 // inside fenced code (``` or ~~~) are not headings, and an indented line is code, not a heading. Text before the
 // first heading is a section of its own with no heading, kept only when it has content. `from` skips front matter.
 function markdownSections(text, from = 0) {
-  const lines = text.split('\n');
+  const lines = text.split(/\r?\n/);
   const sections = [];
   const stack = [];
   let fence = null;
@@ -778,7 +791,7 @@ function markdownSections(text, from = 0) {
       if (!fence) fence = { ch: f[1][0], n: f[1].length };
       else if (f[1][0] === fence.ch && f[1].length >= fence.n && /^ {0,3}[`~]+\s*$/.test(line)) fence = null;
     }
-    const h = !fence && !f ? line.match(/^ {0,3}(#{1,6})\s+(.*?)\s*#*\s*$/) : null;
+    const h = !fence && !f ? line.match(/^ {0,3}(#{1,6})\s+(.*?)(?:\s+#+)?\s*$/) : null;
     if (h) {
       close(i);
       stack.length = Math.min(stack.length, h[1].length - 1);
@@ -790,7 +803,7 @@ function markdownSections(text, from = 0) {
   return sections;
 }
 
-const docWords = (text) => [...new Set(String(text).toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length > 2 && !STOPWORDS.has(w)))];
+const docWords = (text) => [...new Set(String(text).toLowerCase().split(/[^\p{L}\p{N}]+/u).filter((w) => w.length > 2 && !STOPWORDS.has(w)))];
 
 // What decides whether the index is fresh: the configured entries and each file's size and modification time.
 // No file is read to check it. An edit that keeps the size within one file-system clock tick is not seen.
@@ -817,10 +830,11 @@ function docsSync(root, force = false) {
   if (!state.stale && !force) return { ...state, rebuilt: false };
   const sections = state.files.flatMap(({ file, adr }) => {
     const text = fs.readFileSync(path.join(root, file), 'utf8');
-    const front = text.startsWith('---\n') ? text.split('\n').indexOf('---', 1) + 1 : 0;
+    const front = frontMatterEnd(text.split(/\r?\n/));
+    const meta = adr ? readDoc(path.join(root, file)).data : null;
     return markdownSections(text, front).map((s) => ({
       path: file, heading: s.heading, trail: s.trail, start: s.start, end: s.end,
-      ...(adr ? { adr: adr.id, status: adr.status ?? '' } : {}),
+      ...(meta ? { adr: meta.id, status: meta.status ?? '' } : {}),
       heading_words: docWords(s.heading), words: docWords(s.body),
     }));
   });
@@ -836,7 +850,7 @@ function docsSync(root, force = false) {
 // that only mentions it; ties go to the section matching more keywords, then to file order. Bodies are never printed.
 function docsSearch(root, words, budget) {
   const terms = [...new Set(docWords(words.join(' ')))];
-  if (!terms.length) fail('Usage: docs search <keywords> [--budget N] (words of 3 or more letters)');
+  if (!terms.length) fail(`Usage: docs search <keywords> [--budget N]. A keyword needs 3 or more letters and is not one of these common words: ${[...STOPWORDS].join(', ')}.`);
   const synced = docsSync(root);
   const hit = (list, t) => list.some((w) => w.startsWith(t));
   const ranked = synced.index.sections.map((sec, order) => {
@@ -2297,6 +2311,12 @@ const commands = {
       saveConfig(root, cfg);
       return out({ paths, files: docsFiles(root, paths).filter((f) => !f.adr).length });
     }
+    if (action === 'clear') {
+      const cfg = loadConfig(root);
+      if (cfg.docs) { delete cfg.docs.paths; if (!Object.keys(cfg.docs).length) delete cfg.docs; }
+      saveConfig(root, cfg);
+      return out({ paths: null, note: 'Project documentation is not configured; only ADR bodies are indexed.' });
+    }
     if (action === 'sync') {
       const r = docsSync(root);
       return out({ rebuilt: r.rebuilt, documentation: r.entries ? 'configured' : 'not configured', files: r.files.length, sections: r.index.sections.length, index: toPosix(path.relative(root, path.join(aisdlcDir(root), DOCS_INDEX))) });
@@ -2319,7 +2339,7 @@ const commands = {
       if (!Number.isInteger(budget) || budget < 100) fail('--budget must be a whole number of tokens, 100 or more');
       return out(docsSearch(root, rest, budget));
     }
-    fail('Usage: docs paths [<path>...] | sync | status | search <keywords> [--budget N]');
+    fail('Usage: docs paths [<path>...] | clear | sync | status | search <keywords> [--budget N]');
   },
 
   graph([action, ...words], opts) {
