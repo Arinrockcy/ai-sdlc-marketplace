@@ -1492,6 +1492,115 @@ test('cli: task verify refuses inline code that names no project file, and test 
   assert.equal(unanchoredVerify(dir, 'cd src && node -e "1+1"'), null, 'a part that is not inline code is a real command');
 });
 
+test('cli: docs sync indexes heading sections of documentation and ADRs, with line ranges that match the files', () => {
+  const { run, dir } = project();
+  run(['init']);
+  const write = (rel, text) => { fs.mkdirSync(path.dirname(path.join(dir, rel)), { recursive: true }); fs.writeFileSync(path.join(dir, rel), text); };
+  const index = () => JSON.parse(fs.readFileSync(path.join(dir, '.aisdlc/cache/docs-index.json'), 'utf8'));
+  const rows = () => index().sections.map((x) => `${x.path}|${x.trail}|${x.start}-${x.end}`);
+
+  // Unset: nothing configured, no ADRs, so the index is empty but builds.
+  const empty = run(['docs', 'status']).json;
+  assert.deepEqual([empty.configured, empty.built, empty.stale, empty.files], [false, false, true, 0]);
+  assert.match(empty.note, /not configured/);
+  assert.deepEqual([run(['docs', 'sync']).json.sections, run(['docs', 'status']).json.stale], [0, false]);
+
+  // Unset, but ADR bodies are indexed with their ID and status.
+  const adr = path.join(dir, run(['adr', 'new', 'Use', 'Redis', '--goal', run(['goal', 'new', 'Cache']).json.id]).json.file);
+  assert.equal(run(['docs', 'status']).json.stale, true, 'a new ADR makes the index stale');
+  run(['docs', 'sync']);
+  const adrRows = index().sections.filter((x) => x.adr);
+  assert.ok(adrRows.length >= 3 && adrRows.every((x) => x.adr === 'ADR-001' && x.path.startsWith('.aisdlc/adr/')));
+  assert.ok(adrRows.some((x) => x.heading === 'Decision'));
+
+  // Documentation: nested headings, no heading, fences, an indented block, a file with only a preface.
+  write('docs/a/guide.md', '# Guide\nintro\n\n## Setup\nrun it\n```sh\n# not a heading\n```\n~~~\n## nor this\n~~~\n    # nor this: indented code\n### Deep\nbottom\n');
+  write('docs/plain.md', 'no heading at all\nsecond line\n');
+  write('docs/empty.md', '\n\n');
+  write('docs/readme.txt', '# not markdown\n');
+  fs.mkdirSync(path.join(dir, 'docs/emptydir'));
+  assert.deepEqual(run(['docs', 'paths', 'docs']).json, { paths: ['docs'], files: 3 });
+  const built = run(['docs', 'sync']).json;
+  assert.equal(built.rebuilt, true);
+  assert.deepEqual(rows().filter((r) => r.startsWith('docs/')), [
+    'docs/a/guide.md|Guide|1-2',
+    'docs/a/guide.md|Guide > Setup|4-12',
+    'docs/a/guide.md|Guide > Setup > Deep|13-14',
+    'docs/plain.md||1-2',
+  ]);
+  // The ranges point at the real lines.
+  const guide = fs.readFileSync(path.join(dir, 'docs/a/guide.md'), 'utf8').split('\n');
+  assert.equal(guide[4 - 1], '## Setup');
+  assert.equal(guide[13 - 1], '### Deep');
+  assert.equal(run(['docs', 'sync']).json.rebuilt, false, 'an unchanged tree is not parsed again');
+
+  // A changed file, a new file and a deleted file each make the index stale.
+  write('docs/plain.md', 'no heading at all\nsecond line\nthird line\n');
+  assert.equal(run(['docs', 'status']).json.stale, true);
+  run(['docs', 'sync']);
+  assert.ok(rows().includes('docs/plain.md||1-3'));
+  fs.rmSync(path.join(dir, 'docs/plain.md'));
+  assert.equal(run(['docs', 'status']).json.stale, true);
+  run(['docs', 'sync']);
+  assert.ok(!rows().some((r) => r.startsWith('docs/plain.md')));
+
+  // Nothing is written outside .aisdlc/cache/ by building the index.
+  assert.deepEqual(fs.readdirSync(path.join(dir, '.aisdlc/cache')).sort(), ['.gitignore', 'docs-index.json']);
+  assert.ok(adr);
+});
+
+test('cli: docs paths validates entries, and a duplicate or overlapping entry indexes each file once', () => {
+  const { run, dir } = project();
+  run(['init']);
+  fs.mkdirSync(path.join(dir, 'docs/sub'), { recursive: true });
+  fs.writeFileSync(path.join(dir, 'docs/a.md'), '# A\n');
+  fs.writeFileSync(path.join(dir, 'docs/sub/b.md'), '# B\n');
+  fs.writeFileSync(path.join(dir, 'notes.txt'), 'x\n');
+  const bad = (entry) => run(['docs', 'paths', entry]);
+  assert.match(bad('missing').stderr, /docs\.paths entry "missing" does not exist/);
+  assert.match(bad('/etc').stderr, /relative to the project root/);
+  assert.match(bad('../x').stderr, /relative to the project root/);
+  assert.match(bad('notes.txt').stderr, /not Markdown/);
+  assert.match(bad('.aisdlc/goals').stderr, /workflow state/);
+  assert.equal(run(['docs', 'paths']).json.paths, null, 'a refused list stores nothing');
+
+  assert.deepEqual(run(['docs', 'paths', 'docs', './docs/', 'docs/sub', 'docs/a.md']).json, { paths: ['docs', 'docs/sub', 'docs/a.md'], files: 2 });
+  assert.equal(run(['docs', 'sync']).json.sections, 2);
+  assert.deepEqual(run(['docs', 'paths', 'docs/a.md']).json.paths, ['docs/a.md'], 'a new list replaces the old one');
+  assert.deepEqual(run(['docs', 'paths']).json.paths, ['docs/a.md']);
+
+  // A folder that contains the ADRs indexes each ADR once, as an ADR.
+  run(['adr', 'new', 'Pick', 'a', 'queue', '--goal', run(['goal', 'new', 'Queue']).json.id]);
+  run(['docs', 'paths', '.aisdlc']);
+  run(['docs', 'sync']);
+  const index = JSON.parse(fs.readFileSync(path.join(dir, '.aisdlc/cache/docs-index.json'), 'utf8'));
+  assert.ok(index.sections.every((x) => x.path.startsWith('.aisdlc/adr/')) && index.sections.every((x) => x.adr));
+  run(['docs', 'paths', '.aisdlc/adr', 'docs/a.md']);
+  assert.equal(run(['docs', 'status']).json.files, 2);
+});
+
+test('cli: docs reports a bad docs.paths in config by name, and an unknown subcommand fails with usage', () => {
+  const { run, dir } = project();
+  run(['init']);
+  const cfg = path.join(dir, '.aisdlc/config.json');
+  const setPaths = (v) => edit(cfg, (s) => JSON.stringify({ ...JSON.parse(s), docs: { paths: v } }));
+  setPaths('docs');
+  assert.match(run(['docs', 'sync']).stderr, /docs\.paths in \.aisdlc\/config\.json must be a list of project paths, found string/);
+  const status = run(['docs', 'status']);
+  assert.equal(status.code, 0);
+  assert.match(status.json.problems[0], /must be a list/);
+  setPaths([7]);
+  assert.match(run(['docs', 'sync']).stderr, /docs\.paths entry 7 must be a project path/);
+  setPaths(['gone']);
+  assert.match(run(['docs', 'sync']).stderr, /"gone" does not exist/);
+  assert.match(run(['docs', 'status']).json.problems[0], /"gone" does not exist/);
+  for (const args of [['docs'], ['docs', 'bogus']]) {
+    const r = run(args);
+    assert.equal(r.code, 1);
+    assert.match(r.stderr, /Usage: docs paths/);
+  }
+});
+
 test('cli: goal overlap finds unfinished goals that share wording, by goal or by keywords', () => {
   const { run, dir } = project();
   run(['init']);

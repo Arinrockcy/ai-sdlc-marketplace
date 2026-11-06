@@ -704,6 +704,133 @@ function goalOverlap(root, words, selfId, files = []) {
   return matches;
 }
 
+// ---------- docs ----------
+
+// A third index, for the project's own Markdown documentation and the bodies of ADRs: one entry per heading
+// section, built by local parsing with no model. It lives in .aisdlc/cache/ and is searched, never read whole.
+// `docs.paths` in config lists the documentation: project-relative files and folders (folders are searched
+// recursively for *.md, no globs). Unset, only the ADRs are indexed.
+const DOCS_INDEX = path.join('cache', 'docs-index.json');
+const DOCS_SKIPPED_DIRS = new Set(['.git', 'node_modules']);
+const toPosix = (p) => p.split(path.sep).join('/');
+
+// The configured entries, normalised, or null when `docs.paths` is unset. A wrong type or a bad entry is an error that names it.
+function docsPaths(root) {
+  const raw = loadConfig(root).docs?.paths;
+  if (raw === undefined || raw === null) return null;
+  if (!Array.isArray(raw)) fail(`docs.paths in .aisdlc/config.json must be a list of project paths, found ${typeof raw}. Set it with \`docs paths <path>...\`.`);
+  return [...new Set(raw.map((entry) => normalizeDocsEntry(root, entry)))];
+}
+
+function normalizeDocsEntry(root, entry) {
+  if (typeof entry !== 'string' || !entry.trim()) fail(`docs.paths entry ${JSON.stringify(entry)} must be a project path.`);
+  if (path.isAbsolute(entry) || entry.split(/[\\/]/).includes('..')) fail(`docs.paths entry "${entry}" must be relative to the project root and inside it.`);
+  const rel = toPosix(path.normalize(entry.trim())).replace(/^\.\//, '').replace(/\/+$/, '') || '.';
+  const full = path.join(root, rel);
+  if (!fs.existsSync(full)) fail(`docs.paths entry "${entry}" does not exist. Fix the list with \`docs paths <path>...\`.`);
+  if (fs.statSync(full).isFile() && !/\.md$/i.test(rel)) fail(`docs.paths entry "${entry}" is a file but not Markdown (.md).`);
+  const inState = rel === '.aisdlc' || rel.startsWith('.aisdlc/');
+  if (inState && rel !== '.aisdlc' && rel !== '.aisdlc/adr' && !rel.startsWith('.aisdlc/adr/')) fail(`docs.paths entry "${entry}" is workflow state, not documentation. ADRs are indexed already.`);
+  return rel;
+}
+
+// Markdown files under a folder, in a stable order. Symlinks are not followed, so a loop cannot hang the walk.
+function markdownUnder(root, rel) {
+  const full = path.join(root, rel);
+  const stat = fs.lstatSync(full);
+  if (stat.isFile()) return [rel];
+  if (!stat.isDirectory()) return [];
+  return fs.readdirSync(full, { withFileTypes: true }).sort((a, b) => (a.name < b.name ? -1 : 1)).flatMap((d) => {
+    const child = rel === '.' ? d.name : `${rel}/${d.name}`;
+    // Under .aisdlc/ only the ADRs are documentation; goals, the registry and the cache are workflow state.
+    if (child.startsWith('.aisdlc/') && child !== '.aisdlc/adr' && !child.startsWith('.aisdlc/adr/')) return [];
+    if (d.isDirectory()) return DOCS_SKIPPED_DIRS.has(d.name) ? [] : markdownUnder(root, child);
+    return d.isFile() && /\.md$/i.test(d.name) ? [child] : [];
+  });
+}
+
+// Every file the index covers: ADRs (always) and documentation (when configured). A file is listed once, and an
+// ADR reached through a documentation entry stays an ADR.
+function docsFiles(root, entries) {
+  const adrs = new Map(listAdrs(root).map((a) => [toPosix(path.relative(root, a.file)), a]));
+  const docs = [];
+  for (const entry of entries || []) for (const f of markdownUnder(root, entry)) if (!adrs.has(f) && !docs.includes(f)) docs.push(f);
+  return [...[...adrs.keys()].map((f) => ({ file: f, adr: adrs.get(f) })), ...docs.map((f) => ({ file: f }))];
+}
+
+// Heading sections of a Markdown text: `{ heading, trail, start, end }` with 1-based inclusive line numbers. Headings
+// inside fenced code (``` or ~~~) are not headings, and an indented line is code, not a heading. Text before the
+// first heading is a section of its own with no heading, kept only when it has content. `from` skips front matter.
+function markdownSections(text, from = 0) {
+  const lines = text.split('\n');
+  const sections = [];
+  const stack = [];
+  let fence = null;
+  let cur = { heading: '', trail: '', start: from + 1, words: [] };
+  const close = (end) => {
+    while (end > cur.start && !lines[end - 1].trim()) end -= 1;
+    if (cur.heading || lines.slice(cur.start - 1, end).some((l) => l.trim())) sections.push({ heading: cur.heading, trail: cur.trail, start: cur.start, end, body: cur.words.join(' ') });
+  };
+  for (let i = from; i < lines.length; i++) {
+    const line = lines[i];
+    const f = line.match(/^ {0,3}(`{3,}|~{3,})/);
+    if (f) {
+      if (!fence) fence = { ch: f[1][0], n: f[1].length };
+      else if (f[1][0] === fence.ch && f[1].length >= fence.n && /^ {0,3}[`~]+\s*$/.test(line)) fence = null;
+    }
+    const h = !fence && !f ? line.match(/^ {0,3}(#{1,6})\s+(.*?)\s*#*\s*$/) : null;
+    if (h) {
+      close(i);
+      stack.length = Math.min(stack.length, h[1].length - 1);
+      stack[h[1].length - 1] = h[2];
+      cur = { heading: h[2], trail: stack.filter(Boolean).join(' > '), start: i + 1, words: [] };
+    } else cur.words.push(line);
+  }
+  close(lines.length);
+  return sections;
+}
+
+const docWords = (text) => [...new Set(String(text).toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length > 2 && !STOPWORDS.has(w)))];
+
+// What decides whether the index is fresh: the configured entries and each file's size and modification time.
+// No file is read to check it. An edit that keeps the size within one file-system clock tick is not seen.
+function docsStamp(root, entries, files) {
+  return { paths: entries || [], files: files.map((f) => { const st = fs.statSync(path.join(root, f.file)); return [f.file, st.size, st.mtimeMs]; }) };
+}
+
+function docsIndexRead(root) {
+  const file = path.join(aisdlcDir(root), DOCS_INDEX);
+  try { const data = JSON.parse(fs.readFileSync(file, 'utf8')); return data?.version === 1 ? data : null; } catch { return null; }
+}
+
+function docsState(root) {
+  const entries = docsPaths(root);
+  const files = docsFiles(root, entries);
+  const stamp = docsStamp(root, entries, files);
+  const index = docsIndexRead(root);
+  return { entries, files, stamp, index, stale: !index || JSON.stringify(index.stamp) !== JSON.stringify(stamp) };
+}
+
+// Rebuilds the index when it is stale (or `force`). Returns the state afterwards and whether it was rebuilt.
+function docsSync(root, force = false) {
+  const state = docsState(root);
+  if (!state.stale && !force) return { ...state, rebuilt: false };
+  const sections = state.files.flatMap(({ file, adr }) => {
+    const text = fs.readFileSync(path.join(root, file), 'utf8');
+    const front = text.startsWith('---\n') ? text.split('\n').indexOf('---', 1) + 1 : 0;
+    return markdownSections(text, front).map((s) => ({
+      path: file, heading: s.heading, trail: s.trail, start: s.start, end: s.end,
+      ...(adr ? { adr: adr.id, status: adr.status ?? '' } : {}),
+      heading_words: docWords(s.trail || s.heading), words: docWords(s.body),
+    }));
+  });
+  const index = { version: 1, stamp: state.stamp, sections };
+  const file = path.join(aisdlcDir(root), DOCS_INDEX);
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, JSON.stringify(index));
+  return { ...state, index, stale: false, rebuilt: true };
+}
+
 // ---------- graph ----------
 
 // Graphify is only here to cut the tokens the workflow spends finding code. It runs code-only (local parsing, no
@@ -2129,6 +2256,36 @@ const commands = {
     if (action !== 'sync') fail('Usage: registry sync | search <keywords>');
     const rel = (name) => path.relative(root, path.join(aisdlcDir(root), name));
     out({ ...registrySync(root), file: rel('registry.md'), archive: rel('registry-archive.md') });
+  },
+
+  docs([action, ...rest]) {
+    const root = findRoot();
+    if (action === 'paths') {
+      if (!rest.length) return out({ paths: docsPaths(root) });
+      const paths = [...new Set(rest.map((entry) => normalizeDocsEntry(root, entry)))];
+      const cfg = loadConfig(root);
+      cfg.docs = { ...(cfg.docs || {}), paths };
+      saveConfig(root, cfg);
+      return out({ paths, files: docsFiles(root, paths).filter((f) => !f.adr).length });
+    }
+    if (action === 'sync') {
+      const r = docsSync(root);
+      return out({ rebuilt: r.rebuilt, documentation: r.entries ? 'configured' : 'not configured', files: r.files.length, sections: r.index.sections.length, index: toPosix(path.relative(root, path.join(aisdlcDir(root), DOCS_INDEX))) });
+    }
+    if (action === 'status') {
+      let state;
+      try { state = docsState(root); } catch (e) {
+        if (!(e instanceof UserError)) throw e;
+        return out({ configured: true, built: Boolean(docsIndexRead(root)), stale: true, problems: [e.message] });
+      }
+      return out({
+        configured: Boolean(state.entries), paths: state.entries,
+        ...(state.entries ? {} : { note: 'Project documentation is not configured; only ADR bodies are indexed. Set it with `docs paths <path>...`.' }),
+        built: Boolean(state.index), stale: state.stale, files: state.files.length, adrs: state.files.filter((f) => f.adr).length,
+        sections: state.index ? state.index.sections.length : 0,
+      });
+    }
+    fail('Usage: docs paths [<path>...] | sync | status');
   },
 
   graph([action, ...words], opts) {

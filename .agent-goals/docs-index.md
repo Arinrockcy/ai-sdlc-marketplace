@@ -5,7 +5,7 @@
 - **Requested:** 2026-10-12, source: user request "draft the docs-index goal", after the question "what if we have 100K lines of knowledge documentation in MD files"
 - **Revised:** 2026-11-06, against `master` at `d7851eb` (`aisdlc` 0.23.0), after a review found the draft stale and `docs.paths` undefined; the three answers of that date are in Decided
 - **Branch:** `docs-index`, off `master` at `d7851eb`; not created yet
-- **Plan approved by user:** not yet
+- **Plan approved by user:** yes, 2026-11-06
 - **Orchestrated from:** a session in `/Users/arins/work/aisdlc-demo`; every changed file is in this repo
 
 ## Goal
@@ -128,17 +128,17 @@ sub-task's files.
 
 ### 1. Build the index: `docs sync` and `docs status`
 
-- **Status:** pending
+- **Status:** done, 2026-11-06
 - **Scope:** Read the documentation paths from `docs.paths` in config (rules in Decided), and add every ADR file in `.aisdlc/adr/`. Add `docs paths <path>...` to validate and store the list. Split each Markdown file into heading sections (path, heading trail, first and last line), ignoring headings inside fenced code, both backtick and tilde fences. Write the index and the stamp (file list with size and mtime) under `.aisdlc/cache/` so an unchanged tree is not re-parsed. `docs status` reports whether it is configured, built and stale. With `docs.paths` unset, the index holds the ADRs only, and `docs status` says documentation is not configured. `docs` with no or an unknown subcommand prints its usage and exits non-zero.
 - **Areas:** `plugins/aisdlc/scripts/aisdlc.mjs`, `plugins/aisdlc/tests/aisdlc.test.mjs`
 - **Changes a screen:** no
 - **Depends on:** none
 - **Acceptance:** tests cover `docs.paths` unset with ADRs still indexed, no ADRs and no paths, an empty folder, nested headings, a file with no heading, a heading inside a backtick fence and inside a tilde fence, an indented code block, a deleted file, a changed file marking the index stale, and an ADR indexed with its ID; `docs paths` refusing a missing path, an absolute path, a `..` path and a non-string, replacing the old list, and printing it with no arguments; a `docs.paths` that is a string or other non-array in config being reported by name, not iterated; duplicate and overlapping entries, including one that contains `.aisdlc/adr/`, indexing each file once; an unknown `docs` subcommand failing with usage; line ranges in the index match the files; nothing is written outside `.aisdlc/cache/`
 - **Governor notes:**
-- **Review:**
-- **Verification:**
-- **Commit:**
-- **Task detail:**
+- **Review:** none run; the author checked the acceptance list against the tests only
+- **Verification:** `npm test` exits 0 with 155 tests, 153 pass, 0 fail, 2 skipped (the ESLint template tests; the baseline was 152, 150, 0, 2, so three tests were added); `npm run validate` passes. The three new tests cover the acceptance list. Only `aisdlc.mjs`, `aisdlc.test.mjs` and this ledger changed.
+- **Commit:** the commit on branch `docs-index` that holds this line
+- **Task detail:** `docs paths|sync|status` in `aisdlc.mjs`. Folder entries skip `.git`, `node_modules`, symlinks and everything under `.aisdlc/` except `adr/`; a file entry under `.aisdlc/` other than `adr/` is refused. Not yet decided by the user, listed for approval: those skips.
 
 ### 2. Search it: `docs search <keywords> [--budget N]`
 
