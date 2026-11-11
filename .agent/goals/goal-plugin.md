@@ -54,7 +54,7 @@ plugins. No failing test files.
 - Never assume; every question and decision goes to the user with options.
 - Govern: plan approval gate, rules check per sub-task before and after, scope
   and order control, ledger.
-- Ledger at `.agent-goals/<slug>.md` in the project, committed.
+- Ledger at `.agent/goals/<slug>.md` in the project, committed.
 - At plan approval the plugin asks once per goal, and records in the ledger:
   auto-commit per sub-task or ask before each commit; auto-fix up to 2 rounds
   or ask after every review.
@@ -124,7 +124,7 @@ project commands, the decisions, and the template text it needs.
 ### 3. Script for listing and scaffolding ledgers
 
 - **Status:** pending
-- **Scope:** A zero-dependency `goal.mjs` with two commands: list the ledgers in a project's `.agent-goals/` with slug, goal and status; create a ledger from the template for a given slug without overwriting an existing one. The skill is updated to call it with a written-out path.
+- **Scope:** A zero-dependency `goal.mjs` with two commands: list the ledgers in a project's `.agent/goals/` with slug, goal and status; create a ledger from the template for a given slug without overwriting an existing one. The skill is updated to call it with a written-out path.
 - **Source document:** none
 - **Areas:** `plugins/goal/scripts/goal.mjs`, `plugins/goal/tests/goal.test.mjs`, `plugins/goal/skills/goal-workflow/SKILL.md`
 - **Changes a screen:** no
@@ -184,7 +184,7 @@ project commands, the decisions, and the template text it needs.
 ### 7. Repo documentation
 
 - **Status:** pending
-- **Scope:** README: plugin table row, Claude and Copilot install lines, a `goal` section, a "Which plugin" paragraph, Copilot notes (un-namespaced names, the name-collision risk of `/start`, and `/start` as the Copilot entry if its hook cannot inject context, worded as unverified until sub-task 8), and lines 28, 265 and 267 updated for three plugins; the historical Upgrading lines are left alone. AGENTS.md: opening description and plugin list, a short `goal` paragraph (its `hooks/hooks.json` is an agent hook, not an aisdlc lifecycle hook; `.agent-goals/` is separate from `.aisdlc/`; `scripts/goal.mjs`), and a `goal` block under the preserved product decisions (triage, never assume, branch, commit and fix-loop choices asked once per goal, never push).
+- **Scope:** README: plugin table row, Claude and Copilot install lines, a `goal` section, a "Which plugin" paragraph, Copilot notes (un-namespaced names, the name-collision risk of `/start`, and `/start` as the Copilot entry if its hook cannot inject context, worded as unverified until sub-task 8), and lines 28, 265 and 267 updated for three plugins; the historical Upgrading lines are left alone. AGENTS.md: opening description and plugin list, a short `goal` paragraph (its `hooks/hooks.json` is an agent hook, not an aisdlc lifecycle hook; `.agent/goals/` is separate from `.aisdlc/`; `scripts/goal.mjs`), and a `goal` block under the preserved product decisions (triage, never assume, branch, commit and fix-loop choices asked once per goal, never push).
 - **Source document:** none
 - **Areas:** `README.md`, `AGENTS.md`
 - **Changes a screen:** no
@@ -247,6 +247,7 @@ project commands, the decisions, and the template text it needs.
 | 2026-10-03 | Auto-commit and fix loop in the plugin | Aligned to this repo: asked once per goal at plan approval, both recorded in the ledger | 2 |
 | 2026-10-03 | Overlap with aisdlc | README "Which plugin" paragraph and one sentence in the skill; no aisdlc skill edits | 2, 6 |
 | 2026-10-03 | Ledger folder name in the plugin | `.agent-goals/` | 2 |
+| 2026-11-11 | Ledger folder, here and in the plugin | `.agent/goals/`, replacing `.agent-goals/` (user); this repo's ledgers moved the same day | 2 |
 | 2026-10-03 | Project commands for this goal | As listed under "Project commands" | all |
 | 2026-10-03 | Commits for this goal | Auto-commit on `goal-plugin` once the gate passes | all |
 | 2026-10-03 | Task detail | Appended to the source task document when a sub-task finishes, with all four parts; applies to samuraiui's workflow and the plugin | 2 |
