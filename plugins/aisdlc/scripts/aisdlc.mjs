@@ -934,7 +934,7 @@ function codeStamp(root) {
   const blobs = new Map(staged.map((l) => { const [meta, f] = l.split('\t'); return [f, meta.split(' ')[1]]; }));
   for (const f of list('-d')) blobs.delete(f);
   const changed = [...new Set([...list('-m'), ...list('-o', '--exclude-standard')])].filter((f) => keep(f) && fs.existsSync(path.join(root, f)));
-  const hashes = changed.length ? git(root, ['hash-object', '--stdin-paths'], changed.join('\n')).trim().split('\n') : [];
+  const hashes = changed.length ? git(root, ['hash-object', '--stdin-paths'], changed.map((f) => path.join(root, f)).join('\n')).trim().split('\n') : [];
   changed.forEach((f, i) => blobs.set(f, hashes[i]));
   const entries = [...blobs].filter(([f]) => keep(f)).sort(([a], [b]) => (a < b ? -1 : 1));
   return createHash('sha256').update(JSON.stringify(entries)).digest('hex').slice(0, 16);
