@@ -1439,6 +1439,73 @@ const REVIEWER_CHECKS = {
   },
 };
 
+// The plan review's per-criterion table: one row per acceptance criterion of every unfinished task, where the reviewer
+// names what fails while that criterion is unmet. It makes the review of verify commands cover every criterion instead
+// of a sample, so a weak verify is found in the first review. It is part of the review only while an active plan rule
+// uses the `tasks-verifiable` check.
+const VERIFY_COVERAGE = /^verify coverage\b/i;
+const COVERAGE_ID = /^T-\d+\.\d+$/;
+const UNCOVERED = /^none\b/i;
+const tableCell = (v) => v.replace(/\|/g, '\\|').replace(/\s*\n\s*/g, ' ');
+const someOf = (ids, max = 8) => (ids.length > max ? `${ids.slice(0, max).join(', ')} and ${ids.length - max} more` : ids.join(', '));
+
+function criteriaToCover(goal) {
+  return listTasks(goal).filter((t) => !TASK_SATISFIED.has(t.status))
+    .flatMap((t) => listItems(section(readDoc(t.file).body, /acceptance criteria/i)).map((text, i) => ({ id: `${t.id}.${i + 1}`, text })));
+}
+
+function coverageSection(goal) {
+  const rows = criteriaToCover(goal).map((c) => `| ${c.id} | ${tableCell(c.text.length > 160 ? `${c.text.slice(0, 159)}…` : c.text)} |  |`);
+  return [
+    '## Verify coverage', '',
+    '<!-- One row per acceptance criterion of every unfinished task (T-01.2 is T-01\'s second criterion). Checked by: the part of the task\'s `verify`, or of the `after_task` hook, that fails while the criterion is unmet. Write `none` when nothing does. -->', '',
+    '| Criterion | Text | Checked by |', '|-----------|------|------------|', ...rows, '',
+  ].join('\n');
+}
+
+// What the Verify coverage table of a plan review still lacks. `uncovered` are the criteria it says nothing checks.
+function coverageProblems(goal, review, rule, name) {
+  const expected = criteriaToCover(goal);
+  if (!expected.length) return { invalid: [], uncovered: [] };
+  const again = `run \`gate set ${goal.id} govern pending\`, then \`governance review ${goal.id}\``;
+  if (!review.hasCoverage) return { invalid: [`${name} has no \`## Verify coverage\` section (a review started before aisdlc 0.25.0 lacks it); ${again}`], uncovered: [] };
+  const by = (c) => (review.coverage.get(c.id) || '').replace(/^[`*_\s]+/, '');
+  const missing = expected.filter((c) => !review.coverage.has(c.id)).map((c) => c.id);
+  const empty = expected.filter((c) => review.coverage.has(c.id) && !by(c)).map((c) => c.id);
+  const uncovered = expected.filter((c) => UNCOVERED.test(by(c))).map((c) => c.id);
+  const invalid = [];
+  if (missing.length) invalid.push(`Verify coverage has no row for ${someOf(missing)}: the tasks changed after the review was written; ${again}`);
+  if (empty.length) invalid.push(`Verify coverage: ${someOf(empty)} ${empty.length > 1 ? 'have' : 'has'} no "Checked by"; name the part of the verify that fails while the criterion is unmet, or write none`);
+  const r = review.results.get(rule.id);
+  if (uncovered.length && r && ['pass', 'n/a'].includes(r.result)) invalid.push(`${rule.id} is ${r.result} but Verify coverage says nothing checks ${someOf(uncovered)}`);
+  return { invalid, uncovered };
+}
+
+// Runs a pending task's verify command on the code as it is now, before the task's work, and records nothing. A
+// command that already passes proves nothing about that work. Output is kept out of the result except the last
+// lines of a failure, which show whether it failed for the task's reason or for a missing tool or service.
+function precheckTask(root, t) {
+  const verify = String(t.verify ?? '').trim();
+  if (!verify) return { task: t.id, result: 'none' };
+  if (/^manual:/i.test(verify)) return { task: t.id, result: 'manual' };
+  process.stderr.write(`[aisdlc] precheck ${t.id}: ${verify}\n`);
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'aisdlc-precheck-'));
+  const log = path.join(tmp, 'out');
+  const fd = fs.openSync(log, 'w');
+  let code;
+  try {
+    const r = spawnSync(verify, { cwd: root, shell: true, stdio: ['ignore', fd, fd] });
+    code = r.error ? 1 : r.status ?? 1;
+  } finally { fs.closeSync(fd); }
+  const output = fs.readFileSync(log, 'utf8');
+  fs.rmSync(tmp, { recursive: true, force: true });
+  // `task verify` fails a command that passes without running a test, so it does not pass here either.
+  if (!code && ranNoTests(output)) return { task: t.id, result: 'fails', exit: 1, tail: 'the command passed but ran no tests' };
+  if (!code) return { task: t.id, result: 'passes', exit: 0 };
+  const lines = output.replace(/\x1b\[[0-9;]*[A-Za-z]/g, '').split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+  return { task: t.id, result: 'fails', exit: code, tail: lines.slice(-5).map((l) => (l.length > 160 ? `${l.slice(0, 159)}…` : l)).join(' / ') };
+}
+
 function runChecks(root, goal, rules) {
   const ctx = { root, goal, tasks: listTasks(goal) };
   return rules.filter((r) => r.check).map((r) => {
@@ -1513,15 +1580,23 @@ function readReview(file) {
   const doc = readDoc(file);
   const results = new Map();
   const malformed = [];
-  for (const r of tableRows(doc.body)) {
+  // The Verify coverage table has its own rows (T-01.2), which are not rule results.
+  for (const r of tableRows(withoutSection(doc.body, VERIFY_COVERAGE))) {
     const id = r[0].match(/[A-Z][A-Z0-9]*-\d+/)?.[0];
     if (!id) continue;
     // An unescaped `|` in a note splits it into extra cells, and the text after it would be lost.
     if (r.length > 3) malformed.push(`${id}'s row has ${r.length} cells instead of 3; write a literal | in a note as \\|`);
     results.set(id, { result: (r[1] || '').toLowerCase().replace(/[^a-z/]/g, ''), notes: r[2] || '' });
   }
+  const covered = section(doc.body, VERIFY_COVERAGE);
+  const coverage = new Map();
+  for (const r of tableRows(covered || '')) {
+    if (!COVERAGE_ID.test(r[0])) continue;
+    if (r.length > 3) malformed.push(`${r[0]}'s row has ${r.length} cells instead of 3; write a literal | in a cell as \\|`);
+    coverage.set(r[0], r.slice(2).join('|').trim());
+  }
   return {
-    data: doc.data, results, malformed,
+    data: doc.data, results, malformed, coverage, hasCoverage: covered !== null,
     questions: listItems(section(doc.body, /^questions\b/i)),
     readings: listItems(section(doc.body, /^readings\b/i)),
   };
@@ -1553,7 +1628,11 @@ function reviewProblems(root, goal, stage) {
       if (!r.notes) invalid.push(`${rule.id} is ${r.result} without a note (${r.result === 'pass' ? 'cite the evidence' : 'give the reason'})`);
     }
   }
-  return { invalid, blocking, review };
+  // The rule about verify commands is judged criterion by criterion, in the review's Verify coverage table.
+  const verifiable = stage === 'plan' && rules.find((r) => r.check === 'tasks-verifiable');
+  const coverage = verifiable ? coverageProblems(goal, review, verifiable, name) : { invalid: [], uncovered: [] };
+  invalid.push(...coverage.invalid);
+  return { invalid, blocking, review, uncovered: coverage.uncovered };
 }
 
 // Earlier reviews of a stage, oldest first, so the next reviewer can find them without listing the folder.
@@ -1617,13 +1696,13 @@ function setGate(root, goal, gate, value) {
   // Both verdicts are checked against the review, so the output says whether the review file itself holds up.
   let checked = {};
   if (stage && value !== 'pending') {
-    const { invalid, blocking, review } = reviewProblems(root, goal, stage);
+    const { invalid, blocking, review, uncovered = [] } = reviewProblems(root, goal, stage);
     if (value === 'passed') {
       const problems = [...(gate === 'final' ? requireStep(root, goal, 'final') : requireStep(root, goal, 'govern').filter((p) => /^(?:open question|unmarked question|placeholder)/.test(p))), ...invalid, ...blocking];
       if (problems.length) fail(`Cannot mark ${gate} passed:\n- ${problems.join('\n- ')}`);
     }
     const warnings = [...invalid, ...(value === 'failed' && review?.data.result === 'pass' ? [`${REVIEW_FILE[stage]} says \`result: pass\`; set it to \`fail\``] : [])];
-    checked = { checked: true, warnings, questions: review?.questions || [], readings: review?.readings || [] };
+    checked = { checked: true, warnings, questions: review?.questions || [], readings: review?.readings || [], ...(uncovered.length && { uncovered }) };
   }
   // A new answer at one gate invalidates everything after it. Setting a review gate to pending starts a
   // fresh review, so the current one is archived.
@@ -2043,7 +2122,18 @@ const commands = {
       writeDoc(t.file, doc);
       return out({ goal: g.id, task: taskId, files: listed });
     }
-    fail('Usage: task new|edit|remove|set|verify|review|explore');
+    if (action === 'precheck') {
+      // Runs the verify of each pending task (or of the ones named) before its work, so a verify that proves nothing
+      // is fixed while the plan is written, not found by a review. It changes no state.
+      const tasks = listTasks(g);
+      const unknown = rest.filter((id) => !tasks.some((t) => t.id === id));
+      if (unknown.length) fail(`Task ${unknown.join(', ')} not found in ${g.id}.`);
+      const started = rest.filter((id) => tasks.find((t) => t.id === id).status !== 'pending');
+      if (started.length) fail(`${started.join(', ')} ${started.length > 1 ? 'are' : 'is'} not pending; precheck runs a task's verify before its work starts.`);
+      const results = tasks.filter((t) => t.status === 'pending' && (!rest.length || rest.includes(t.id))).map((t) => precheckTask(root, t));
+      return out({ goal: g.id, passes_now: results.filter((r) => r.result === 'passes').map((r) => r.task), results });
+    }
+    fail('Usage: task new|edit|remove|set|verify|review|explore|precheck');
   },
 
   // The goal's open questions, kept by the script so none hides: `- **Open:** Q-n: text` under Risks & Unknowns until
@@ -2248,7 +2338,7 @@ const commands = {
       if (fs.existsSync(file)) fail(`${path.relative(root, file)} already exists. Run \`gate set ${g.id} ${gate} pending\` first; it archives the old review.`);
       const rules = activeRules(root, stage);
       const checks = new Map(runChecks(root, g, rules).map((c) => [c.rule, c]));
-      const cell = (v) => v.replace(/\|/g, '\\|').replace(/\s*\n\s*/g, ' ');
+      const cell = tableCell;
       // A failed automatic check can only be a fail, so its row is filled in; every other row is left to the reviewer.
       // A check the review itself satisfies (criteria-met: the reviewer ticks what the code meets) is not a finding yet.
       const prefilled = (c) => c && !c.ok && !REVIEWER_CHECKS[c.check];
@@ -2256,10 +2346,14 @@ const commands = {
         const c = checks.get(r.id);
         return prefilled(c) ? `| ${r.id} | fail | ${cell(`check ${c.check}: ${c.problems.join('; ')}`)} |` : `| ${r.id} |  |  |`;
       });
-      const text = render('governance-review.md', { goal: g.id, stage, result: '', date: today() }).replace(/(\|-+\|-+\|-+\|\n)/, `$1${rows.map((r) => `${r}\n`).join('')}`);
+      // The rule about verify commands is reviewed one criterion at a time, so the review gets a row for each.
+      const toCover = stage === 'plan' && rules.some((r) => r.check === 'tasks-verifiable') ? criteriaToCover(g).length : 0;
+      const text = render('governance-review.md', { goal: g.id, stage, result: '', date: today() }).replace(/(\|-+\|-+\|-+\|\n)/, `$1${rows.map((r) => `${r}\n`).join('')}`)
+        .replace(/^## Required Fixes$/m, () => `${toCover ? `${coverageSection(g)}\n` : ''}## Required Fixes`);
       fs.writeFileSync(file, text);
       return out({
         file: path.relative(root, file),
+        ...(toCover && { verify_coverage: { criteria: toCover } }),
         rules: rules.map((r) => {
           const c = checks.get(r.id);
           if (!c) return { id: r.id, rule: r.rule, severity: r.severity };

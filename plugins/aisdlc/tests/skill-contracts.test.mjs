@@ -29,6 +29,13 @@ const MUST = [
   ['govern', /fresh eyes/i, 'the review runs in a sub-agent or fresh session'],
   ['govern', /\$AISDLC question add <G-id> "<question>" --answer "<the user's answer>" --by user/, 'govern records answers as the user\'s'],
   ['govern', /\$AISDLC goal overlap <G-id>/, 'govern checks overlap'],
+  ['govern', /\$AISDLC task precheck <G-id>`/, 'the reviewer runs every verify before the work'],
+  ['govern', /Fill in every row of `## Verify coverage`/, 'the reviewer names what checks every criterion'],
+  ['govern', /never a sample/, 'the review of verify commands covers every criterion'],
+  ['govern', /\$AISDLC task precheck <G-id> <T-id>/, 'a task changed by an answer or fix is re-checked before the next review'],
+  ['create-goal', /\$AISDLC task precheck <G-id>/, 'create-goal runs every verify before the work'],
+  ['challenge', /\$AISDLC task precheck <G-id>/, 'challenge runs every verify before the work'],
+  ...['create-goal', 'challenge'].map((skill) => [skill, /name the part of its `verify`, or of the `after_task` hook, that fails while that criterion is unmet/, 'planning names what checks each criterion']),
   ...['create-goal', 'challenge', 'adr', 'implement', 'govern'].flatMap((skill) => [
     [skill, /\$AISDLC docs search <keywords>/, 'documentation is searched before it is read'],
     [skill, /never read the index in `\.aisdlc\/cache\/`/i, 'the documentation index is never read whole'],

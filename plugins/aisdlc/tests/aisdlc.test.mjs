@@ -29,11 +29,25 @@ const t = (id, depends_on = [], extra = {}) => ({ id, depends_on, status: 'pendi
 
 const BASELINE_RULES = ['GOV-01', 'GOV-02', 'GOV-03', 'GOV-04', 'GOV-05'];
 
-// Writes a governance review; `results` maps rule ID -> [result, notes], defaulting to pass with a note.
-function writeReview(dir, goalId, results = {}, result = 'pass', { rules = BASELINE_RULES, file = 'governance-review.md' } = {}) {
+// The `## Verify coverage` section of a plan review: one row per task criterion in the goal folder. `by` maps a
+// criterion ID (T-01.2) to its "Checked by" cell; the rest say the verify checks them.
+function coverageTable(dir, by = {}) {
+  const tasks = path.join(dir, 'tasks');
+  const files = fs.existsSync(tasks) ? fs.readdirSync(tasks).filter((f) => f.endsWith('.md')).sort() : [];
+  const rows = files.flatMap((f) => {
+    const body = fs.readFileSync(path.join(tasks, f), 'utf8');
+    const criteria = (body.split(/^## Acceptance Criteria$/m)[1] || '').split(/^## /m)[0].split('\n').map((l) => l.match(/^- \[[ x]\] (.+)$/)?.[1]).filter(Boolean);
+    return criteria.map((text, i) => { const id = `${f.match(/^T-\d+/)[0]}.${i + 1}`; return `| ${id} | ${text.replace(/\|/g, '\\|')} | ${by[id] ?? 'the verify fails without it'} |`; });
+  });
+  return `\n## Verify coverage\n\n| Criterion | Text | Checked by |\n|-----------|------|------------|\n${rows.join('\n')}\n`;
+}
+
+// Writes a governance review; `results` maps rule ID -> [result, notes], defaulting to pass with a note. A plan review
+// also gets its Verify coverage table, unless `coverage` is false.
+function writeReview(dir, goalId, results = {}, result = 'pass', { rules = BASELINE_RULES, file = 'governance-review.md', coverage = {} } = {}) {
   const rows = rules.map((id) => { const [res, notes] = results[id] || ['pass', 'checked']; return `| ${id} | ${res} | ${notes ?? ''} |`; });
   const text = `---\ngoal: ${goalId}\nresult: ${result}\n---\n\n| Rule | Result | Notes |\n|------|--------|-------|\n${rows.join('\n')}\n`;
-  fs.writeFileSync(path.join(dir, file), text);
+  fs.writeFileSync(path.join(dir, file), text + (coverage && file === 'governance-review.md' ? coverageTable(dir, coverage) : ''));
 }
 
 const edit = (file, fn) => fs.writeFileSync(file, fn(fs.readFileSync(file, 'utf8')));
@@ -551,8 +565,96 @@ test('cli: govern passes only with a review that covers every active rule and fa
   run(['governance', 'set', 'GOV-08', 'severity', 'retired']);
   writeReview(goalDir, 'G-001');
   assert.match(pass().stderr, /GOV-07 is missing/);
-  fs.appendFileSync(path.join(goalDir, 'governance-review.md'), '| GOV-07 | fail | no README section |\n');
+  writeReview(goalDir, 'G-001', { 'GOV-07': ['fail', 'no README section'] }, 'pass', { rules: [...BASELINE_RULES, 'GOV-07'] });
   assert.equal(pass().code, 0);
+});
+
+test('cli: a plan review names what checks every task criterion before govern can pass', () => {
+  const { run, dir } = project();
+  run(['init']);
+  plannedGoal(run, dir, [['A'], ['B']]);
+  const goalDir = path.join(dir, run(['goal', 'show', 'G-001']).json.dir);
+  edit(path.join(goalDir, 'tasks', 'T-01-a.md'), (s) => s.replace('- [ ] It works\n', '- [ ] It works\n- [ ] It handles a | b\n'));
+  run(['gate', 'set', 'G-001', 'challenge', 'done']);
+  run(['adr', 'none', 'G-001', '--reason', 'no architectural change']);
+  run(['gate', 'set', 'G-001', 'adr', 'done']);
+  const reviewFile = path.join(goalDir, 'governance-review.md');
+  const pass = () => run(['gate', 'set', 'G-001', 'govern', 'passed']);
+
+  // The scaffold has one row per criterion of every unfinished task, with the cell to fill left empty.
+  const scaffold = run(['governance', 'review', 'G-001']);
+  assert.deepEqual(scaffold.json.verify_coverage, { criteria: 3 });
+  const text = fs.readFileSync(reviewFile, 'utf8');
+  assert.match(text, /## Verify coverage\n[\s\S]*\| T-01\.1 \| It works \| {2}\|\n\| T-01\.2 \| It handles a \\\| b \| {2}\|\n\| T-02\.1 \| It works \| {2}\|\n\n## Required Fixes/);
+
+  // Every row has to be filled, whatever the verdict: the gate reports the gap for a failed review too.
+  writeReview(goalDir, 'G-001', {}, 'pass', { coverage: { 'T-01.2': '' } });
+  assert.match(pass().stderr, /Verify coverage: T-01\.2 has no "Checked by"/);
+  writeReview(goalDir, 'G-001', { 'GOV-02': ['fail', 'weak verify'] }, 'fail', { coverage: { 'T-01.2': '' } });
+  assert.match(run(['gate', 'set', 'G-001', 'govern', 'failed']).json.warnings.join('\n'), /T-01\.2 has no "Checked by"/);
+
+  // A criterion nothing checks fails the rule about verify commands; a pass is refused.
+  writeReview(goalDir, 'G-001', {}, 'pass', { coverage: { 'T-01.2': 'none', 'T-02.1': '`None`: the test file is not in the verify' } });
+  assert.match(pass().stderr, /GOV-02 is pass but Verify coverage says nothing checks T-01\.2, T-02\.1/);
+  writeReview(goalDir, 'G-001', { 'GOV-02': ['fail', 'T-01.2 and T-02.1 are unchecked'] }, 'fail', { coverage: { 'T-01.2': 'none', 'T-02.1': 'none' } });
+  const failed = run(['gate', 'set', 'G-001', 'govern', 'failed']).json;
+  assert.deepEqual(failed.warnings, []);
+  assert.deepEqual(failed.uncovered, ['T-01.2', 'T-02.1']);
+
+  // A review without the table, or written before a criterion was added, has to be started again.
+  writeReview(goalDir, 'G-001', {}, 'pass', { coverage: false });
+  assert.match(pass().stderr, /no `## Verify coverage` section .*run `gate set G-001 govern pending`, then `governance review G-001`/);
+  writeReview(goalDir, 'G-001');
+  edit(path.join(goalDir, 'tasks', 'T-02-b.md'), (s) => s.replace('- [ ] It works\n', '- [ ] It works\n- [ ] It is fast\n'));
+  assert.match(pass().stderr, /Verify coverage has no row for T-02\.2: the tasks changed after the review was written/);
+
+  // A literal | in a cell is escaped, and a row of the table is never read as a rule's result.
+  writeReview(goalDir, 'G-001', {}, 'pass', { coverage: { 'T-01.2': "`grep -Eq 'a\\|b' src/x.js`" } });
+  assert.equal(pass().code, 0, pass().stderr);
+  run(['gate', 'set', 'G-001', 'govern', 'pending']);
+  writeReview(goalDir, 'G-001', {}, 'pass', { coverage: { 'T-01.2': "`grep -Eq 'a|b' src/x.js`" } });
+  assert.match(pass().stderr, /T-01\.2's row has 4 cells instead of 3/);
+
+  // Without a rule that uses the tasks-verifiable check there is no table and none is required.
+  run(['governance', 'set', 'GOV-02', 'check', '-']);
+  run(['gate', 'set', 'G-001', 'govern', 'pending']);
+  assert.equal(run(['governance', 'review', 'G-001']).json.verify_coverage, undefined);
+  assert.doesNotMatch(fs.readFileSync(reviewFile, 'utf8'), /Verify coverage/);
+  writeReview(goalDir, 'G-001', {}, 'pass', { coverage: false });
+  assert.equal(pass().code, 0, pass().stderr);
+});
+
+test('cli: task precheck runs each pending verify on the code as it is and records nothing', () => {
+  const { run, dir } = project();
+  run(['init']);
+  const missing = 'node -e "require(\'fs\').statSync(\'built.txt\')"';
+  plannedGoal(run, dir, [['Already true'], ['Needs work', '--verify', missing], ['By hand', '--verify', 'manual: open the page'], ['No tests', '--verify', 'node -e "console.log(\'# tests 0\'); require(\'fs\').statSync(\'.aisdlc\')"']]);
+  const task = (id) => parseDoc(fs.readFileSync(path.join(dir, run(['goal', 'show', 'G-001']).json.dir, 'tasks', fs.readdirSync(path.join(dir, run(['goal', 'show', 'G-001']).json.dir, 'tasks')).find((f) => f.startsWith(id))), 'utf8')).data;
+
+  const r = run(['task', 'precheck', 'G-001']);
+  assert.equal(r.code, 0, r.stderr);
+  assert.deepEqual(r.json.passes_now, ['T-01']);
+  assert.deepEqual(r.json.results.map((x) => [x.task, x.result]), [['T-01', 'passes'], ['T-02', 'fails'], ['T-03', 'manual'], ['T-04', 'fails']]);
+  assert.match(r.json.results[1].tail, /built\.txt/);
+  assert.equal(r.json.results[3].tail, 'the command passed but ran no tests');
+  assert.equal(task('T-01').verified, '');
+  assert.equal(task('T-02').verify_evidence, '');
+
+  // Naming tasks limits the run; once the work exists the verify passes.
+  fs.writeFileSync(path.join(dir, 'built.txt'), '');
+  assert.deepEqual(run(['task', 'precheck', 'G-001', 'T-02']).json, { goal: 'G-001', passes_now: ['T-02'], results: [{ task: 'T-02', result: 'passes', exit: 0 }] });
+  assert.match(run(['task', 'precheck', 'G-001', 'T-09']).stderr, /Task T-09 not found in G-001/);
+
+  // A started task is past the point where its verify should fail.
+  run(['gate', 'set', 'G-001', 'challenge', 'done']);
+  run(['adr', 'none', 'G-001', '--reason', 'no architectural change']);
+  run(['gate', 'set', 'G-001', 'adr', 'done']);
+  writeReview(path.join(dir, run(['goal', 'show', 'G-001']).json.dir), 'G-001');
+  run(['gate', 'set', 'G-001', 'govern', 'passed']);
+  run(['state', 'move', 'G-001', 'in-progress']);
+  run(['task', 'set', 'G-001', 'T-01', 'in-progress']);
+  assert.match(run(['task', 'precheck', 'G-001', 'T-01']).stderr, /T-01 is not pending; precheck runs a task's verify before its work starts/);
+  assert.deepEqual(run(['task', 'precheck', 'G-001']).json.results.map((x) => x.task), ['T-02', 'T-03', 'T-04']);
 });
 
 test('cli: adr gate needs accepted ADRs, and adr none removes back-links', () => {

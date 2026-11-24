@@ -2,6 +2,19 @@
 
 All notable changes to the `aisdlc` plugin. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/). Until 1.0.0, a minor version may include breaking changes; each one is listed under **Breaking** with its upgrade step.
 
+## [0.25.0] - 2026-11-23
+
+A weak `verify` command is found while the plan is written, and by the first plan review instead of one review after another.
+
+### Added
+- `task precheck <G-id> [<T-id>...]` runs the `verify` of each pending task (or of the ones named) on the code as it is now, before the task's work, and records nothing. `passes_now` lists the tasks whose verify already passes, which proves nothing about their work. A failing command reports its exit code and the last lines of its output, so a failure from a missing tool or service can be told from a real check. A command that passes without running a test counts as failing, as in `task verify`.
+- The plan review gets a `## Verify coverage` table while a plan rule uses the `tasks-verifiable` check: `governance review` writes one row per acceptance criterion of every unfinished task (`T-01.2` is T-01's second criterion), and the reviewer names under Checked by what fails while that criterion is unmet, or `none`.
+- `gate set <G-id> govern passed|failed` reports `uncovered`: the criteria the review says nothing checks.
+- `/aisdlc:create-goal` and `/aisdlc:challenge` run `task precheck` and go through every criterion before they finish. `/aisdlc:govern` does both for every criterion, never a sample, and re-checks each task an answer or a fix changed before the review runs again.
+
+### Breaking
+- `gate set <G-id> govern passed` refuses a plan review whose `## Verify coverage` table is missing, lacks a row for a task criterion or has an empty Checked by, and refuses `pass` or `n/a` on the rule with the `tasks-verifiable` check while a row says `none`. `gate set <G-id> govern failed` returns the same gaps as `warnings`. Goals that already passed governance are not affected. See the README's Upgrading section.
+
 ## [0.24.1] - 2026-11-06
 
 ### Fixed
