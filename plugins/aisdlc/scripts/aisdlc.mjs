@@ -774,6 +774,125 @@ function goalOverlap(root, words, selfId, files = []) {
   return matches;
 }
 
+// The same `likely` test `goal overlap` uses: at least 3 shared words covering a third of the smaller side.
+function wordOverlap(words, theirs) {
+  const shared = words.filter((w) => theirs.some((t) => t.startsWith(w) || w.startsWith(t)));
+  const ratio = shared.length / Math.max(1, Math.min(words.length, theirs.length));
+  return { shared, likely: shared.length >= 3 && ratio >= 0.34 };
+}
+
+// ---------- parallel work on other branches ----------
+
+// Whether anyone started similar work on another branch: every local, remote-tracking and pull-request branch that
+// has commits this checkout doesn't. A branch counts when it changes this goal's own folder or carries its ID in its
+// name (same goal), changes a file the goal's tasks list (same files), or adds or changes another goal whose wording
+// overlaps this one (similar goal planned). Only files whose content on that branch differs from this checkout count,
+// so work already brought over by a cherry-pick doesn't. Paths are limited to this project (`git diff --relative`).
+// The goal's own recorded branch is its home, not parallel work. Branches with no history in common are listed as not
+// compared. The user acknowledges a branch at its current commit with `goal parallel ack`; new commits on it undo that.
+const PARALLEL_ACKS = 'parallel.md';
+const PARALLEL_REFS = ['refs/heads', 'refs/remotes', 'refs/pull'];
+const parallelCache = new Map();
+
+function fetchEveryMinutes(root) {
+  const v = loadConfig(root).parallel?.fetch_every_minutes ?? 10;
+  if (typeof v !== 'number' || !(v >= 0)) fail(`parallel.fetch_every_minutes "${v}" is not valid. Use a number of minutes, 0 or more: \`config set parallel.fetch_every_minutes 10\`.`);
+  return v;
+}
+
+// Fetches every remote first, so branches others pushed are seen, unless a fetch ran in the last
+// `parallel.fetch_every_minutes` (default 10). A failed fetch is reported, and the refs already fetched are used.
+function fetchRemotes(root) {
+  const remotes = (git(root, ['remote']) || '').trim().split('\n').filter(Boolean);
+  const fetchHead = path.resolve(root, (git(root, ['rev-parse', '--git-path', 'FETCH_HEAD']) || 'FETCH_HEAD').trim());
+  const age = () => (fs.existsSync(fetchHead) ? Math.round((Date.now() - fs.statSync(fetchHead).mtimeMs) / 60000) : null);
+  if (!remotes.length) return { remotes: 0, ran: false, note: 'no remotes' };
+  const before = age();
+  if (before !== null && before < fetchEveryMinutes(root)) return { remotes: remotes.length, ran: false, last_fetch_minutes_ago: before };
+  const r = spawnSync('git', ['fetch', '--all', '--prune', '--quiet'], { cwd: root, encoding: 'utf8', timeout: 120000 });
+  if (r.status === 0) return { remotes: remotes.length, ran: true, ok: true, last_fetch_minutes_ago: 0 };
+  const error = oneLine(r.error?.message || r.stderr || `exit ${r.status}`).slice(0, 300);
+  process.stderr.write(`[aisdlc] git fetch failed (${error}); comparing the branches fetched ${before === null ? 'before (never fetched)' : `${before} minutes ago`}\n`);
+  return { remotes: remotes.length, ran: true, ok: false, error, last_fetch_minutes_ago: before };
+}
+
+function readParallelAcks(goal) {
+  const file = path.join(goal.dir, PARALLEL_ACKS);
+  if (!fs.existsSync(file)) return [];
+  return fs.readFileSync(file, 'utf8').split('\n').map((l) => l.match(/^- (\S+) @ ([0-9a-f]{40}) \| (.+?) \| (\d{4}-\d{2}-\d{2}) \| (.*)$/)).filter(Boolean)
+    .map((m) => ({ branch: m[1], sha: m[2], by: m[3], date: m[4], reason: m[5] }));
+}
+
+function parallelWork(root, goal, { fetch = true } = {}) {
+  const key = `${goal.dir}|${fetch}`;
+  if (parallelCache.has(key)) return parallelCache.get(key);
+  if (git(root, ['rev-parse', '--git-dir']) === null) return { git: false, findings: [], not_compared: [] };
+  const fetched = fetch ? fetchRemotes(root) : { ran: false };
+  const head = (git(root, ['rev-parse', 'HEAD']) || '').trim();
+  const prefix = (git(root, ['rev-parse', '--show-prefix']) || '').trim();
+  const lines = (s) => (s || '').trim().split('\n').filter(Boolean);
+  const folder = path.basename(goal.dir);
+  const idRe = new RegExp(`(^|[^A-Za-z0-9])${goal.id}(?![0-9])`, 'i');
+  const home = String(goal.data.branch || '');
+  // The base branch is where finished work lands, not a parallel effort; it is compared by rebasing, not here.
+  const baseBranch = loadConfig(root).git?.base_branch || 'develop';
+  const files = new Set(goalFiles(goal));
+  const words = goalWords(goal);
+  // One entry per commit: a local branch and its remote copy at the same commit are one piece of work.
+  const bySha = new Map();
+  for (const line of lines(git(root, ['for-each-ref', '--format=%(refname)%09%(refname:short)%09%(objectname)', ...PARALLEL_REFS]))) {
+    const [ref, short, sha] = line.split('\t');
+    if (/^refs\/remotes\/[^/]+\/HEAD$/.test(ref) || !head || sha === head) continue;
+    const kind = ref.startsWith('refs/heads/') ? 'local' : ref.startsWith('refs/pull/') ? 'pull request' : `remote ${ref.split('/')[2]}`;
+    const name = ref.startsWith('refs/remotes/') ? short.slice(short.indexOf('/') + 1) : ref.replace(/^refs\/heads\//, '');
+    if ((home && name === home) || name === baseBranch) continue;
+    if (!bySha.has(sha)) bySha.set(sha, { sha, branches: [], kinds: new Set() });
+    bySha.get(sha).branches.push(short);
+    bySha.get(sha).kinds.add(kind);
+  }
+  const acks = readParallelAcks(goal);
+  const findings = [];
+  const notCompared = [];
+  for (const { sha, branches, kinds } of bySha.values()) {
+    // Already part of this checkout: nothing new on it.
+    if (spawnSync('git', ['merge-base', '--is-ancestor', sha, head], { cwd: root }).status === 0) continue;
+    const base = (git(root, ['merge-base', head, sha]) || '').trim();
+    if (!base) { notCompared.push(...branches); continue; }
+    const differs = new Set(lines(git(root, ['diff', '--name-only', '--relative', head, sha])));
+    const changed = lines(git(root, ['diff', '--name-only', '--relative', base, sha])).filter((f) => differs.has(f));
+    const signals = [];
+    const named = branches.filter((b) => idRe.test(b));
+    if (changed.some((f) => f.split('/').includes(folder) && f.includes('.aisdlc/goals/')) || named.length) {
+      signals.push({ type: 'same goal', detail: named.length ? `branch name carries ${goal.id}` : `changes ${goal.id}'s goal folder` });
+    }
+    const sameFiles = changed.filter((f) => files.has(f));
+    if (sameFiles.length) signals.push({ type: 'same files', detail: sameFiles.slice(0, 10).join(', ') + (sameFiles.length > 10 ? ` and ${sameFiles.length - 10} more` : '') });
+    for (const f of changed.filter((x) => /(^|\/)\.aisdlc\/goals\/[^/]+\/[^/]+\/goal\.md$/.test(x) && !x.split('/').includes(folder))) {
+      const text = git(root, ['show', `${sha}:${prefix}${f}`]);
+      if (text === null) continue;
+      const doc = parseDoc(text);
+      const theirs = wordsOf([doc.data.title, ...OVERLAP_SECTIONS.map((re) => section(doc.body, re))].filter(Boolean).join(' '));
+      const o = wordOverlap(words, theirs);
+      if (o.likely) signals.push({ type: 'similar goal planned', detail: `${doc.data.id || path.basename(path.dirname(f))} "${doc.data.title || ''}" shares ${o.shared.slice(0, 8).join(', ')}` });
+    }
+    if (!signals.length) continue;
+    const ack = acks.filter((a) => branches.includes(a.branch)).at(-1);
+    findings.push({
+      branches, kind: [...kinds].join(', '), sha,
+      started_by: [...new Set(lines(git(root, ['log', '--format=%an', `${base}..${sha}`])))],
+      last_commit: (git(root, ['log', '-1', '--format=%cI', sha]) || '').trim(),
+      signals,
+      acknowledged: !!ack && ack.sha === sha,
+      ...(ack && { ack: { by: ack.by, date: ack.date, reason: ack.reason, ...(ack.sha !== sha && { stale: `new commits since it was acknowledged at ${ack.sha.slice(0, 10)}` }) } }),
+    });
+  }
+  const result = { git: true, fetch: fetched, base_branch: baseBranch, home_branch: home || null, compared: bySha.size, findings, not_compared: notCompared };
+  parallelCache.set(key, result);
+  return result;
+}
+
+const parallelProblem = (goal, f) => `${f.branches.join(', ')} (${f.kind}; started by ${f.started_by.join(', ') || 'unknown'}; last commit ${f.last_commit.slice(0, 10)}): ${f.signals.map((s) => `${s.type}: ${s.detail}`).join('; ')}${f.ack?.stale ? `; ${f.ack.stale}` : ''}. Coordinate with them, or have the user acknowledge it: \`goal parallel ack ${goal.id} ${f.branches[0]} --reason "<why>" --by user\``;
+
 // ---------- docs ----------
 
 // A third index, for the project's own Markdown documentation and the bodies of ADRs: one entry per heading
@@ -1495,6 +1614,8 @@ const CHECKS = {
       ...scan.adrs.map((q) => `open question in ${q.where}: ${q.text}; ask the user, then edit the ADR to state the answer`),
     ];
   },
+  // No one started similar work on another branch, unless the user acknowledged that branch at its current commit.
+  'no-parallel-work': ({ root, goal }) => parallelWork(root, goal).findings.filter((f) => !f.acknowledged).map((f) => parallelProblem(goal, f)),
   // Every acceptance criterion of the goal and of each done task is ticked. Skipped tasks don't count.
   'criteria-met': ({ goal, tasks }) => [
     ...unticked(readDoc(goal.file).body).map((c) => `goal criterion not met: ${c}`),
@@ -2058,6 +2179,31 @@ const commands = {
       registrySync(root);
       return out({ id, owner: name, previous, changed: true, reason });
     }
+    if (action === 'parallel') {
+      // `goal parallel <G-id>` reports similar work on other branches; `goal parallel ack <G-id> <branch>` records that
+      // the user knows about one and why it is fine, at that branch's current commit.
+      if (rest[0] !== 'ack') {
+        const g = getGoal(root, rest[0]);
+        const r = parallelWork(root, g);
+        return out({ goal: g.id, ...r, unacknowledged: r.findings.filter((f) => !f.acknowledged).length });
+      }
+      const [, id, branch] = rest;
+      const reason = oneLine(opts.reason);
+      if (!id || !branch || !reason) fail('Usage: goal parallel ack <G-id> <branch> --reason "<why>" --by user');
+      if (opts.by !== 'user') fail('goal parallel ack needs --by user: it attests that the user knows about this branch and decided it is fine. Ask the user.');
+      const g = getGoal(root, id);
+      assertOpen(g);
+      const by = signature(root, opts);
+      const refs = (git(root, ['for-each-ref', '--format=%(refname)%09%(refname:short)%09%(objectname)', ...PARALLEL_REFS]) || '').trim().split('\n').filter(Boolean).map((l) => l.split('\t'));
+      const hit = refs.find(([ref, short]) => ref === branch || short === branch);
+      if (!hit) fail(`No local, remote or pull-request branch named ${branch}. \`goal parallel ${id}\` lists the branches it found.`);
+      const [, short, sha] = hit;
+      const file = path.join(g.dir, PARALLEL_ACKS);
+      if (!fs.existsSync(file)) fs.writeFileSync(file, `# Parallel work acknowledged: ${g.id}\n\nWritten by \`aisdlc.mjs goal parallel ack\`: branches with similar work that the user knows about, each at the commit it was acknowledged. New commits on a branch make it count again. Don't edit it by hand.\n\n`);
+      fs.appendFileSync(file, `- ${short} @ ${sha} | ${actorName(root)} | ${today()} | ${reason}\n`);
+      logDecision(root, g, `acknowledged parallel work on ${short} at ${sha.slice(0, 10)}: ${reason}`, by);
+      return out({ goal: g.id, branch: short, sha, reason });
+    }
     if (action === 'backfill') {
       // For goals made before aisdlc recorded names: created_by is the author of the commit that added goal.md (renames
       // followed, so a goal that moved folders still finds it), and owner starts as the same person. A goal.md that is
@@ -2186,7 +2332,7 @@ const commands = {
       logDecision(root, g, `set ${key} to ${value}`, by);
       return out({ id, [key]: parseScalar(value, key) });
     }
-    fail('Usage: goal new|list|show|diff|overlap|preflight|push|set|owner|backfill');
+    fail('Usage: goal new|list|show|diff|overlap|preflight|push|set|owner|backfill|parallel');
   },
 
   state([action, id, status], opts) {

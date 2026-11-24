@@ -2,6 +2,16 @@
 
 All notable changes to the `aisdlc` plugin. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/). Until 1.0.0, a minor version may include breaking changes; each one is listed under **Breaking** with its upgrade step.
 
+## [0.28.0] - 2026-11-24
+
+Governance can check whether anyone already started similar work on another branch.
+
+### Added
+- A `no-parallel-work` check for a governance rule. It fetches every remote first (unless a fetch ran in the last `parallel.fetch_every_minutes`, default 10; a failed fetch is reported and the refs fetched earlier are used), then looks at every local, remote-tracking and pull-request branch with commits this checkout doesn't have. A branch counts when it changes the goal's folder or carries its ID in its name (same goal), changes a file the goal's tasks list under Files (same files), or adds or changes another goal whose wording overlaps this one (similar goal planned, the `goal overlap` test). Only files whose content differs from this checkout count, so cherry-picked work doesn't, and paths stay inside the project. Merged branches, the base branch and the goal's own `branch` are left out.
+- `goal parallel <G-id>` lists the findings: each branch, its kind, who started it, its last commit, the signals and whether it is acknowledged.
+- `goal parallel ack <G-id> <branch> --reason "<why>" --by user` records that the user knows about a branch and why it is fine, at that branch's current commit, in the goal's `parallel.md` and its decision log. New commits on the branch make the check fail again.
+- `/aisdlc:govern` explains the check and asks the user to coordinate or acknowledge; the rule catalog offers it (`must`, `plan`).
+
 ## [0.27.0] - 2026-11-24
 
 Traceability and ownership: every goal says who started it and who owns it now, and every decision is logged with who made it.

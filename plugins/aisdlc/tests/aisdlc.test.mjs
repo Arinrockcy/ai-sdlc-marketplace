@@ -2288,3 +2288,139 @@ test('trace: goal backfill finds who added a goal that arrived by a merge', () =
   assert.equal(filled.created_by, 'Branch Person');
   assert.match(filled.source, /^git history/);
 });
+
+// ---------- parallel work on other branches ----------
+
+function parallelRepo() {
+  const { dir, run } = project();
+  const env = { ...process.env, GIT_AUTHOR_NAME: 'Main Person', GIT_AUTHOR_EMAIL: 'm@example.invalid', GIT_COMMITTER_NAME: 'Main Person', GIT_COMMITTER_EMAIL: 'm@example.invalid' };
+  const gitc = (args, as = 'Main Person') => {
+    const r = spawnSync('git', args, { cwd: dir, encoding: 'utf8', env: { ...env, GIT_AUTHOR_NAME: as, GIT_COMMITTER_NAME: as } });
+    assert.equal(r.status, 0, `git ${args.join(' ')}: ${r.stderr}`);
+    return r.stdout.trim();
+  };
+  const write = (rel, text) => { fs.mkdirSync(path.dirname(path.join(dir, rel)), { recursive: true }); fs.writeFileSync(path.join(dir, rel), text); };
+  const commit = (msg, as, paths = ['-A']) => { gitc(['add', ...paths], as); gitc(['commit', '-qm', msg], as); };
+  gitc(['init', '-q', '-b', 'main']);
+  run(['init']);
+  run(['config', 'set', 'git.base_branch', 'main']);
+  run(['governance', 'add', 'No one started similar work on another branch', '--severity', 'must', '--stage', 'plan', '--check', 'no-parallel-work']);
+  const g = run(['goal', 'new', 'Rate limiting for vendor requests']).json;
+  edit(path.join(dir, g.file), (s) => s.replace('## Problem\n', '## Problem\n\nVendor requests have no rate limiting, so one vendor can exhaust the request budget.\n'));
+  const t = run(['task', 'new', 'G-001', 'Limit requests', '--verify', REAL_VERIFY]).json;
+  edit(path.join(dir, t.file), (s) => s.replace('## Files (expected)\n', '## Files (expected)\n\n- `src/limit.js`\n'));
+  write('src/limit.js', 'export const x = 1;\n');
+  write('src/other.js', 'export const y = 1;\n');
+  commit('plan G-001');
+  const checks = () => run(['governance', 'checks', 'G-001']).json.find((c) => c.check === 'no-parallel-work');
+  return { dir, run, gitc, write, commit, checks };
+}
+
+test('parallel: a branch that changes the files the tasks list is found, with who started it', () => {
+  const { run, gitc, write, commit, checks } = parallelRepo();
+  assert.equal(checks().ok, true, 'no other branch yet');
+  gitc(['checkout', '-qb', 'kim/limits']);
+  write('src/limit.js', 'export const x = 2;\n');
+  commit('limit work', 'Kim Other');
+  gitc(['checkout', '-q', 'main']);
+  const r = run(['goal', 'parallel', 'G-001']).json;
+  assert.equal(r.findings.length, 1);
+  const [f] = r.findings;
+  assert.deepEqual([f.branches, f.kind, f.started_by, f.acknowledged], [['kim/limits'], 'local', ['Kim Other'], false]);
+  assert.deepEqual(f.signals, [{ type: 'same files', detail: 'src/limit.js' }]);
+  const c = checks();
+  assert.equal(c.ok, false);
+  assert.match(c.problems[0], /kim\/limits \(local; started by Kim Other; .*same files: src\/limit\.js.*goal parallel ack G-001 kim\/limits/);
+});
+
+test('parallel: the same goal by name or folder, and a similar goal planned elsewhere, are found', () => {
+  const { dir, run, gitc, write, commit } = parallelRepo();
+  gitc(['checkout', '-qb', 'feature/G-001-try']);
+  write('src/other.js', 'export const y = 2;\n');
+  commit('try it', 'Ann');
+  gitc(['checkout', '-q', 'main']);
+  gitc(['checkout', '-qb', 'notes']);
+  edit(path.join(dir, run(['goal', 'show', 'G-001']).json.dir, 'goal.md'), (s) => s.replace('## Scope', 'More notes.\n\n## Scope'));
+  commit('edit the goal', 'Bo');
+  gitc(['checkout', '-q', 'main']);
+  gitc(['checkout', '-qb', 'plan2']);
+  const g2 = run(['goal', 'new', 'Vendor request rate limiting budget']).json;
+  edit(path.join(dir, g2.file), (s) => s.replace('## Problem\n', '## Problem\n\nRate limiting vendor requests so the request budget holds.\n'));
+  commit('plan a similar goal', 'Cy');
+  gitc(['checkout', '-q', 'main']);
+  fs.rmSync(path.join(dir, g2.dir), { recursive: true, force: true });
+  const by = Object.fromEntries(run(['goal', 'parallel', 'G-001']).json.findings.map((f) => [f.branches[0], f.signals.map((s) => s.type)]));
+  assert.deepEqual(by['feature/G-001-try'], ['same goal']);
+  assert.deepEqual(by.notes, ['same goal']);
+  assert.ok(by.plan2.includes('similar goal planned'), JSON.stringify(by));
+});
+
+test('parallel: merged, cherry-picked, base and home branches are not parallel work', () => {
+  const { run, gitc, write, commit } = parallelRepo();
+  gitc(['checkout', '-qb', 'done']);
+  write('src/limit.js', 'export const x = 3;\n');
+  commit('merged later', 'Di');
+  gitc(['checkout', '-q', 'main']);
+  gitc(['merge', '-q', '--no-ff', '-m', 'merge done', 'done']);
+  gitc(['checkout', '-qb', 'picked']);
+  write('src/limit.js', 'export const x = 4;\n');
+  commit('picked', 'Ed');
+  const picked = gitc(['rev-parse', 'HEAD']);
+  gitc(['checkout', '-q', 'main']);
+  gitc(['cherry-pick', picked]);
+  gitc(['checkout', '-qb', 'g-001-home']);
+  write('src/limit.js', 'export const x = 5;\n');
+  commit('the goal on its own branch', 'Fay');
+  gitc(['checkout', '-q', 'main']);
+  run(['goal', 'set', 'G-001', 'branch', 'g-001-home']);
+  assert.deepEqual(run(['goal', 'parallel', 'G-001']).json.findings, []);
+});
+
+test('parallel: fetches first, finds a branch only on the remote, and fetches again only when due', () => {
+  const { dir, run, gitc, write, commit } = parallelRepo();
+  const remote = fs.mkdtempSync(path.join(os.tmpdir(), 'aisdlc-remote-'));
+  spawnSync('git', ['init', '-q', '--bare', remote]);
+  gitc(['remote', 'add', 'origin', remote]);
+  gitc(['push', '-q', 'origin', 'main']);
+  gitc(['checkout', '-qb', 'pushed']);
+  write('src/limit.js', 'export const x = 6;\n');
+  commit('elsewhere', 'Gus');
+  gitc(['push', '-q', 'origin', 'pushed']);
+  gitc(['checkout', '-q', 'main']);
+  gitc(['branch', '-qD', 'pushed']);
+  gitc(['update-ref', '-d', 'refs/remotes/origin/pushed']);
+  const r = run(['goal', 'parallel', 'G-001']).json;
+  assert.equal(r.fetch.ran, true);
+  assert.equal(r.fetch.ok, true);
+  assert.deepEqual(r.findings.map((f) => [f.branches, f.kind, f.started_by]), [[['origin/pushed'], 'remote origin', ['Gus']]]);
+  assert.equal(run(['goal', 'parallel', 'G-001']).json.fetch.ran, false, 'a fetch a moment ago is recent enough');
+  run(['config', 'set', 'parallel.fetch_every_minutes', '0']);
+  assert.equal(run(['goal', 'parallel', 'G-001']).json.fetch.ran, true);
+  gitc(['remote', 'set-url', 'origin', path.join(dir, 'missing.git')]);
+  const failed = run(['goal', 'parallel', 'G-001']);
+  assert.equal(failed.json.fetch.ok, false, 'a failed fetch falls back to the refs already fetched');
+  assert.match(failed.stderr, /git fetch failed/);
+  assert.equal(failed.json.findings.length, 1);
+});
+
+test('parallel: the user acknowledges a branch at its commit; new commits make it count again', () => {
+  const { dir, run, gitc, write, commit, checks } = parallelRepo();
+  gitc(['checkout', '-qb', 'kim/limits']);
+  write('src/limit.js', 'export const x = 2;\n');
+  commit('limit work', 'Kim Other');
+  gitc(['checkout', '-q', 'main']);
+  assert.match(run(['goal', 'parallel', 'ack', 'G-001', 'kim/limits', '--reason', 'x']).stderr, /needs --by user/);
+  assert.match(run(['goal', 'parallel', 'ack', 'G-001', 'nope', '--reason', 'x', '--by', 'user']).stderr, /No local, remote or pull-request branch named nope/);
+  const ack = run(['goal', 'parallel', 'ack', 'G-001', 'kim/limits', '--reason', 'Kim is only spiking; agreed on 2026-11-24', '--by', 'user']).json;
+  assert.equal(ack.branch, 'kim/limits');
+  assert.equal(checks().ok, true);
+  const goalDir = run(['goal', 'show', 'G-001']).json.dir;
+  assert.match(fs.readFileSync(path.join(dir, goalDir, 'decisions.md'), 'utf8'), /\| Tess Tester \| acknowledged parallel work on kim\/limits at [0-9a-f]{10}: Kim is only spiking/);
+  gitc(['checkout', '-q', 'kim/limits']);
+  write('src/limit.js', 'export const x = 7;\n');
+  commit('more', 'Kim Other', ['src']);
+  gitc(['checkout', '-q', 'main']);
+  const c = checks();
+  assert.equal(c.ok, false);
+  assert.match(c.problems[0], /new commits since it was acknowledged at [0-9a-f]{10}/);
+});

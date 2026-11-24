@@ -73,7 +73,7 @@ Each step refuses to run until the previous gate passes, and the script enforces
 - Tasks change only through the script: `task edit` for a title, dependencies, risk or verify command, and `task remove --reason` before the goal starts. Removals are logged in the goal, and a task ID is never reused.
 
 Governance is tied to what it reviewed:
-- Rules can name automatic checks (`goal-defined`, `tasks-verifiable`, `dag-valid`, `adr-recorded`, `questions-resolved`, `criteria-met`) that a review can't overrule.
+- Rules can name automatic checks (`goal-defined`, `tasks-verifiable`, `dag-valid`, `adr-recorded`, `questions-resolved`, `criteria-met`, `no-parallel-work`) that a review can't overrule.
 - Every row of a review needs a note: the evidence for a `pass`, the reason for a `fail` or `n/a`.
 - A `verify` command has to fail until its task's work is done. `aisdlc.mjs task precheck G-001` runs every pending task's verify on today's code and lists the ones that already pass; `create-goal`, `challenge` and the plan review all run it. The plan review also fills a `## Verify coverage` table, one row per task criterion, naming what fails while that criterion is unmet. It can't pass with an empty row, or pass the verify rule while a row says `none`, so one review finds every weak verify. `gate set G-001 govern passed` runs the precheck itself and refuses a verify that passes before its work, unless the review exempts the task in writing. `aisdlc.mjs task precheck all` sweeps every pending goal.
 - A failed plan review whose fixes are all written out in full (`(auto)`) and that has no question is fixed and run again without you, up to `govern.auto_fix_rounds` rounds (default 2, `0` turns it off).
@@ -92,6 +92,15 @@ Every goal records who started it and who owns it now, and every decision on it 
 - **Person or agent.** A line signed with a name alone is that person's decision. An agent signs `<agent> for <name>` (`AISDLC_AGENT`, or Claude under Claude Code), unless the command carries `--by user`, which attests that the user made the choice in this session. The skills pass `--by user` only for the user's own choices, and record choices no command carries out (merge or create, retry, which option) with `decision add <G-id> "<the choice>" --by user`.
 - **ADRs.** `adr status <ADR-id> accepted|rejected|superseded|proposed [--reason "<why>"]` settles an ADR, sets `decided_by` on it, and logs it in the project and in every open linked goal. `adr new` sets `created_by`.
 - The log lives outside the plan fingerprint, so logging and handoffs never force re-governance.
+
+## Similar work on other branches
+
+A rule with the `no-parallel-work` check stops governance while someone else has started similar work on another branch.
+
+- **Which branches:** every local, remote-tracking and pull-request branch (`refs/heads`, `refs/remotes`, `refs/pull`) with commits this checkout doesn't have. Remotes are fetched first, at most once every `parallel.fetch_every_minutes` (default 10). Merged branches, the base branch and the goal's own `branch` are skipped, and a local branch and its remote copy at the same commit count once.
+- **What counts:** the branch changes the goal's folder or carries its ID in its name; it changes a file the goal's tasks list under Files; or it plans a goal whose wording overlaps this one. Only files whose content differs from this checkout count, and only inside the project.
+- **Who:** `goal parallel <G-id>` names who started each branch (the authors of its own commits) and its last commit.
+- **Acknowledging:** when the user decides a branch is fine, `goal parallel ack <G-id> <branch> --reason "<why>" --by user` records it at that branch's commit, in `parallel.md` and the decision log. New commits on the branch make the check fail again.
 
 ## Project layout created by init
 

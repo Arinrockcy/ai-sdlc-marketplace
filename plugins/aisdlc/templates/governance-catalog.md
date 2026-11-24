@@ -10,6 +10,7 @@ Optional rules `/aisdlc:govern` (no argument) offers. The user picks which to ad
 | Stack standards | The plan's tasks carry the criteria the active standards skills require, or the goal records the user's deviation under Standards deviations. | must | plan |
 | Scope | Changed files stay within the goal's Scope (In); extra work became new tasks instead of being done silently. | should | final |
 | Docs | User-facing or API changes update the README, docs or changelog. | should | final |
+| Parallel work | No one has started similar work on another branch: no local, remote or pull-request branch changes this goal's folder or carries its ID in its name, changes the files its tasks list, or plans a goal whose wording overlaps it, unless the user acknowledged that branch at its current commit (`goal parallel ack`). Check: `no-parallel-work`. | must | plan |
 | Dependencies | Every new third-party dependency is named in a task or ADR, with the reason it is needed. | should | plan |
 | Sensitive areas | Tasks that touch authentication, authorization, payments or personal data are marked `risk: high`. | should | plan |
 | Migrations | Data or schema migrations have a tested rollback path, or the plan records why none is possible. | should | plan |
