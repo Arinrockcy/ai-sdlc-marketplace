@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { trivialVerify, unanchoredVerify, ranNoTests, analyzeDag, goalProgress, resolveHook, mergeStackHooks, parseDoc, formatDoc, testCounts, nodeVersionError } from '../scripts/aisdlc.mjs';
+import { trivialVerify, unanchoredVerify, ranNoTests, verifyClauses, nameFilterMatchedNothing, unisolatedNameFilter, analyzeDag, goalProgress, resolveHook, mergeStackHooks, parseDoc, formatDoc, testCounts, nodeVersionError } from '../scripts/aisdlc.mjs';
 
 const SCRIPT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../scripts/aisdlc.mjs');
 
@@ -30,8 +30,9 @@ const t = (id, depends_on = [], extra = {}) => ({ id, depends_on, status: 'pendi
 const BASELINE_RULES = ['GOV-01', 'GOV-02', 'GOV-03', 'GOV-04', 'GOV-05'];
 
 // The `## Verify coverage` section of a plan review: one row per task criterion in the goal folder. `by` maps a
-// criterion ID (T-01.2) to its "Checked by" cell; the rest say the verify checks them.
-function coverageTable(dir, by = {}) {
+// criterion ID (T-01.2) to its "Checked by" cell; the rest say the verify checks them. The fixtures' verify commands
+// pass before any work, so every task is exempted from the precheck unless `exempt` is false.
+function coverageTable(dir, by = {}, exempt = true) {
   const tasks = path.join(dir, 'tasks');
   const files = fs.existsSync(tasks) ? fs.readdirSync(tasks).filter((f) => f.endsWith('.md')).sort() : [];
   const rows = files.flatMap((f) => {
@@ -39,15 +40,17 @@ function coverageTable(dir, by = {}) {
     const criteria = (body.split(/^## Acceptance Criteria$/m)[1] || '').split(/^## /m)[0].split('\n').map((l) => l.match(/^- \[[ x]\] (.+)$/)?.[1]).filter(Boolean);
     return criteria.map((text, i) => { const id = `${f.match(/^T-\d+/)[0]}.${i + 1}`; return `| ${id} | ${text.replace(/\|/g, '\\|')} | ${by[id] ?? 'the verify fails without it'} |`; });
   });
-  return `\n## Verify coverage\n\n| Criterion | Text | Checked by |\n|-----------|------|------------|\n${rows.join('\n')}\n`;
+  const exemptions = exempt ? files.map((f) => `- ${f.match(/^T-\d+/)[0]}: test fixture, nothing to build\n`).join('') : '';
+  return `\n## Verify coverage\n\n| Criterion | Text | Checked by |\n|-----------|------|------------|\n${rows.join('\n')}\n\n${exemptions}`;
 }
 
 // Writes a governance review; `results` maps rule ID -> [result, notes], defaulting to pass with a note. A plan review
 // also gets its Verify coverage table, unless `coverage` is false.
-function writeReview(dir, goalId, results = {}, result = 'pass', { rules = BASELINE_RULES, file = 'governance-review.md', coverage = {} } = {}) {
+function writeReview(dir, goalId, results = {}, result = 'pass', { rules = BASELINE_RULES, file = 'governance-review.md', coverage = {}, exempt = true, fixes = [] } = {}) {
   const rows = rules.map((id) => { const [res, notes] = results[id] || ['pass', 'checked']; return `| ${id} | ${res} | ${notes ?? ''} |`; });
   const text = `---\ngoal: ${goalId}\nresult: ${result}\n---\n\n| Rule | Result | Notes |\n|------|--------|-------|\n${rows.join('\n')}\n`;
-  fs.writeFileSync(path.join(dir, file), text + (coverage && file === 'governance-review.md' ? coverageTable(dir, coverage) : ''));
+  const fixList = fixes.length ? `\n## Required Fixes\n\n${fixes.map((f) => `- ${f}\n`).join('')}` : '';
+  fs.writeFileSync(path.join(dir, file), text + (coverage && file === 'governance-review.md' ? coverageTable(dir, coverage, exempt) : '') + fixList);
 }
 
 const edit = (file, fn) => fs.writeFileSync(file, fn(fs.readFileSync(file, 'utf8')));
@@ -655,6 +658,130 @@ test('cli: task precheck runs each pending verify on the code as it is and recor
   run(['task', 'set', 'G-001', 'T-01', 'in-progress']);
   assert.match(run(['task', 'precheck', 'G-001', 'T-01']).stderr, /T-01 is not pending; precheck runs a task's verify before its work starts/);
   assert.deepEqual(run(['task', 'precheck', 'G-001']).json.results.map((x) => x.task), ['T-02', 'T-03', 'T-04']);
+});
+
+test('verify: clauses split at a top-level && only, and a command that splitting would change runs whole', () => {
+  assert.deepEqual(verifyClauses('npm run lint && node --test a.test.mjs && grep -q "a && b" x.js'), ['npm run lint', 'node --test a.test.mjs', 'grep -q "a && b" x.js']);
+  assert.deepEqual(verifyClauses("[ \"$(grep -c 'x' f && echo)\" -eq 1 ] && (cd a && make) && cmd 2>&1 | tail -1"), ["[ \"$(grep -c 'x' f && echo)\" -eq 1 ]", '(cd a && make)', 'cmd 2>&1 | tail -1']);
+  for (const whole of ['a || b && c', 'a; b && c', 'cd pkg && npm test', 'export X=1 && npm test', 'X=1 && npm test', 'server & sleep 1 && curl x']) {
+    assert.deepEqual(verifyClauses(whole), [whole], whole);
+  }
+  assert.deepEqual(verifyClauses('npm test &> out.log && grep ok out.log'), ['npm test &> out.log', 'grep ok out.log']);
+});
+
+test('cli: task precheck names the failing clause and tells a missing service from a real check', () => {
+  const { run, dir } = project();
+  run(['init']);
+  const exists = (f) => `node -e "require('fs').statSync('${f}')"`;
+  plannedGoal(run, dir, [
+    ['Second clause', '--verify', `${exists('.aisdlc')} && ${exists('built.txt')}`],
+    ['No tool', '--verify', `${exists('.aisdlc')} && no-such-tool-aisdlc --check`],
+    ['No database', '--verify', 'node -e "console.error(\'Integration settings are missing\'); process.exit(1)"'],
+    ['Refused', '--verify', 'node -e "console.error(\'connect ECONNREFUSED 127.0.0.1:1433\'); process.exit(1)"'],
+  ]);
+  const r = run(['task', 'precheck', 'G-001']).json.results;
+  assert.deepEqual(r.map((x) => [x.task, x.clause, x.of, x.cause]), [['T-01', 2, 2, 'check'], ['T-02', 2, 2, 'environment'], ['T-03', 1, 1, 'check'], ['T-04', 1, 1, 'environment']]);
+  assert.equal(r[0].failed, exists('built.txt'));
+  assert.equal(r[1].exit, 127);
+
+  // The project names its own signs of a missing service.
+  run(['config', 'set', 'precheck.environment_patterns', '["settings are missing"]']);
+  assert.equal(run(['task', 'precheck', 'G-001', 'T-03']).json.results[0].cause, 'environment');
+  run(['config', 'set', 'precheck.environment_patterns', '["("]']);
+  assert.match(run(['task', 'precheck', 'G-001', 'T-03']).stderr, /precheck\.environment_patterns has an invalid pattern "\("/);
+});
+
+test('cli: task precheck all lists, for every pending goal, the verifies that pass and the ones a service blocked', () => {
+  const { run, dir } = project();
+  run(['init']);
+  plannedGoal(run, dir, [['Passes'], ['Fails', '--verify', 'node -e "require(\'fs\').statSync(\'built.txt\')"']], 'One');
+  plannedGoal(run, dir, [['Blocked', '--verify', 'no-such-tool-aisdlc']], 'Two');
+  plannedGoal(run, dir, [['Done later']], 'Three');
+  run(['state', 'move', 'G-003', 'cancelled', '--reason', 'not needed']);
+  const r = run(['task', 'precheck', 'all']);
+  assert.equal(r.code, 0, r.stderr);
+  assert.deepEqual(r.json.checked, { goals: 2, tasks: 3 });
+  assert.deepEqual(r.json.passes_now, { 'G-001': ['T-01'] });
+  assert.deepEqual(Object.keys(r.json.environment), ['G-002']);
+  assert.match(run(['task', 'precheck', 'all', 'T-01']).stderr, /Usage: task precheck all/);
+});
+
+test('cli: govern passes only once no pending verify passes before its work, or the review exempts it', () => {
+  const { run, dir } = project();
+  run(['init']);
+  plannedGoal(run, dir, [['Already true'], ['Needs work', '--verify', 'node -e "require(\'fs\').statSync(\'built.txt\')"']]);
+  run(['gate', 'set', 'G-001', 'challenge', 'done']);
+  run(['adr', 'none', 'G-001', '--reason', 'no architectural change']);
+  run(['gate', 'set', 'G-001', 'adr', 'done']);
+  const goalDir = path.join(dir, run(['goal', 'show', 'G-001']).json.dir);
+  const pass = () => run(['gate', 'set', 'G-001', 'govern', 'passed']);
+
+  writeReview(goalDir, 'G-001', {}, 'pass', { exempt: false });
+  const refused = pass().stderr;
+  assert.match(refused, /T-01's verify already passes on today's code \(`task precheck G-001 T-01`\)/);
+  assert.doesNotMatch(refused, /T-02's verify/);
+
+  // An exemption needs its reason; with one, the gate passes and says what it ran.
+  edit(path.join(goalDir, 'governance-review.md'), (s) => s.replace('\n- T-02: test fixture, nothing to build\n', '\n').replace('- T-01: test fixture, nothing to build', '- T-01:'));
+  edit(path.join(goalDir, 'governance-review.md'), (s) => s.replace(/(\| T-02\.1 [^\n]*\n)/, '$1\n- T-01:\n'));
+  assert.match(pass().stderr, /T-01's verify already passes/);
+  writeReview(goalDir, 'G-001');
+  const ok = pass();
+  assert.equal(ok.code, 0, ok.stderr);
+  assert.deepEqual(ok.json.prechecked, { tasks: 2, exempt: ['T-01', 'T-02'] });
+});
+
+test('cli: a failed plan review says whether the session may fix it and run it again on its own', () => {
+  const { run, dir } = project();
+  run(['init']);
+  plannedGoal(run, dir, [['A']]);
+  run(['gate', 'set', 'G-001', 'challenge', 'done']);
+  run(['adr', 'none', 'G-001', '--reason', 'no architectural change']);
+  run(['gate', 'set', 'G-001', 'adr', 'done']);
+  const goalDir = path.join(dir, run(['goal', 'show', 'G-001']).json.dir);
+  const failed = (fixes, extra = '') => {
+    writeReview(goalDir, 'G-001', { 'GOV-02': ['fail', 'weak verify'] }, 'fail', { fixes });
+    if (extra) fs.appendFileSync(path.join(goalDir, 'governance-review.md'), extra);
+    return run(['gate', 'set', 'G-001', 'govern', 'failed']).json;
+  };
+  const auto = failed(['(auto) T-01: append `&& grep -q x a.js` to the verify', '(auto) T-01: add the criterion "a.js has x"']);
+  assert.deepEqual([auto.fixes, auto.auto_fix, auto.auto_fix_rounds], [{ auto: 2, ask: 0 }, true, 2]);
+  assert.equal(failed(['(auto) T-01: append x', 'T-01: use a or b']).auto_fix, false);
+  assert.equal(failed(['(auto) T-01: append x', '(ask) T-01: pick a name']).auto_fix, false);
+  assert.equal(failed(['(auto) T-01: append x'], '\n## Questions for the user\n\n- Which name?\n').auto_fix, false);
+  assert.equal(failed([]).auto_fix, false);
+  run(['config', 'set', 'govern.auto_fix_rounds', '0']);
+  assert.equal(failed(['(auto) T-01: append x']).auto_fix_rounds, 0);
+  run(['config', 'set', 'govern.auto_fix_rounds', '"two"']);
+  assert.match(run(['gate', 'set', 'G-001', 'govern', 'failed']).stderr, /govern\.auto_fix_rounds "two" is not valid/);
+});
+
+test('verify: a test-name filter that matches no test does not verify the task', () => {
+  const jestSkipped = 'Test Suites: 1 skipped, 0 of 1 total\nTests:       100 skipped, 100 total\n';
+  assert.equal(nameFilterMatchedNothing("jest -t 'G-007 Q-2' a.test.js", jestSkipped), true);
+  assert.equal(nameFilterMatchedNothing("jest -t 'G-007 Q-2' a.test.js", 'Tests:       1 passed, 99 skipped, 100 total\n'), false);
+  assert.equal(nameFilterMatchedNothing('jest a.test.js', jestSkipped), false);
+  assert.equal(nameFilterMatchedNothing("vitest run -t 'x'", ' Tests  4 skipped (4)\n'), true);
+  assert.equal(nameFilterMatchedNothing("pytest -k 'x'", '=== 5 deselected in 0.01s ===\n'), true);
+  assert.equal(unisolatedNameFilter("node --test --test-name-pattern 'x' a.test.mjs"), true);
+  assert.equal(unisolatedNameFilter("node --test --test-isolation=none --test-name-pattern 'x' a.test.mjs"), false);
+  assert.equal(unisolatedNameFilter('node --test a.test.mjs && jest -t x'), false);
+
+  const { run, dir } = project();
+  run(['init']);
+  const fakeJest = 'node -e "console.log(\'Tests:       3 skipped, 3 total\'); require(\'fs\').statSync(\'.aisdlc\')" -- -t named';
+  governedGoal(run, dir, [['Filtered', '--verify', fakeJest]]);
+  run(['state', 'move', 'G-001', 'in-progress']);
+  run(['task', 'set', 'G-001', 'T-01', 'in-progress']);
+  const v = run(['task', 'verify', 'G-001', 'T-01']);
+  assert.equal(v.code, 1);
+  assert.match(v.stderr, /the test-name filter matched no test/);
+
+  // The plan check catches a node --test name filter that can't tell, before the review.
+  const other = project();
+  other.run(['init']);
+  plannedGoal(other.run, other.dir, [['Node filter', '--verify', "node --test --test-name-pattern 'x' .aisdlc"]]);
+  assert.match(other.run(['governance', 'checks', 'G-001']).stdout, /T-01 verify filters `node --test` by test name without `--test-isolation=none`/);
 });
 
 test('cli: adr gate needs accepted ADRs, and adr none removes back-links', () => {

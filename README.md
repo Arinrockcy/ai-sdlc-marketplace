@@ -75,7 +75,8 @@ Each step refuses to run until the previous gate passes, and the script enforces
 Governance is tied to what it reviewed:
 - Rules can name automatic checks (`goal-defined`, `tasks-verifiable`, `dag-valid`, `adr-recorded`, `questions-resolved`, `criteria-met`) that a review can't overrule.
 - Every row of a review needs a note: the evidence for a `pass`, the reason for a `fail` or `n/a`.
-- A `verify` command has to fail until its task's work is done. `aisdlc.mjs task precheck G-001` runs every pending task's verify on today's code and lists the ones that already pass; `create-goal`, `challenge` and the plan review all run it. The plan review also fills a `## Verify coverage` table, one row per task criterion, naming what fails while that criterion is unmet. It can't pass with an empty row, or pass the verify rule while a row says `none`, so one review finds every weak verify.
+- A `verify` command has to fail until its task's work is done. `aisdlc.mjs task precheck G-001` runs every pending task's verify on today's code and lists the ones that already pass; `create-goal`, `challenge` and the plan review all run it. The plan review also fills a `## Verify coverage` table, one row per task criterion, naming what fails while that criterion is unmet. It can't pass with an empty row, or pass the verify rule while a row says `none`, so one review finds every weak verify. `gate set G-001 govern passed` runs the precheck itself and refuses a verify that passes before its work, unless the review exempts the task in writing. `aisdlc.mjs task precheck all` sweeps every pending goal.
+- A failed plan review whose fixes are all written out in full (`(auto)`) and that has no question is fixed and run again without you, up to `govern.auto_fix_rounds` rounds (default 2, `0` turns it off).
 - The plan is fingerprinted when governance passes. Editing the goal, tasks, linked ADRs or plan rules afterwards blocks the next task until it is re-governed.
 - Re-running `challenge` or `adr`, linking another ADR, or adding or editing a task resets the governance gate. The old review is archived as `governance-review.stale-N.md`. Archived reviews are kept on purpose, as the goal's audit trail, and the next reviewer reads the latest one.
 - A reviewer that runs into a question only the user can answer writes it under Questions for the user. The review fails, the questions are asked, and the answers go under Clarifications, which later reviewers treat as settled.
@@ -138,6 +139,14 @@ See [`plugins/aisdlc/docs/stack-plugin-contract.md`](plugins/aisdlc/docs/stack-p
 ## Upgrading
 
 Each plugin keeps a changelog: [`aisdlc`](plugins/aisdlc/CHANGELOG.md), [`aisdlc-nodejs`](plugins/aisdlc-nodejs/CHANGELOG.md). Breaking changes are listed there with their upgrade step.
+
+### 0.25.x → 0.26.0 (`aisdlc`)
+
+The plan gate runs every pending verify itself.
+
+- Before governing a goal planned earlier, run `$AISDLC task precheck <G-id>` (or `$AISDLC task precheck all` for every pending goal) and strengthen each verify in `passes_now`. A task whose every criterion is about something that must stay as it is gets a `- <T-id>: <why>` line under `## Verify coverage` in its review instead.
+- A task's verify that filters `node --test` by test name needs `--test-isolation=none`; change it with `$AISDLC task edit <G-id> <T-id> verify "<command>"`.
+- If a verify fails in the precheck because a service or its settings are missing, add the message it prints to `precheck.environment_patterns` so the precheck reports it as `environment`: `$AISDLC config set precheck.environment_patterns '["<message>"]'`.
 
 ### 0.24.x → 0.25.0 (`aisdlc`)
 

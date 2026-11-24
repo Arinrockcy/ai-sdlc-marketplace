@@ -2,6 +2,21 @@
 
 All notable changes to the `aisdlc` plugin. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/). Until 1.0.0, a minor version may include breaking changes; each one is listed under **Breaking** with its upgrade step.
 
+## [0.26.0] - 2026-11-23
+
+Fewer plan-review rounds: the script checks every pending verify itself, design questions come up in challenge, and a review whose fixes need no choice is fixed and run again without the user.
+
+### Added
+- `task precheck` runs a verify clause by clause (the parts joined by a top-level `&&`) and reports the clause that failed (`clause`, `of`, `failed`) and its `cause`: `check`, or `environment` when it failed for a missing tool, service or setting (exit 127, a refused connection, a missing command). `precheck.environment_patterns` in config.json adds the project's own signs as regular expressions. A command that also uses `||`, `;` or `&`, or changes the shell (`cd`, `export`), runs whole.
+- `task precheck all` checks every pending task of every pending goal and lists only what needs attention: `passes_now` and `environment`, by goal.
+- `gate set <G-id> govern failed` returns `fixes` (how many Required Fixes start with `(auto)` and how many need the user), `auto_fix` (no question, no warning and every fix `(auto)`) and `auto_fix_rounds` (`govern.auto_fix_rounds`, default 2). `/aisdlc:govern` then makes the fixes, re-checks the tasks they changed and runs a fresh review on its own, up to that many rounds, and stops for the user when a fix comes back.
+- `/aisdlc:challenge` starts a code-reading pass: a fresh sub-agent reads the code under each task's Files and returns the questions the code raises, with options and a recommendation, before the user is asked anything.
+- A verify filtered by test name (`jest -t`, `vitest -t`, `--testNamePattern`, `pytest -k`) whose filter matches no test now fails `task verify` and the precheck, so `jest -t '<name>'` shows that a named test exists and passes. The skills recommend it over grepping for a comment.
+
+### Breaking
+- `gate set <G-id> govern passed` runs every pending task's verify while a plan rule uses the `tasks-verifiable` check, and refuses a verify that already passes unless the review exempts the task with `- <T-id>: <why>` under `## Verify coverage`. It reports `prechecked`.
+- The `tasks-verifiable` check, and `task verify`, refuse `node --test --test-name-pattern` without `--test-isolation=none`: with process isolation, a file whose tests the filter skipped counts as a passing test.
+
 ## [0.25.0] - 2026-11-23
 
 A weak `verify` command is found while the plan is written, and by the first plan review instead of one review after another.

@@ -34,6 +34,13 @@ const MUST = [
   ['govern', /never a sample/, 'the review of verify commands covers every criterion'],
   ['govern', /\$AISDLC task precheck <G-id> <T-id>/, 'a task changed by an answer or fix is re-checked before the next review'],
   ['create-goal', /\$AISDLC task precheck <G-id>/, 'create-goal runs every verify before the work'],
+  ['govern', /Start each fix with `\(auto\)`/, 'the reviewer tags fixes that need no choice'],
+  ['govern', /\*\*Fix it without the user\*\* when `auto_fix` is true/, 'govern fixes and re-reviews mechanical failures on its own'],
+  ['govern', /repeats a fix from the last one/, 'the auto-fix loop stops when a fix does not hold'],
+  ['govern', /exempt it with a `- <T-id>: <why>` line/, 'a verify that must pass before the work is exempted in writing'],
+  ['challenge', /\*\*Code-reading pass\.\*\*/, 'challenge reads the code each task touches for design questions'],
+  ['challenge', /but not your own reading of the plan/, 'the code reader gets fresh eyes'],
+  ...['create-goal', 'challenge', 'govern'].map((skill) => [skill, /rather than grepping for a comment/, 'a named test is checked with the runner\'s name filter']),
   ['challenge', /\$AISDLC task precheck <G-id>/, 'challenge runs every verify before the work'],
   ...['create-goal', 'challenge'].map((skill) => [skill, /name the part of its `verify`, or of the `after_task` hook, that fails while that criterion is unmet/, 'planning names what checks each criterion']),
   ...['create-goal', 'challenge', 'adr', 'implement', 'govern'].flatMap((skill) => [

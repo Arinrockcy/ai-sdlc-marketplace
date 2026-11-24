@@ -1407,6 +1407,7 @@ const CHECKS = {
     return [
       ...(verify && !/^manual:\s*$/i.test(verify) ? [] : [`${t.id} has no verify command or manual check`]),
       ...(trivialVerify(verify) ? [trivialVerifyProblem(t.id, verify)] : []),
+      ...(unisolatedNameFilter(verify) ? [`${t.id} verify filters \`node --test\` by test name without \`--test-isolation=none\`, so a filter that matches no test still passes; add \`--test-isolation=none\``] : []),
       ...(listItems(section(readDoc(t.file).body, /acceptance criteria/i)).length ? [] : [`${t.id} has no acceptance criteria`]),
     ];
   }) : ['goal has no tasks']),
@@ -1438,6 +1439,26 @@ const REVIEWER_CHECKS = {
     return `${goal} goal and ${problems.length - goal} task criteria to check`;
   },
 };
+
+// `task precheck all`: the precheck of every pending task of every pending goal, the sweep for plans written before
+// the precheck existed. Only the tasks that need attention are listed: verifies that already pass, and failures that
+// came from a missing tool, service or setting, which say nothing about the criteria until the precheck runs with it.
+function precheckAll(root, rest) {
+  if (rest.length) fail('Usage: task precheck all (it checks every pending goal; name a goal to check some of its tasks)');
+  const patterns = environmentPatterns(root);
+  const goals = listGoals(root).filter((g) => g.status === 'pending');
+  const passes = {}; const environment = {}; let tasks = 0;
+  for (const g of goals) {
+    process.stderr.write(`[aisdlc] precheck ${g.id}\n`);
+    for (const t of listTasks(g).filter((x) => x.status === 'pending')) {
+      tasks++;
+      const r = precheckTask(root, t, patterns);
+      if (r.result === 'passes') (passes[g.id] ??= []).push(t.id);
+      if (r.cause === 'environment') (environment[g.id] ??= []).push({ task: t.id, clause: r.clause, tail: r.tail });
+    }
+  }
+  return { checked: { goals: goals.length, tasks }, passes_now: passes, environment };
+}
 
 // The plan review's per-criterion table: one row per acceptance criterion of every unfinished task, where the reviewer
 // names what fails while that criterion is unmet. It makes the review of verify commands cover every criterion instead
@@ -1481,29 +1502,119 @@ function coverageProblems(goal, review, rule, name) {
   return { invalid, uncovered };
 }
 
-// Runs a pending task's verify command on the code as it is now, before the task's work, and records nothing. A
-// command that already passes proves nothing about that work. Output is kept out of the result except the last
-// lines of a failure, which show whether it failed for the task's reason or for a missing tool or service.
-function precheckTask(root, t) {
-  const verify = String(t.verify ?? '').trim();
-  if (!verify) return { task: t.id, result: 'none' };
-  if (/^manual:/i.test(verify)) return { task: t.id, result: 'manual' };
-  process.stderr.write(`[aisdlc] precheck ${t.id}: ${verify}\n`);
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'aisdlc-precheck-'));
+// The clauses of a verify command joined by `&&` at the top level, so the precheck can say which one failed. Quotes,
+// `$(…)`, `(…)` and `{…}` are respected. A command that also uses `||`, `;`, `&` or a newline at the top level, or a
+// clause that changes the shell (`cd`, `export`, a bare assignment), is run whole as one clause, since splitting it
+// would change what it does.
+export function verifyClauses(command) {
+  const c = String(command ?? '').trim();
+  const parts = [];
+  let depth = 0; let quote = ''; let start = 0; let whole = false;
+  for (let i = 0; i < c.length; i++) {
+    const ch = c[i];
+    if (quote) {
+      if (ch === '\\' && quote === '"') i++;
+      else if (ch === quote) quote = '';
+      continue;
+    }
+    if (ch === '\\') { i++; continue; }
+    if (ch === '"' || ch === "'") { quote = ch; continue; }
+    if ('({'.includes(ch)) { depth++; continue; }
+    if (')}'.includes(ch)) { depth = Math.max(0, depth - 1); continue; }
+    if (depth) continue;
+    if (ch === '&' && c[i + 1] === '&') { parts.push(c.slice(start, i)); start = i + 2; i++; continue; }
+    if (ch === ';' || ch === '\n' || (ch === '|' && c[i + 1] === '|') || (ch === '&' && c[i - 1] !== '>' && c[i + 1] !== '>')) whole = true;
+  }
+  parts.push(c.slice(start));
+  const clauses = parts.map((p) => p.trim()).filter(Boolean);
+  if (whole || clauses.some((p) => /^(?:cd|pushd|export|set|source|\.)\s|^[A-Za-z_]\w*=\S*$/.test(p))) return c ? [c] : [];
+  return clauses;
+}
+
+// Output that shows a command failed because something it needs is missing (a tool, a service, settings), not because
+// of what it checks. `precheck.environment_patterns` in config.json adds the project's own (regular expressions).
+const ENVIRONMENT_FAILURE = /command not found|is not recognized as an internal or external command|\bENOENT\b.*\bspawn\b|\bECONNREFUSED\b|\bENOTFOUND\b|\bEAI_AGAIN\b|\bETIMEDOUT\b|connection refused|could not connect|failed to connect|Cannot find module '(?![./])/i;
+function environmentPatterns(root) {
+  const extra = loadConfig(root).precheck?.environment_patterns ?? [];
+  if (!Array.isArray(extra) || extra.some((p) => typeof p !== 'string')) fail('precheck.environment_patterns must be a list of regular expressions written as strings: `config set precheck.environment_patterns \'["<pattern>"]\'`.');
+  return [ENVIRONMENT_FAILURE, ...extra.map((p) => {
+    try { return new RegExp(p, 'i'); } catch (e) { return fail(`precheck.environment_patterns has an invalid pattern "${p}": ${e.message}`); }
+  })];
+}
+
+// Runs one command with its output captured; returns its exit code and output. A command that passes without running
+// a test, or whose test-name filter matched no test, counts as failing, as in `task verify`.
+function runCaptured(root, cmd) {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'aisdlc-run-'));
   const log = path.join(tmp, 'out');
   const fd = fs.openSync(log, 'w');
   let code;
   try {
-    const r = spawnSync(verify, { cwd: root, shell: true, stdio: ['ignore', fd, fd] });
+    const r = spawnSync(cmd, { cwd: root, shell: true, stdio: ['ignore', fd, fd] });
     code = r.error ? 1 : r.status ?? 1;
   } finally { fs.closeSync(fd); }
   const output = fs.readFileSync(log, 'utf8');
   fs.rmSync(tmp, { recursive: true, force: true });
-  // `task verify` fails a command that passes without running a test, so it does not pass here either.
-  if (!code && ranNoTests(output)) return { task: t.id, result: 'fails', exit: 1, tail: 'the command passed but ran no tests' };
-  if (!code) return { task: t.id, result: 'passes', exit: 0 };
-  const lines = output.replace(/\x1b\[[0-9;]*[A-Za-z]/g, '').split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
-  return { task: t.id, result: 'fails', exit: code, tail: lines.slice(-5).map((l) => (l.length > 160 ? `${l.slice(0, 159)}…` : l)).join(' / ') };
+  const empty = !code && ranNoTests(output) ? 'the command passed but ran no tests' : !code && nameFilterMatchedNothing(cmd, output) ? 'the test-name filter matched no test' : '';
+  return { code: empty ? 1 : code, output, empty };
+}
+
+const clipLine = (l) => (l.length > 160 ? `${l.slice(0, 159)}…` : l);
+const outputTail = (output) => output.replace(/\x1b\[[0-9;]*[A-Za-z]/g, '').split(/\r?\n/).map((l) => l.trim()).filter(Boolean).slice(-5).map(clipLine).join(' / ');
+
+// Runs a pending task's verify command on the code as it is now, before the task's work, and records nothing. A
+// command that already passes proves nothing about that work. The clauses run in order, as the shell would run them,
+// so the result names the clause that failed and whether it failed for what it checks (`cause: check`) or for a
+// missing tool, service or setting (`cause: environment`), which says nothing about the task's criteria.
+function precheckTask(root, t, patterns = environmentPatterns(root)) {
+  const verify = String(t.verify ?? '').trim();
+  if (!verify) return { task: t.id, result: 'none' };
+  if (/^manual:/i.test(verify)) return { task: t.id, result: 'manual' };
+  const clauses = verifyClauses(verify);
+  for (const [i, clause] of clauses.entries()) {
+    process.stderr.write(`[aisdlc] precheck ${t.id} (${i + 1}/${clauses.length}): ${clause}\n`);
+    const r = runCaptured(root, clause);
+    if (!r.code) continue;
+    const cause = r.code === 127 || (!r.empty && patterns.some((p) => p.test(r.output))) ? 'environment' : 'check';
+    return { task: t.id, result: 'fails', exit: r.code, clause: i + 1, of: clauses.length, failed: clipLine(clause), cause, tail: r.empty || outputTail(r.output) };
+  }
+  return { task: t.id, result: 'passes', exit: 0 };
+}
+
+// What a plan review's Verify coverage section exempts from the precheck: `- T-03: <why>` items, for a task whose every
+// criterion is about something that must stay as it is, so its verify passes before the work.
+function precheckExemptions(review) {
+  return new Map(listItems(review.coverageText || '').map((l) => l.match(/^(T-\d+):\s*(\S.*)$/)).filter(Boolean).map((m) => [m[1], m[2]]));
+}
+
+// The pending tasks whose verify already passes and that the review doesn't exempt. Run when govern is set passed.
+function precheckProblems(root, goal, review) {
+  const exempt = precheckExemptions(review);
+  const tasks = listTasks(goal).filter((t) => t.status === 'pending');
+  const patterns = environmentPatterns(root);
+  const passing = tasks.filter((t) => !exempt.has(t.id)).map((t) => precheckTask(root, t, patterns)).filter((r) => r.result === 'passes').map((r) => r.task);
+  return {
+    problems: passing.map((id) => `${id}'s verify already passes on today's code (\`task precheck ${goal.id} ${id}\`), so it proves nothing about the task's work: strengthen it, or, if every criterion of ${id} is about something that must stay as it is, exempt it under Verify coverage with "- ${id}: <why>"`),
+    prechecked: { tasks: tasks.length, exempt: [...exempt.keys()].filter((id) => tasks.some((t) => t.id === id)) },
+  };
+}
+
+// A test command filtered by test name (`jest -t`, `vitest -t`, `--testNamePattern`, `pytest -k`) whose filter
+// matched nothing still exits 0, with every test skipped. So it can't show that the named test exists and passes.
+const TEST_NAME_FILTER = /(?:^|\s)(?:-t|--testNamePattern|--test-name-pattern|-k)(?:=|\s+)\S/;
+export function nameFilterMatchedNothing(cmd, output) {
+  if (!TEST_NAME_FILTER.test(String(cmd))) return false;
+  const plain = output.replace(/\x1b\[[0-9;]*[A-Za-z]/g, '');
+  const summary = plain.split('\n').reverse().find((l) => /^\s*Tests:?\s+\d/.test(l));
+  if (summary) return !/\b[1-9]\d* passed\b/.test(summary);
+  return /\b\d+ deselected\b/.test(plain) && !/\b[1-9]\d* passed\b/.test(plain);
+}
+
+// node --test runs each file in its own process and counts a file whose tests the name filter skipped as one passing
+// test, so a filter that matches nothing still reports a pass. Without process isolation it reports 0 tests.
+const NODE_TEST_NAME_FILTER = /\bnode\s[^&|;]*--test\b[^&|;]*--test-name-pattern|\bnode\s[^&|;]*--test-name-pattern[^&|;]*--test\b/;
+export function unisolatedNameFilter(command) {
+  return String(command ?? '').split(/&&|\|\||;/).some((part) => NODE_TEST_NAME_FILTER.test(part) && !/--test-isolation(?:=|\s+)none\b/.test(part));
 }
 
 function runChecks(root, goal, rules) {
@@ -1596,7 +1707,8 @@ function readReview(file) {
     coverage.set(r[0], r.slice(2).join('|').trim());
   }
   return {
-    data: doc.data, results, malformed, coverage, hasCoverage: covered !== null,
+    data: doc.data, results, malformed, coverage, hasCoverage: covered !== null, coverageText: covered,
+    fixes: listItems(section(doc.body, /^required fixes\b/i)),
     questions: listItems(section(doc.body, /^questions\b/i)),
     readings: listItems(section(doc.body, /^readings\b/i)),
   };
@@ -1697,12 +1809,30 @@ function setGate(root, goal, gate, value) {
   let checked = {};
   if (stage && value !== 'pending') {
     const { invalid, blocking, review, uncovered = [] } = reviewProblems(root, goal, stage);
+    let prechecked;
     if (value === 'passed') {
       const problems = [...(gate === 'final' ? requireStep(root, goal, 'final') : requireStep(root, goal, 'govern').filter((p) => /^(?:open question|unmarked question|placeholder)/.test(p))), ...invalid, ...blocking];
+      // The script runs every pending verify itself, last, so a review can't pass a verify that proves nothing.
+      if (!problems.length && gate === 'govern' && activeRules(root, 'plan').some((r) => r.check === 'tasks-verifiable')) {
+        const p = precheckProblems(root, goal, review);
+        problems.push(...p.problems);
+        prechecked = p.prechecked;
+      }
       if (problems.length) fail(`Cannot mark ${gate} passed:\n- ${problems.join('\n- ')}`);
     }
     const warnings = [...invalid, ...(value === 'failed' && review?.data.result === 'pass' ? [`${REVIEW_FILE[stage]} says \`result: pass\`; set it to \`fail\``] : [])];
-    checked = { checked: true, warnings, questions: review?.questions || [], readings: review?.readings || [], ...(uncovered.length && { uncovered }) };
+    const fixes = review ? fixSummary(review) : null;
+    const questions = review?.questions || [];
+    checked = {
+      checked: true, warnings, questions, readings: review?.readings || [], ...(uncovered.length && { uncovered }),
+      ...(prechecked && { prechecked }),
+      ...(value === 'failed' && fixes && {
+        fixes,
+        // A failed review the session may fix and run again without the user: no question, and every fix fully written out.
+        auto_fix: !warnings.length && !questions.length && fixes.ask === 0 && fixes.auto > 0,
+        auto_fix_rounds: autoFixRounds(root),
+      }),
+    };
   }
   // A new answer at one gate invalidates everything after it. Setting a review gate to pending starts a
   // fresh review, so the current one is archived.
@@ -1714,6 +1844,22 @@ function setGate(root, goal, gate, value) {
   if (gate === 'govern') patch.govern_fingerprint = value === 'passed' ? planFingerprint(root, goal) : '';
   updateDoc(goal.file, patch);
   return { notes, ...checked, ...(stage && value === 'pending' && { stale_reviews: staleReviews(root, goal, stage) }) };
+}
+
+// A Required Fix starts with `(auto)` when it is written out in full and needs no choice: the exact command, clause or
+// text to change, in the plan files only. Anything else (untagged, `(ask)`, offering options) needs the user.
+const AUTO_FIX = /^\(auto\)\s*\S/i;
+function fixSummary(review) {
+  const auto = review.fixes.filter((f) => AUTO_FIX.test(f)).length;
+  return { auto, ask: review.fixes.length - auto };
+}
+
+// How many failed plan reviews in a row the session fixes and runs again on its own: `govern.auto_fix_rounds`
+// (default 2, 0 turns it off). A bad value fails loudly instead of being read as the default.
+function autoFixRounds(root) {
+  const v = loadConfig(root).govern?.auto_fix_rounds ?? 2;
+  if (!Number.isInteger(v) || v < 0) fail(`govern.auto_fix_rounds "${v}" is not valid. Use a whole number, 0 or more: \`config set govern.auto_fix_rounds 2\`.`);
+  return v;
 }
 
 function reviewSummary(root, goal, stage) {
@@ -1937,6 +2083,7 @@ const commands = {
 
   task([action, goalId, ...rest], opts) {
     const root = findRoot();
+    if (action === 'precheck' && goalId === 'all') return out(precheckAll(root, rest));
     const g = getGoal(root, goalId);
     if (action === 'new') {
       const title = rest.join(' ').trim();
@@ -2055,6 +2202,7 @@ const commands = {
       const evidence = typeof opts.evidence === 'string' && opts.evidence.trim() ? opts.evidence : '';
       // With no verify command and no after_task hook nothing would run, so a pass needs evidence like a manual check.
       if (trivialVerify(verify)) fail(`${trivialVerifyProblem(taskId, verify)}. Change it with \`task edit ${g.id} ${taskId} verify "<command>"\`.`);
+      if (unisolatedNameFilter(verify)) fail(`${taskId} verify command \`${verify}\` filters \`node --test\` by test name without \`--test-isolation=none\`, so a filter that matches no test still passes. Add \`--test-isolation=none\` with \`task edit ${g.id} ${taskId} verify "<command>"\`.`);
       const unanchored = unanchoredVerify(root, verify);
       if (unanchored) fail(`${taskId} verify command \`${verify}\`: ${unanchored}. Change it with \`task edit ${g.id} ${taskId} verify "<command>"\`.`);
       const byHand = manual || (!verify && !hook.commands.length);
@@ -2126,11 +2274,12 @@ const commands = {
       // Runs the verify of each pending task (or of the ones named) before its work, so a verify that proves nothing
       // is fixed while the plan is written, not found by a review. It changes no state.
       const tasks = listTasks(g);
+      const patterns = environmentPatterns(root);
       const unknown = rest.filter((id) => !tasks.some((t) => t.id === id));
       if (unknown.length) fail(`Task ${unknown.join(', ')} not found in ${g.id}.`);
       const started = rest.filter((id) => tasks.find((t) => t.id === id).status !== 'pending');
       if (started.length) fail(`${started.join(', ')} ${started.length > 1 ? 'are' : 'is'} not pending; precheck runs a task's verify before its work starts.`);
-      const results = tasks.filter((t) => t.status === 'pending' && (!rest.length || rest.includes(t.id))).map((t) => precheckTask(root, t));
+      const results = tasks.filter((t) => t.status === 'pending' && (!rest.length || rest.includes(t.id))).map((t) => precheckTask(root, t, patterns));
       return out({ goal: g.id, passes_now: results.filter((r) => r.result === 'passes').map((r) => r.task), results });
     }
     fail('Usage: task new|edit|remove|set|verify|review|explore|precheck');
@@ -2544,6 +2693,9 @@ function runCommands(root, label, cmds, record) {
       if (!code && ranNoTests(output)) {
         code = 1;
         process.stderr.write(`[aisdlc] ${label}: the command passed but ran no tests, so it proves nothing: ${cmd}\n`);
+      } else if (!code && nameFilterMatchedNothing(cmd, output)) {
+        code = 1;
+        process.stderr.write(`[aisdlc] ${label}: the test-name filter matched no test, so the named test doesn't exist or didn't run: ${cmd}\n`);
       }
       record.push({ cmd, code, tests: testCounts(output) });
     }
