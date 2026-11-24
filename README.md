@@ -82,14 +82,25 @@ Governance is tied to what it reviewed:
 - A reviewer that runs into a question only the user can answer writes it under Questions for the user. The review fails, the questions are asked, and the answers go under Clarifications, which later reviewers treat as settled.
 - There is no waiver.
 
+## Who did what: owners and the decision log
+
+Every goal records who started it and who owns it now, and every decision on it is logged with who made it.
+
+- **Who.** The name comes from `AISDLC_ACTOR`, else the project's `git config user.name`. Only a name is stored, never an email, because it goes into committed files. A command that changes state refuses when neither is set; reading never needs one.
+- **Owners.** `goal new` sets `created_by` and `owner` to that person. `created_by` never changes. `goal owner <G-id> <name> --reason "<why>"` hands the goal over, and `goal set` refuses both fields. The registry has an Owner column (for an ADR, who decided it), and `goal list --owner <name>` filters by it. `/aisdlc:implement` says when the goal belongs to someone else and asks whether to take it over.
+- **The decision log.** Each goal folder has a `decisions.md`, appended by the script and never edited by hand: one line per decision, with the UTC time, who, and what. It covers creation, owner handoffs, every state move (with its reason), gate results and what they reset, ADR links and `none`, task additions, edits, removals and status changes, verify and review results, and answered questions. Project-wide decisions (governance rules, `config set`, new ADRs and their status) go to `.aisdlc/decisions.md`. `decision list <G-id>|project` reads either back.
+- **Person or agent.** A line signed with a name alone is that person's decision. An agent signs `<agent> for <name>` (`AISDLC_AGENT`, or Claude under Claude Code), unless the command carries `--by user`, which attests that the user made the choice in this session. The skills pass `--by user` only for the user's own choices, and record choices no command carries out (merge or create, retry, which option) with `decision add <G-id> "<the choice>" --by user`.
+- **ADRs.** `adr status <ADR-id> accepted|rejected|superseded|proposed [--reason "<why>"]` settles an ADR, sets `decided_by` on it, and logs it in the project and in every open linked goal. `adr new` sets `created_by`.
+- The log lives outside the plan fingerprint, so logging and handoffs never force re-governance.
+
 ## Project layout created by init
 
 ```
 .aisdlc/
-  config.json  registry.md  registry-archive.md  governance.md
+  config.json  registry.md  registry-archive.md  governance.md  decisions.md
   adr/  stacks/  cache/
   goals/{pending,in-progress,blocked,completed,cancelled}/G-001-slug/
-    goal.md  tasks.md  tasks/T-01-slug.md  governance-review.md  governance-final.md
+    goal.md  tasks.md  tasks/T-01-slug.md  decisions.md  governance-review.md  governance-final.md
 ```
 
 ## Documentation index
@@ -139,6 +150,15 @@ See [`plugins/aisdlc/docs/stack-plugin-contract.md`](plugins/aisdlc/docs/stack-p
 ## Upgrading
 
 Each plugin keeps a changelog: [`aisdlc`](plugins/aisdlc/CHANGELOG.md), [`aisdlc-nodejs`](plugins/aisdlc-nodejs/CHANGELOG.md). Breaking changes are listed there with their upgrade step.
+
+### 0.26.x → 0.27.0 (`aisdlc`)
+
+Every change records who made it.
+
+- Make sure everyone who runs the workflow has a name set: `git config user.name "<name>"` in the project (or globally), or `AISDLC_ACTOR` in the environment, for example in CI. Without one, commands that change state refuse.
+- Run `$AISDLC goal backfill` once. It gives every existing goal a `created_by` (the author of the commit that added its `goal.md`, following folder moves) and an `owner` (the same person), and logs it in the goal's new `decisions.md`. A goal not committed yet gets the person running it. Commits made by an agent under its own git name show that name; hand those goals over with `goal owner` if you want a person's name on them.
+- Change an ADR's status with `$AISDLC adr status <ADR-id> <status>` from now on, so who decided it is recorded. Earlier ADRs keep their status and have no `decided_by`.
+- `--by` now takes only `user`, on every command.
 
 ### 0.25.x → 0.26.0 (`aisdlc`)
 

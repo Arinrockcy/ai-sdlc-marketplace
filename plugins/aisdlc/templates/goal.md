@@ -12,6 +12,8 @@ adr_reason:
 cancel_reason:
 auto_commit:
 branch:
+created_by: {{created_by}}
+owner: {{owner}}
 created: {{date}}
 updated: {{date}}
 ---

@@ -31,6 +31,8 @@ const TASK_STATES = ['pending', 'in-progress', 'done', 'blocked', 'skipped'];
 const TASK_SATISFIED = new Set(['done', 'skipped']);
 const RISK_RANK = { high: 0, medium: 1, low: 2 };
 const ADR_SETTLED = new Set(['accepted', 'superseded']);
+// What `adr status` accepts. `proposed` waits on the user; the rest settle the ADR one way or the other.
+const ADR_STATUSES = ['proposed', 'accepted', 'rejected', 'superseded'];
 const RULE_SEVERITIES = ['must', 'should', 'retired'];
 // A rule's stage says which review checks it: `plan` gates implementation, `final` gates completion.
 const RULE_STAGES = ['plan', 'final'];
@@ -172,9 +174,77 @@ function setPath(obj, dotted, value) {
   o[keys.at(-1)] = value;
 }
 
+// ---------- who, and the decision log ----------
+
+// Who is acting: AISDLC_ACTOR, else the project's `git config user.name`. Only a name is kept, never an email, because
+// it goes into committed files. A change that records who made it refuses without one.
+let actorCache;
+function actorName(root, required = true) {
+  if (actorCache === undefined) {
+    const name = (process.env.AISDLC_ACTOR || '').trim() || (git(root, ['config', 'user.name']) || '').trim();
+    actorCache = name.replace(/\s+/g, ' ') || null;
+  }
+  if (!actorCache && required) fail('aisdlc records who makes each change, and no name is set. Run `git config user.name "<your name>"` in this project, or set AISDLC_ACTOR.');
+  return actorCache;
+}
+
+// The agent running the script, if any: AISDLC_AGENT (empty for none), else Claude when Claude Code runs it.
+function agentName() {
+  if ('AISDLC_AGENT' in process.env) return process.env.AISDLC_AGENT.trim();
+  return process.env.CLAUDECODE ? 'Claude' : '';
+}
+
+// How a decision is signed. `--by user` attests that the person decided it in this session, so it carries their name
+// alone; a change an agent makes on its own reads `<agent> for <name>`. Run by hand, with no agent, it is the name.
+function signature(root, opts) {
+  const name = actorName(root);
+  const agent = agentName();
+  return opts?.by === 'user' || !agent ? name : `${agent} for ${name}`;
+}
+
+const DECISIONS = 'decisions.md';
+const oneLine = (s) => String(s ?? '').replace(/\s+/g, ' ').trim();
+const shortText = (s, n = 200) => { const t = oneLine(s); return t.length > n ? `${t.slice(0, n - 1)}…` : t; };
+// The gates an `invalidate` reset, for the decision line of the change that caused it.
+const resets = (notes) => {
+  const gates = (notes || []).map((n) => n.match(/^gate_(\w+) reset/)?.[1]).filter(Boolean);
+  return gates.length ? ` (reset: ${gates.join(', ')})` : '';
+};
+
+// Appends one line to a goal's decisions.md (or, with no goal, the project's .aisdlc/decisions.md): the time in UTC,
+// who, and what was decided. Append-only and outside the plan fingerprint, so logging never forces re-governance.
+function logDecision(root, goal, what, by) {
+  const file = goal ? path.join(goal.dir, DECISIONS) : path.join(aisdlcDir(root), DECISIONS);
+  if (!fs.existsSync(file)) {
+    const subject = goal ? `this goal` : 'this project (governance rules, configuration, ADRs)';
+    fs.writeFileSync(file, `# Decisions: ${goal ? goal.id : 'project'}\n\nWritten by \`aisdlc.mjs\`: every decision on ${subject}, oldest first. Each line is the time (UTC), who, and what was decided. A name alone means that person decided; \`<agent> for <name>\` means an agent acted in that person's session. Don't edit it by hand.\n\n`);
+  } else if (!fs.readFileSync(file, 'utf8').endsWith('\n')) fs.appendFileSync(file, '\n');
+  const stamp = new Date().toISOString().slice(0, 16).replace('T', ' ');
+  fs.appendFileSync(file, `- ${stamp} | ${by} | ${oneLine(what)}\n`);
+}
+
+const DECISION_LINE = /^- (\d{4}-\d{2}-\d{2} \d{2}:\d{2}) \| (.+?) \| (.*)$/;
+function readDecisions(file) {
+  if (!fs.existsSync(file)) return [];
+  return fs.readFileSync(file, 'utf8').split('\n').map((l) => l.match(DECISION_LINE)).filter(Boolean).map((m) => ({ at: `${m[1]} UTC`, by: m[2], decision: m[3] }));
+}
+
+// Puts keys into a goal's frontmatter just before `created`, where the template has them.
+function withKeys(data, add) {
+  const result = {};
+  let placed = false;
+  for (const [k, v] of Object.entries(data)) {
+    if (k in add) continue;
+    if (!placed && k === 'created') { Object.assign(result, add); placed = true; }
+    result[k] = v;
+  }
+  if (!placed) Object.assign(result, add);
+  return result;
+}
+
 // Every option takes a value, even one that starts with "--" (e.g. --verify "--version").
 // Unknown options fail, so a typo in a skill can't be silently ignored.
-export const OPTIONS = new Set(['depends', 'risk', 'verify', 'reason', 'evidence', 'goal', 'task', 'status', 'stack', 'graph', 'base-branch', 'dir', 'severity', 'stage', 'check', 'budget', 'answer', 'by']);
+export const OPTIONS = new Set(['depends', 'risk', 'verify', 'reason', 'evidence', 'goal', 'task', 'status', 'stack', 'graph', 'base-branch', 'dir', 'severity', 'stage', 'check', 'budget', 'answer', 'by', 'owner']);
 
 function parseArgs(argv) {
   const pos = [];
@@ -624,10 +694,10 @@ function registrySync(root) {
     const p = goalProgress(listTasks(g));
     const status = p.total ? `${g.status} (${p.done}/${p.total})` : g.status;
     const links = g.data.adrs === 'none' ? 'adr: none' : cell(g.data.adrs);
-    (ARCHIVED_STATES.includes(g.status) ? archived : open).push(`| ${g.id} | goal | ${cell(g.title)} | ${status} | ${links} | ${cell(g.data.updated)} |`);
+    (ARCHIVED_STATES.includes(g.status) ? archived : open).push(`| ${g.id} | goal | ${cell(g.title)} | ${status} | ${links} | ${cell(g.data.owner)} | ${cell(g.data.updated)} |`);
   }
   for (const a of listAdrs(root)) {
-    open.push(`| ${a.id} | adr | ${cell(a.title)} | ${cell(a.status)} | ${cell(a.goals)} | ${cell(a.date)} |`);
+    open.push(`| ${a.id} | adr | ${cell(a.title)} | ${cell(a.status)} | ${cell(a.goals)} | ${cell(a.decided_by)} | ${cell(a.date)} |`);
   }
   const write = (name, rows) => {
     const header = fs.readFileSync(path.join(TEMPLATES, name), 'utf8').trimEnd();
@@ -1904,19 +1974,44 @@ const commands = {
     out(stackReport(root, cfg));
   },
 
-  config([action, key, value]) {
+  config([action, key, value], opts) {
     const root = findRoot();
     const cfg = loadConfig(root);
     if (action === 'get') return out(key ? getPath(cfg, key) ?? null : cfg);
     if (action === 'set') {
       if (!key || value === undefined) fail('Usage: config set <dot.path> <value>');
+      const by = signature(root, opts);
       let v;
       try { v = JSON.parse(value); } catch { v = value; }
+      const old = getPath(cfg, key);
       setPath(cfg, key, v);
       saveConfig(root, cfg);
+      logDecision(root, null, `config ${key}: ${old === undefined ? 'unset' : JSON.stringify(old)} → ${JSON.stringify(v)}`, by);
       return out({ [key]: v });
     }
     fail('Usage: config get [dot.path] | config set <dot.path> <value>');
+  },
+
+  // The decision log: every change the script makes is logged by itself. `decision add` records a choice the user made
+  // in conversation that no other command records (merge or create, retry, skip or block, which option to take).
+  decision([action, goalId, ...rest], opts) {
+    const root = findRoot();
+    if (action === 'list') {
+      const g = goalId && goalId !== 'project' ? getGoal(root, goalId) : null;
+      const file = g ? path.join(g.dir, DECISIONS) : path.join(aisdlcDir(root), DECISIONS);
+      return out({ subject: g ? g.id : 'project', file: path.relative(root, file), decisions: readDecisions(file) });
+    }
+    if (action === 'add') {
+      const text = oneLine(rest.join(' '));
+      if (!goalId || !text) fail('Usage: decision add <G-id>|project <decision> [--reason "<why>"] [--by user]');
+      const g = goalId === 'project' ? null : getGoal(root, goalId);
+      if (g) assertOpen(g);
+      const by = signature(root, opts);
+      const reason = oneLine(opts.reason);
+      logDecision(root, g, `${text}${reason ? `: ${reason}` : ''}`, by);
+      return out({ subject: g ? g.id : 'project', by, decision: text, ...(reason && { reason }) });
+    }
+    fail('Usage: decision add <G-id>|project <decision> [--reason "<why>"] [--by user] | decision list <G-id>|project');
   },
 
   goal([action, ...rest], opts) {
@@ -1924,20 +2019,74 @@ const commands = {
     if (action === 'new') {
       const title = rest.join(' ').trim();
       if (!title) fail('Usage: goal new <title>');
+      const by = signature(root, opts);
+      const name = actorName(root);
       const id = nextId('G', listGoals(root).map((g) => g.id), 3);
       const dir = path.join(aisdlcDir(root), 'goals', 'pending', `${id}-${slugify(title)}`);
-      const content = render('goal.md', { id, title, date: today() });
+      // The person who created the goal is its first owner; created_by never changes, owner moves with `goal owner`.
+      const content = render('goal.md', { id, title, date: today(), created_by: name, owner: name });
       fs.mkdirSync(path.join(dir, 'tasks'), { recursive: true });
       fs.writeFileSync(path.join(dir, 'goal.md'), content);
+      logDecision(root, { id, dir }, `created "${title}"; owner ${name}`, by);
       registrySync(root);
-      return out({ id, dir: path.relative(root, dir), file: path.relative(root, path.join(dir, 'goal.md')) });
+      return out({ id, dir: path.relative(root, dir), file: path.relative(root, path.join(dir, 'goal.md')), created_by: name, owner: name });
     }
     if (action === 'list') {
       const match = statusFilter(opts.status, GOAL_STATES);
-      return out(listGoals(root).filter((g) => match(g.status)).map((g) => ({
-        id: g.id, title: g.title, status: g.status, dir: path.relative(root, g.dir),
+      const owner = typeof opts.owner === 'string' ? opts.owner.trim().toLowerCase() : null;
+      return out(listGoals(root).filter((g) => match(g.status) && (owner === null || String(g.data.owner || '').toLowerCase() === owner)).map((g) => ({
+        id: g.id, title: g.title, status: g.status, owner: g.data.owner || null, dir: path.relative(root, g.dir),
         gates: gatesOf(g), next: nextStep(root, g),
       })));
+    }
+    if (action === 'owner') {
+      // Hands a goal to someone else. Every handoff is logged with its reason; created_by stays as it was.
+      const [id, ...words] = rest;
+      const name = oneLine(words.join(' '));
+      const reason = oneLine(opts.reason);
+      if (!id || !name || !reason) fail('Usage: goal owner <G-id> <name> --reason "<why>"');
+      const g = getGoal(root, id);
+      assertOpen(g);
+      const by = signature(root, opts);
+      const previous = g.data.owner || null;
+      if (previous === name) return out({ id, owner: name, previous, changed: false });
+      const doc = readDoc(g.file);
+      doc.data = withKeys(doc.data, { ...(doc.data.created_by !== undefined && { created_by: doc.data.created_by }), owner: name });
+      if ('updated' in doc.data) doc.data.updated = today();
+      writeDoc(g.file, doc);
+      logDecision(root, g, `owner ${previous || 'none'} → ${name}: ${reason}`, by);
+      registrySync(root);
+      return out({ id, owner: name, previous, changed: true, reason });
+    }
+    if (action === 'backfill') {
+      // For goals made before aisdlc recorded names: created_by is the author of the commit that added goal.md (renames
+      // followed, so a goal that moved folders still finds it), and owner starts as the same person. A goal.md that is
+      // not committed yet was made by whoever runs this. Goals that already have created_by are left alone.
+      const by = signature(root, opts);
+      const repo = git(root, ['rev-parse', '--git-dir']) !== null;
+      const filled = [];
+      for (const g of listGoals(root)) {
+        if (g.data.created_by) continue;
+        const rel = path.relative(root, g.file).split(path.sep).join('/');
+        const tracked = repo && !!git(root, ['ls-files', '--', rel])?.trim();
+        const log = (args) => (tracked ? (git(root, ['log', '--follow', ...args, '--format=%an', '--', rel]) || '').trim().split('\n').filter(Boolean) : []);
+        const authors = log(['--diff-filter=A']);
+        // `--follow` loses a file that first appeared in a merge; `-m` follows it into the merged branch, back to the
+        // commit that added it there. Failing that, the earliest commit git finds for the path.
+        const merged = authors.length ? [] : log(['-m', '--diff-filter=A']);
+        const earliest = authors.length || merged.length || !tracked ? [] : (git(root, ['log', '--format=%an', '--', rel]) || '').trim().split('\n').filter(Boolean);
+        const [name, source] = authors.length ? [authors.at(-1), 'git history']
+          : merged.length ? [merged.at(-1), 'git history, through a merge']
+          : earliest.length ? [earliest.at(-1), 'earliest commit found']
+          : repo && !tracked ? [actorName(root), 'not committed yet'] : ['unknown', repo ? 'no commit found' : 'no git repository'];
+        const doc = readDoc(g.file);
+        doc.data = withKeys(doc.data, { created_by: name, owner: doc.data.owner || name });
+        writeDoc(g.file, doc);
+        logDecision(root, g, `created_by set to ${name} (${source}); owner ${doc.data.owner} (backfill)`, by);
+        filled.push({ id: g.id, created_by: name, owner: doc.data.owner, source });
+      }
+      registrySync(root);
+      return out({ filled: filled.length, goals: filled });
     }
     if (action === 'overlap') {
       // `goal overlap <G-id>` compares a goal with the other unfinished goals; keywords do the same for a goal not yet written.
@@ -2005,8 +2154,11 @@ const commands = {
       const hint = next === 'implement' && p.complete && (!finals || g.data.gate_final === 'passed')
         ? `Every task is done${finals ? ' and the final review passed' : ''}. /aisdlc:implement ${g.id} only completes the goal.`
         : next === 'implement' && p.complete ? `Every task is done. /aisdlc:implement ${g.id} runs the final review, then completes the goal.` : null;
+      const decisions = readDecisions(path.join(g.dir, DECISIONS));
       return out({
         id: g.id, title: g.title, status: g.status, dir: path.relative(root, g.dir),
+        created_by: g.data.created_by || null, owner: g.data.owner || null, you: actorName(root, false),
+        decisions: { file: path.relative(root, path.join(g.dir, DECISIONS)), count: decisions.length, last: decisions.at(-1) || null },
         gates: gatesOf(g), next, ...(hint && { next_hint: hint }),
         final_review_required: finals,
         governance: { plan: reviewSummary(root, g, 'plan'), final: reviewSummary(root, g, 'final') },
@@ -2025,12 +2177,16 @@ const commands = {
       // The branch is substituted into hook commands, so keep it to git-ref-safe characters.
       if (key === 'branch' && !/^[A-Za-z0-9._][A-Za-z0-9._/-]*$/.test(value)) fail(`Invalid branch name "${value}".`);
       if (key === 'cancel_reason') fail('Use `state move <G-id> cancelled --reason "<why>"` to cancel a goal.');
+      if (key === 'owner') fail(`Use \`goal owner ${id} <name> --reason "<why>"\` to hand a goal over, so the handoff is logged.`);
+      if (key === 'created_by') fail('created_by never changes. `goal backfill` fills it for goals made before aisdlc recorded names.');
       const g = getGoal(root, id);
       assertOpen(g);
+      const by = signature(root, opts);
       updateDoc(g.file, { [key]: parseScalar(value, key) });
+      logDecision(root, g, `set ${key} to ${value}`, by);
       return out({ id, [key]: parseScalar(value, key) });
     }
-    fail('Usage: goal new|list|show|diff|overlap|preflight|push|set');
+    fail('Usage: goal new|list|show|diff|overlap|preflight|push|set|owner|backfill');
   },
 
   state([action, id, status], opts) {
@@ -2042,6 +2198,7 @@ const commands = {
     const root = findRoot();
     const g = getGoal(root, id);
     if (g.status === 'completed') fail(`${id} is completed; it can no longer move.`);
+    const by = signature(root, opts);
     if (!GOAL_MOVES[g.status].includes(status)) {
       fail(`${id} is ${g.status}; it can't move to ${status}. From ${g.status} it can move to: ${GOAL_MOVES[g.status].join(', ')}.`);
     }
@@ -2077,6 +2234,7 @@ const commands = {
       doc.body = appendToSection(doc.body, CANCELLATIONS, 'Cancellations', `- ${today()}: reopened as ${status}`);
     }
     writeDoc(path.join(dest, 'goal.md'), doc);
+    logDecision(root, { id, dir: dest }, `moved ${g.status} → ${status}${reason ? `: ${reason}` : ''}`, by);
     registrySync(root);
     out({ id, from: g.status, to: status, dir: path.relative(root, dest), ...(reason && { reason }) });
   },
@@ -2089,6 +2247,7 @@ const commands = {
       const title = rest.join(' ').trim();
       if (!title) fail('Usage: task new <G-id> <title> [--depends T-01,T-02] [--risk high|medium|low] [--verify "<cmd>"]');
       assertOpen(g);
+      const by = signature(root, opts);
       const risk = opts.risk || 'medium';
       if (!(risk in RISK_RANK)) fail(`Invalid risk "${risk}"`);
       const tasks = listTasks(g);
@@ -2102,6 +2261,7 @@ const commands = {
       if (typeof opts.verify === 'string') updateDoc(file, { verify: opts.verify });
       // A task added after governance was never reviewed, so governance has to run again.
       const notes = invalidate(g, 'govern');
+      logDecision(root, g, `added ${id} "${title}" (risk ${risk}${depends.length ? `, after ${depends.join(', ')}` : ''})${resets(notes)}`, by);
       return out({ id, file: path.relative(root, file), notes });
     }
     if (action === 'remove') {
@@ -2114,12 +2274,14 @@ const commands = {
       if (g.status !== 'pending') fail(`${g.id} is ${g.status}; tasks can only be removed before the goal starts. Skip it instead: \`task set ${g.id} ${taskId} skipped --reason "<why>"\`.`);
       const dependents = listTasks(g).filter((x) => x.depends_on.includes(taskId)).map((x) => x.id);
       if (dependents.length) fail(`${dependents.join(', ')} depend${dependents.length > 1 ? '' : 's'} on ${taskId}. Change ${dependents.length > 1 ? 'their' : 'its'} dependencies first with \`task edit ${g.id} <T-id> depends …\`.`);
+      const by = signature(root, opts);
       fs.rmSync(t.file);
       const doc = readDoc(g.file);
       doc.body = appendToSection(doc.body, REMOVED_TASKS, 'Removed tasks', `- ${today()}: ${taskId} "${t.title}" removed: ${reason}`);
       doc.data.updated = today();
       writeDoc(g.file, doc);
       const notes = invalidate(g, 'govern');
+      logDecision(root, g, `removed ${taskId} "${t.title}": ${reason}${resets(notes)}`, by);
       writeTasksMd(g);
       registrySync(root);
       return out({ goal: g.id, removed: taskId, reason, notes });
@@ -2132,6 +2294,7 @@ const commands = {
       const t = getTask(g, taskId);
       assertOpen(g);
       if (TASK_SATISFIED.has(t.status)) fail(`${taskId} is ${t.status}; a finished task no longer changes. Add a new task for the change.`);
+      const by = signature(root, opts);
       const doc = readDoc(t.file);
       let file = t.file;
       if (field === 'title') {
@@ -2156,6 +2319,7 @@ const commands = {
       if (file !== t.file) fs.renameSync(t.file, file);
       // The planned fields are what governance reviewed.
       const notes = changed ? invalidate(g, 'govern') : [];
+      if (changed) logDecision(root, g, `${taskId} ${field} → ${field === 'depends' ? (doc.data.depends_on.join(', ') || 'none') : v}${resets(notes)}`, by);
       writeTasksMd(g);
       return out({ goal: g.id, task: taskId, [field]: field === 'depends' ? doc.data.depends_on : v, file: path.relative(root, file), notes });
     }
@@ -2180,12 +2344,14 @@ const commands = {
         if (t.verified !== 'pass') fail(`${taskId} has not passed verification; run \`task verify ${g.id} ${taskId}\` first.`);
         if (t.reviewed !== 'pass') fail(`${taskId} has not passed its review; run \`task review ${g.id} ${taskId} pass|fail --evidence "<findings>"\` first.`);
       }
+      const by = signature(root, opts);
       const patch = { status, reason: typeof opts.reason === 'string' ? opts.reason : '' };
       if (status !== 'done') Object.assign(patch, { verified: '', verify_evidence: '', reviewed: '', review_evidence: '', review_round: '', review_fails: '' });
       const explore = status === 'in-progress' ? exploreDecision(root, t) : null;
       updateDoc(t.file, patch);
       // The final review judged the finished tasks; any change to them means it has to run again.
       const notes = invalidate(g, 'final');
+      logDecision(root, g, `${taskId} ${t.status} → ${status}${patch.reason ? `: ${patch.reason}` : ''}${resets(notes)}`, by);
       writeTasksMd(g);
       registrySync(root);
       return out({ goal: g.id, task: taskId, status, progress: goalProgress(listTasks(g)), notes, ...(explore && { explore }) });
@@ -2206,6 +2372,7 @@ const commands = {
       const unanchored = unanchoredVerify(root, verify);
       if (unanchored) fail(`${taskId} verify command \`${verify}\`: ${unanchored}. Change it with \`task edit ${g.id} ${taskId} verify "<command>"\`.`);
       const byHand = manual || (!verify && !hook.commands.length);
+      const by = signature(root, opts);
       if (byHand && !evidence) {
         fail(manual
           ? `${taskId} has a manual check ("${manual[1]}"); pass --evidence "<what you checked and saw>".`
@@ -2222,6 +2389,7 @@ const commands = {
       const recorded = [byHand ? evidence : '', summary].filter(Boolean).join('; ').replace(/\s*\n\s*/g, ' ');
       // The code may have changed since the last review, so verifying again sends the task back to review.
       updateDoc(t.file, { verified: code ? 'fail' : 'pass', verify_evidence: clip(recorded), reviewed: '', review_evidence: '' });
+      logDecision(root, g, `${taskId} verify ${code ? 'fail' : 'pass'}: ${shortText(recorded)}`, by);
       process.stdout.write(`[aisdlc] verify ${taskId}: ${code ? 'fail' : 'pass'}\n`);
       if (code) process.exitCode = code;
       return;
@@ -2237,6 +2405,7 @@ const commands = {
       const full = typeof opts.evidence === 'string' ? opts.evidence.trim() : '';
       if (!full) fail(`--evidence is required: ${result === 'pass' ? 'what you checked and found for each acceptance criterion' : 'the defects found'}.`);
       const evidence = full.replace(/\s*\n\s*/g, ' ');
+      const by = signature(root, opts);
       const round = Number(t.review_round || 0) + 1;
       const fails = result === 'fail' ? Number(t.review_fails || 0) + 1 : 0;
       const doc = readDoc(t.file);
@@ -2247,6 +2416,7 @@ const commands = {
       const log = path.join(g.dir, CODE_REVIEW);
       const head = fs.existsSync(log) ? fs.readFileSync(log, 'utf8').replace(/\s*$/, '\n') : `# Code review: ${g.id}\n\nWritten by \`task review\`: every review round of every task, oldest first.\n`;
       fs.writeFileSync(log, `${head}\n## ${taskId}: ${t.title}, round ${round} (${today()}): ${result}\n\n${full}\n`);
+      logDecision(root, g, `${taskId} review round ${round} ${result}: ${shortText(evidence)} (full text in ${CODE_REVIEW})`, by);
       writeTasksMd(g);
       out({ goal: g.id, task: taskId, result, round, fails_in_a_row: fails, file: path.relative(root, log) });
       if (result === 'fail') process.exitCode = 1;
@@ -2312,14 +2482,17 @@ const commands = {
       // Without --answer the question stays open and blocks govern. With it, the user already answered: it is recorded as settled.
       const text = rest.join(' ').trim().replace(/\s*\n\s*/g, ' ');
       if (!text) fail('Usage: question add <G-id> <question> [--answer "<the user\'s answer>" --by user]');
+      const by = signature(root, opts);
       const id = nextQ();
       doc.body = answer ? answered(id, text, answer) : appendToSection(doc.body, /^risks\b/i, 'Risks & Unknowns', `- **Open:** ${id}: ${text}`);
       save();
+      logDecision(root, g, answer ? `${id} answered: ${text} → ${answer}` : `${id} asked: ${text}`, by);
       return out({ goal: g.id, id, status: answer ? 'answered' : 'open' });
     }
     if (action === 'resolve') {
       const [id] = rest;
       if (!/^Q-\d+$/.test(id || '') || !answer) fail('Usage: question resolve <G-id> <Q-id> --answer "<the user\'s answer>" --by user');
+      const by = signature(root, opts);
       const lines = bodyLines(doc.body);
       const r = sectionRange(lines, /^risks\b/i);
       const at = r ? lines.findIndex((l, i) => i > r[0] && i < r[1] && l.match(OPEN_ITEM)?.[2] === id) : -1;
@@ -2328,6 +2501,7 @@ const commands = {
       lines.splice(at, 1);
       doc.body = appendToSection(lines.join('\n'), /^clarifications\b/i, 'Clarifications', `- **Q:** ${id}: ${text} **A (user):** ${answer}`);
       save();
+      logDecision(root, g, `${id} answered: ${text} → ${answer}`, by);
       return out({ goal: g.id, id, status: 'answered', still_open: openItems().length });
     }
     if (action === 'number') {
@@ -2380,7 +2554,7 @@ const commands = {
     fail('Usage: dag validate|write|next <G-id>');
   },
 
-  gate([action, goalId, a, b]) {
+  gate([action, goalId, a, b], opts) {
     const root = findRoot();
     const g = getGoal(root, goalId);
     if (action === 'require') {
@@ -2390,7 +2564,11 @@ const commands = {
       return;
     }
     if (action === 'set') {
+      const by = signature(root, opts);
+      const from = g.data[`gate_${a}`] || 'pending';
       const result = setGate(root, g, a, b);
+      const review = { govern: REVIEW_FILE.plan, final: REVIEW_FILE.final }[a];
+      logDecision(root, g, `gate ${a} ${from} → ${b}${review && b !== 'pending' ? ` (${review})` : ''}${resets(result.notes)}`, by);
       registrySync(root);
       return out({ goal: g.id, gate: a, value: b, ...result });
     }
@@ -2403,25 +2581,53 @@ const commands = {
       const title = rest.join(' ').trim();
       if (!title) fail('Usage: adr new <title> [--goal G-001]');
       if (typeof opts.goal === 'string') assertOpen(getGoal(root, opts.goal));
+      const by = signature(root, opts);
       const id = nextId('ADR', listAdrs(root).map((a) => a.id), 3);
       const goals = typeof opts.goal === 'string' ? [opts.goal] : [];
       const file = path.join(aisdlcDir(root), 'adr', `${id}-${slugify(title)}.md`);
-      fs.writeFileSync(file, render('adr.md', { id, title, goals, date: today() }));
+      fs.writeFileSync(file, render('adr.md', { id, title, goals, date: today(), created_by: actorName(root) }));
+      logDecision(root, null, `${id} "${title}" proposed${goals.length ? ` for ${goals[0]}` : ''}`, by);
       const notes = goals.length ? linkAdr(root, id, goals[0]) : [];
+      if (goals.length) logDecision(root, getGoal(root, goals[0]), `linked new ${id} "${title}" (proposed)${resets(notes)}`, by);
       registrySync(root);
       return out({ id, file: path.relative(root, file), notes });
     }
     if (action === 'link') {
       const [adrId, goalId] = rest;
+      const by = signature(root, opts);
+      const before = goalId ? getGoal(root, goalId).data.adrs : null;
       const notes = linkAdr(root, adrId, goalId);
+      const g = getGoal(root, goalId);
+      if (!(Array.isArray(before) && before.includes(adrId))) logDecision(root, g, `linked ${adrId}${resets(notes)}`, by);
       registrySync(root);
       return out({ adr: adrId, goal: goalId, notes });
+    }
+    if (action === 'status') {
+      // Settles an ADR: who decided it is kept on the ADR (decided_by) and in the log of the project and of every linked goal.
+      const [adrId, status] = rest;
+      if (!adrId || !ADR_STATUSES.includes(status)) fail(`Usage: adr status <ADR-id> ${ADR_STATUSES.join('|')} [--reason "<why>"] [--by user]`);
+      const adr = listAdrs(root).find((a) => a.id === adrId) || fail(`ADR ${adrId} not found.`);
+      const by = signature(root, opts);
+      const reason = oneLine(opts.reason);
+      if (adr.status === status) return out({ adr: adrId, status, changed: false });
+      const doc = readDoc(adr.file);
+      doc.data.status = status;
+      doc.data.decided_by = status === 'proposed' ? '' : actorName(root);
+      doc.data.date = today();
+      writeDoc(adr.file, doc);
+      const what = `${adrId} "${adr.title}" ${adr.status || 'proposed'} → ${status}${reason ? `: ${reason}` : ''}`;
+      logDecision(root, null, what, by);
+      const linked = (Array.isArray(adr.goals) ? adr.goals : []).map((id) => listGoals(root).find((x) => x.id === id)).filter((x) => x && !ARCHIVED_STATES.includes(x.status));
+      for (const g of linked) logDecision(root, g, what, by);
+      registrySync(root);
+      return out({ adr: adrId, from: adr.status || 'proposed', status, decided_by: doc.data.decided_by || null, goals_logged: linked.map((x) => x.id) });
     }
     if (action === 'none') {
       const [goalId] = rest;
       if (typeof opts.reason !== 'string' || !opts.reason.trim()) fail('Usage: adr none <G-id> --reason "<why no decision is needed>"');
       const g = getGoal(root, goalId);
       assertOpen(g);
+      const by = signature(root, opts);
       // Drop the back-links from ADRs this goal used to reference.
       const prev = Array.isArray(g.data.adrs) ? g.data.adrs : [];
       for (const a of listAdrs(root)) {
@@ -2430,6 +2636,7 @@ const commands = {
       const changed = g.data.adrs !== 'none' || g.data.adr_reason !== opts.reason;
       updateDoc(g.file, { adrs: 'none', adr_reason: opts.reason });
       const notes = changed ? invalidate(g, 'adr') : [];
+      if (changed) logDecision(root, g, `no ADR needed: ${opts.reason}${prev.length ? ` (unlinked ${prev.join(', ')})` : ''}${resets(notes)}`, by);
       registrySync(root);
       return out({ goal: goalId, adrs: 'none', reason: opts.reason, notes });
     }
@@ -2439,7 +2646,7 @@ const commands = {
         id: a.id, title: a.title, status: a.status, goals: Array.isArray(a.goals) ? a.goals : [], file: path.relative(root, a.file),
       })));
     }
-    fail('Usage: adr new|link|none|list');
+    fail('Usage: adr new|link|status|none|list');
   },
 
   hooks([action, point], opts) {
@@ -2514,7 +2721,9 @@ const commands = {
     }
     if (action !== 'add' && action !== 'set') fail('Usage: governance list | checks <G-id> [--stage plan|final] | review <G-id> [--stage plan|final] | add <rule> --severity must|should --stage plan|final [--check <name>] | set <rule-id> rule|severity|stage|check <value>');
     if (gov.text === null) fail('No .aisdlc/governance.md; run init first.');
+    const by = signature(root, opts);
     let rule;
+    let what;
     if (action === 'add') {
       const text = rest.join(' ').trim();
       if (!text || typeof opts.severity !== 'string' || typeof opts.stage !== 'string') {
@@ -2522,17 +2731,21 @@ const commands = {
       }
       rule = { id: nextId('GOV', gov.rules.map((r) => r.id), 2), rule: text, severity: opts.severity.toLowerCase(), stage: opts.stage.toLowerCase(), check: typeof opts.check === 'string' ? opts.check.replace(/^-$/, '') : '' };
       gov.rules.push(rule);
+      what = `${rule.id} added (${rule.severity}, ${rule.stage}${rule.check ? `, check ${rule.check}` : ''}): ${rule.rule}`;
     } else {
       const [id, field, ...value] = rest;
       if (!['rule', 'severity', 'stage', 'check'].includes(field) || !value.length) fail('Usage: governance set <rule-id> rule|severity|stage|check <value>');
       // IDs never change and rules are never deleted: reviews reference them. Retire with `severity retired`.
       rule = gov.rules.find((r) => r.id === id) || fail(`Rule ${id} not found.`);
       const v = value.join(' ').trim();
+      const old = rule[field];
       rule[field] = field === 'rule' ? v : field === 'check' ? v.replace(/^-$/, '') : v.toLowerCase();
+      what = `${rule.id} ${field} ${old || 'none'} → ${rule[field] || 'none'}`;
     }
     const errors = ruleErrors(rule);
     if (errors.length) fail(errors.join('\n'));
     writeGovernance(gov, gov.rules);
+    logDecision(root, null, what, by);
     return out(rule);
   },
 
@@ -2752,6 +2965,7 @@ function main() {
   }
   try {
     const { pos, opts } = parseArgs(argv);
+    if ('by' in opts && opts.by !== 'user') fail('--by takes only "user": it attests that the user made this decision in this session.');
     commands[cmd](pos, opts);
   } catch (e) {
     if (e instanceof UserError) {

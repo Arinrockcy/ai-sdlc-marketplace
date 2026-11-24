@@ -14,7 +14,7 @@ const SCRIPT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../sc
 function project() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'aisdlc-'));
   const run = (args, env = {}) => {
-    const r = spawnSync(process.execPath, [SCRIPT, ...args], { cwd: dir, encoding: 'utf8', env: { ...process.env, AISDLC_STACK_PLUGINS: '', ...env } });
+    const r = spawnSync(process.execPath, [SCRIPT, ...args], { cwd: dir, encoding: 'utf8', env: { ...process.env, AISDLC_STACK_PLUGINS: '', AISDLC_ACTOR: 'Tess Tester', AISDLC_AGENT: '', ...env } });
     let json;
     try { json = JSON.parse(r.stdout); } catch { json = undefined; }
     return { code: r.status, stdout: r.stdout, stderr: r.stderr, json };
@@ -2102,4 +2102,189 @@ test('cli: docs index handles a leading rule, CRLF, symlinked entries, non-ASCII
   assert.equal(run(['docs', 'paths']).json.paths, null);
   assert.match(run(['docs', 'search', 'delta']).json.note, /not configured/);
   assert.match(run(['docs', 'search', 'use']).stderr, /common words/);
+});
+
+// ---------- who, owners and the decision log ----------
+
+const decisionsOf = (dir, goalDir) => fs.readFileSync(path.join(dir, goalDir, 'decisions.md'), 'utf8').split('\n').filter((l) => l.startsWith('- '));
+const projectDecisions = (dir) => fs.readFileSync(path.join(dir, '.aisdlc/decisions.md'), 'utf8').split('\n').filter((l) => l.startsWith('- '));
+
+test('trace: a new goal records who created it, its owner and the first decision', () => {
+  const { dir, run } = project();
+  run(['init']);
+  const g = run(['goal', 'new', 'Rate limits']).json;
+  assert.equal(g.created_by, 'Tess Tester');
+  assert.equal(g.owner, 'Tess Tester');
+  const doc = parseDoc(fs.readFileSync(path.join(dir, g.file), 'utf8'));
+  assert.equal(doc.data.created_by, 'Tess Tester');
+  assert.equal(doc.data.owner, 'Tess Tester');
+  const [line] = decisionsOf(dir, g.dir);
+  assert.match(line, /^- \d{4}-\d{2}-\d{2} \d{2}:\d{2} \| Tess Tester \| created "Rate limits"; owner Tess Tester$/);
+  assert.match(fs.readFileSync(path.join(dir, '.aisdlc/registry.md'), 'utf8'), /\| G-001 \| goal \| Rate limits \| pending \| - \| Tess Tester \|/);
+  const show = run(['goal', 'show', 'G-001']).json;
+  assert.equal(show.owner, 'Tess Tester');
+  assert.equal(show.you, 'Tess Tester');
+  assert.equal(show.decisions.count, 1);
+});
+
+test('trace: an agent signs as acting for the person; --by user signs with the name alone', () => {
+  const { dir, run } = project();
+  run(['init']);
+  const g = run(['goal', 'new', 'A'], { AISDLC_AGENT: 'Claude' }).json;
+  run(['question', 'add', 'G-001', 'Which store?', '--answer', 'Postgres', '--by', 'user'], { AISDLC_AGENT: 'Claude' });
+  const lines = decisionsOf(dir, g.dir);
+  assert.match(lines[0], /\| Claude for Tess Tester \| created "A"/);
+  assert.match(lines[1], /\| Tess Tester \| Q-1 answered: Which store\? → Postgres$/);
+  const bad = run(['decision', 'add', 'G-001', 'x', '--by', 'agent']);
+  assert.equal(bad.code, 1);
+  assert.match(bad.stderr, /--by takes only "user"/);
+});
+
+test('trace: a change that records who made it refuses when no name is set', () => {
+  const { dir, run } = project();
+  run(['init']);
+  const env = { AISDLC_ACTOR: '', GIT_CONFIG_GLOBAL: path.join(dir, 'no-gitconfig'), GIT_CONFIG_NOSYSTEM: '1', HOME: dir };
+  const r = run(['goal', 'new', 'A'], env);
+  assert.equal(r.code, 1);
+  assert.match(r.stderr, /no name is set.*git config user\.name/);
+  assert.equal(run(['goal', 'list']).json.length, 0, 'nothing was created');
+  assert.equal(run(['goal', 'list'], env).code, 0, 'reading needs no name');
+});
+
+test('trace: goal owner hands a goal over and logs it; created_by never changes', () => {
+  const { dir, run } = project();
+  run(['init']);
+  const g = run(['goal', 'new', 'A']).json;
+  run(['goal', 'new', 'B']);
+  assert.match(run(['goal', 'owner', 'G-001', 'Sam Other']).stderr, /Usage: goal owner/, 'a handoff needs a reason');
+  const r = run(['goal', 'owner', 'G-001', 'Sam', 'Other', '--reason', 'Sam builds the API', '--by', 'user']).json;
+  assert.deepEqual(r, { id: 'G-001', owner: 'Sam Other', previous: 'Tess Tester', changed: true, reason: 'Sam builds the API' });
+  assert.equal(run(['goal', 'owner', 'G-001', 'Sam Other', '--reason', 'again']).json.changed, false);
+  const doc = parseDoc(fs.readFileSync(path.join(dir, g.file), 'utf8'));
+  assert.equal(doc.data.created_by, 'Tess Tester');
+  assert.equal(doc.data.owner, 'Sam Other');
+  assert.match(decisionsOf(dir, g.dir).at(-1), /\| Tess Tester \| owner Tess Tester → Sam Other: Sam builds the API$/);
+  assert.deepEqual(run(['goal', 'list', '--owner', 'sam other']).json.map((x) => x.id), ['G-001']);
+  assert.match(run(['goal', 'set', 'G-001', 'owner', 'X']).stderr, /goal owner/);
+  assert.match(run(['goal', 'set', 'G-001', 'created_by', 'X']).stderr, /never changes/);
+  run(['state', 'move', 'G-002', 'cancelled', '--reason', 'not needed']);
+  assert.match(run(['goal', 'owner', 'G-002', 'Sam', '--reason', 'x']).stderr, /cancelled/);
+});
+
+test('trace: state moves, task changes, gates and ADR choices are all logged with what they reset', () => {
+  const { dir, run } = project();
+  run(['init']);
+  governedGoal(run, dir, [['T1']]);
+  run(['state', 'move', 'G-001', 'in-progress']);
+  run(['task', 'new', 'G-001', 'Extra', '--verify', REAL_VERIFY]);
+  run(['state', 'move', 'G-001', 'cancelled', '--reason', 'priorities changed', '--by', 'user']);
+  const lines = decisionsOf(dir, run(['goal', 'show', 'G-001']).json.dir).map((l) => l.split(' | ').slice(1).join(' | '));
+  for (const want of [
+    'Tess Tester | added T-01 "T1" (risk medium)',
+    'Tess Tester | gate challenge pending → done',
+    'Tess Tester | no ADR needed: no architectural change',
+    'Tess Tester | gate adr pending → done',
+    'Tess Tester | gate govern pending → passed (governance-review.md)',
+    'Tess Tester | moved pending → in-progress',
+    'Tess Tester | added T-02 "Extra" (risk medium) (reset: govern)',
+    'Tess Tester | moved in-progress → cancelled: priorities changed',
+  ]) assert.ok(lines.includes(want), `missing "${want}" in:\n${lines.join('\n')}`);
+});
+
+test('trace: adr status records who decided an ADR, in the ADR, the project log and each linked goal', () => {
+  const { dir, run } = project();
+  run(['init']);
+  const g = run(['goal', 'new', 'A']).json;
+  const adr = run(['adr', 'new', 'Use a queue', '--goal', 'G-001']).json;
+  assert.match(run(['adr', 'status', 'ADR-001', 'approved']).stderr, /Usage: adr status/);
+  const r = run(['adr', 'status', 'ADR-001', 'accepted', '--reason', 'simplest', '--by', 'user']).json;
+  assert.deepEqual(r, { adr: 'ADR-001', from: 'proposed', status: 'accepted', decided_by: 'Tess Tester', goals_logged: ['G-001'] });
+  const doc = parseDoc(fs.readFileSync(path.join(dir, adr.file), 'utf8'));
+  assert.equal(doc.data.created_by, 'Tess Tester');
+  assert.equal(doc.data.decided_by, 'Tess Tester');
+  assert.match(decisionsOf(dir, g.dir).at(-1), /ADR-001 "Use a queue" proposed → accepted: simplest$/);
+  assert.match(projectDecisions(dir).at(-1), /ADR-001 "Use a queue" proposed → accepted: simplest$/);
+  assert.match(fs.readFileSync(path.join(dir, '.aisdlc/registry.md'), 'utf8'), /\| ADR-001 \| adr \| Use a queue \| accepted \| G-001 \| Tess Tester \|/);
+});
+
+test('trace: governance and config changes go to the project log', () => {
+  const { dir, run } = project();
+  run(['init']);
+  run(['governance', 'add', 'No TODOs', '--severity', 'should', '--stage', 'final', '--by', 'user']);
+  run(['governance', 'set', 'GOV-07', 'severity', 'must']);
+  run(['config', 'set', 'implement.mode', 'auto']);
+  const lines = projectDecisions(dir).map((l) => l.split(' | ').slice(2).join(' | '));
+  assert.deepEqual(lines.slice(-3), ['GOV-07 added (should, final): No TODOs', 'GOV-07 severity should → must', 'config implement.mode: "single" → "auto"']);
+});
+
+test('trace: decision add records a choice made in conversation; decision list reads it back', () => {
+  const { dir, run } = project();
+  run(['init']);
+  run(['goal', 'new', 'A']);
+  assert.match(run(['decision', 'add', 'G-001']).stderr, /Usage: decision add/);
+  const r = run(['decision', 'add', 'G-001', 'Create a separate goal', '--reason', 'G-004 is in progress', '--by', 'user']).json;
+  assert.deepEqual(r, { subject: 'G-001', by: 'Tess Tester', decision: 'Create a separate goal', reason: 'G-004 is in progress' });
+  run(['decision', 'add', 'project', 'Adopt GOV-07 for every package', '--by', 'user']);
+  const list = run(['decision', 'list', 'G-001']).json;
+  assert.equal(list.decisions.length, 2);
+  assert.deepEqual({ by: list.decisions[1].by, decision: list.decisions[1].decision }, { by: 'Tess Tester', decision: 'Create a separate goal: G-004 is in progress' });
+  assert.match(list.decisions[1].at, /^\d{4}-\d{2}-\d{2} \d{2}:\d{2} UTC$/);
+  assert.equal(run(['decision', 'list', 'project']).json.decisions.at(-1).decision, 'Adopt GOV-07 for every package');
+  assert.ok(fs.existsSync(path.join(dir, '.aisdlc/decisions.md')));
+});
+
+test('trace: the decision log stays out of the plan fingerprint', () => {
+  const { dir, run } = project();
+  run(['init']);
+  governedGoal(run, dir, [['T1']]);
+  run(['decision', 'add', 'G-001', 'Keep going', '--by', 'user']);
+  run(['goal', 'owner', 'G-001', 'Sam', '--reason', 'handover']);
+  assert.equal(run(['gate', 'require', 'G-001', 'implement']).code, 0, 'logging and handoffs never force re-governance');
+});
+
+test('trace: goal backfill fills created_by and owner from the commit that added goal.md, following moves', () => {
+  const { dir, run } = project();
+  const gitc = (...args) => spawnSync('git', args, { cwd: dir, encoding: 'utf8', env: { ...process.env, GIT_AUTHOR_NAME: 'Ann Author', GIT_AUTHOR_EMAIL: 'a@example.invalid', GIT_COMMITTER_NAME: 'Ann Author', GIT_COMMITTER_EMAIL: 'a@example.invalid' } });
+  gitc('init', '-q');
+  run(['init']);
+  const strip = (file) => edit(file, (s) => s.replace(/^created_by:.*\n/m, '').replace(/^owner:.*\n/m, ''));
+  const a = run(['goal', 'new', 'Old goal']).json;
+  strip(path.join(dir, a.file));
+  gitc('add', '.');
+  gitc('commit', '-qm', 'plan');
+  // The goal moves folder after it was committed; backfill still finds who added it.
+  run(['state', 'move', 'G-001', 'cancelled', '--reason', 'parked']);
+  gitc('add', '-A');
+  gitc('commit', '-qm', 'cancel');
+  const b = run(['goal', 'new', 'Not committed']).json;
+  strip(path.join(dir, b.file));
+  const r = run(['goal', 'backfill']).json;
+  assert.deepEqual(r.goals.map(({ id, created_by, owner, source }) => ({ id, created_by, owner, source })), [
+    { id: 'G-002', created_by: 'Tess Tester', owner: 'Tess Tester', source: 'not committed yet' },
+    { id: 'G-001', created_by: 'Ann Author', owner: 'Ann Author', source: 'git history' },
+  ]);
+  const doc = parseDoc(fs.readFileSync(path.join(dir, run(['goal', 'show', 'G-001']).json.dir, 'goal.md'), 'utf8'));
+  assert.deepEqual(Object.keys(doc.data).slice(-4), ['created_by', 'owner', 'created', 'updated'], 'the keys sit where the template has them');
+  assert.match(decisionsOf(dir, run(['goal', 'show', 'G-001']).json.dir).at(-1), /created_by set to Ann Author \(git history\); owner Ann Author \(backfill\)$/);
+  assert.equal(run(['goal', 'backfill']).json.filled, 0, 'a second run changes nothing');
+});
+
+test('trace: goal backfill finds who added a goal that arrived by a merge', () => {
+  const { dir, run } = project();
+  const as = (name) => ({ ...process.env, GIT_AUTHOR_NAME: name, GIT_AUTHOR_EMAIL: 'x@example.invalid', GIT_COMMITTER_NAME: name, GIT_COMMITTER_EMAIL: 'x@example.invalid' });
+  const gitc = (name, ...args) => spawnSync('git', args, { cwd: dir, encoding: 'utf8', env: as(name) });
+  gitc('Main Person', 'init', '-q', '-b', 'main');
+  run(['init']);
+  gitc('Main Person', 'add', '.');
+  gitc('Main Person', 'commit', '-qm', 'init');
+  gitc('Main Person', 'checkout', '-qb', 'side');
+  const g = run(['goal', 'new', 'From a branch']).json;
+  edit(path.join(dir, g.file), (s) => s.replace(/^created_by:.*\n/m, '').replace(/^owner:.*\n/m, ''));
+  gitc('Branch Person', 'add', '.');
+  gitc('Branch Person', 'commit', '-qm', 'plan on a branch');
+  gitc('Main Person', 'checkout', '-q', 'main');
+  gitc('Main Person', 'merge', '-q', '--no-ff', '-m', 'merge side', 'side');
+  const [filled] = run(['goal', 'backfill']).json.goals;
+  assert.equal(filled.created_by, 'Branch Person');
+  assert.match(filled.source, /^git history/);
 });

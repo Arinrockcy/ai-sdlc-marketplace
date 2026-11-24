@@ -2,6 +2,24 @@
 
 All notable changes to the `aisdlc` plugin. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/). Until 1.0.0, a minor version may include breaking changes; each one is listed under **Breaking** with its upgrade step.
 
+## [0.27.0] - 2026-11-24
+
+Traceability and ownership: every goal says who started it and who owns it now, and every decision is logged with who made it.
+
+### Added
+- `goal new` records `created_by` and `owner` (the name from `AISDLC_ACTOR`, else `git config user.name`; never an email). `goal show` returns them, plus `you` and a `decisions` summary; `goal list` returns `owner` and takes `--owner <name>`.
+- `goal owner <G-id> <name> --reason "<why>"` hands a goal over and logs the handoff. `goal set` refuses `owner` and `created_by`.
+- `goal backfill` fills `created_by` and `owner` for goals made before 0.27.0, from the author of the commit that added `goal.md`, following renames and merges, else the earliest commit that touched it.
+- A script-owned `decisions.md` in each goal folder: one line per decision with the UTC time, who, and what. The script writes it on goal creation, owner handoffs, state moves, gate changes (and the gates they reset), ADR links and `none`, task new, edit, remove and status changes, verify and review results, and questions asked and answered. Project-wide decisions (governance rules, `config set`, new ADRs and ADR status) go to `.aisdlc/decisions.md`. It is outside the plan fingerprint.
+- `decision add <G-id>|project <decision> [--reason "<why>"] [--by user]` records a choice made in conversation that no command carries out; `decision list <G-id>|project` reads the log.
+- `adr status <ADR-id> proposed|accepted|rejected|superseded [--reason "<why>"]` changes an ADR's status, sets `decided_by`, and logs it in the project and in every open linked goal. `adr new` sets `created_by`. The registry's new Owner column shows a goal's owner, or who decided an ADR.
+- An agent's change is signed `<agent> for <name>` (`AISDLC_AGENT`, or Claude when Claude Code runs the script); `--by user` signs it with the person's name alone. The skills pass `--by user` for the user's own choices, record other choices with `decision add`, use `adr status` instead of editing `status:` by hand, and `/aisdlc:implement` asks before working on a goal someone else owns.
+
+### Breaking
+- Commands that change state refuse when no name is set (`AISDLC_ACTOR` or `git config user.name`).
+- `--by` takes only `user` on every command.
+- `registry.md` and `registry-archive.md` have an Owner column between Links and Updated.
+
 ## [0.26.0] - 2026-11-23
 
 Fewer plan-review rounds: the script checks every pending verify itself, design questions come up in challenge, and a review whose fixes need no choice is fixed and run again without the user.

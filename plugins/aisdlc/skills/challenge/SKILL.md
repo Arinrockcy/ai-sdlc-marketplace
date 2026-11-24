@@ -10,6 +10,8 @@ argument-hint: "<G-id>"
 
 **Don't assume.** If something this step needs is unclear, missing or under-documented, and neither the code nor the `.aisdlc/` files answer it, ask the user. Never fill a gap with a guess or a silent default. Resolve a question only with the user's answer, never with your own inference.
 
+**Who decided.** The script logs every change it makes in the goal's `decisions.md`, with the time and who made it (the name from `git config user.name`, or `AISDLC_ACTOR`). When the user made the choice in this conversation, add `--by user` to the command that carries it out, so the log shows it as theirs. When no command carries it out (merge or create, retry, which option to take), record it with `$AISDLC decision add <G-id> "<the choice>" --by user`. Never pass `--by user` for a choice you made yourself.
+
 Input: `$ARGUMENTS` (the text after the skill's name) is the goal ID. If it is missing, run `$AISDLC goal list --status pending` and ask the user which goal.
 
 ## Steps
@@ -36,7 +38,7 @@ Input: `$ARGUMENTS` (the text after the skill's name) is the goal ID. If it is m
    - Update the affected goal sections and task files right away. After changing a goal criterion, check that the task criteria and Files still match it, and that the task's `verify` would fail while the changed criteria are unmet (step 7). Change tasks only through the script, never by renaming or deleting task files, so IDs are never reused:
      - add one: `$AISDLC task new <G-id> "<title>" --risk … --depends … --verify "…"`
      - change a planned field: `$AISDLC task edit <G-id> <T-id> title "<title>"`, `$AISDLC task edit <G-id> <T-id> depends T-01,T-02|none`, `$AISDLC task edit <G-id> <T-id> risk high|medium|low` or `$AISDLC task edit <G-id> <T-id> verify "<command>"`. A new title renames the file too.
-     - remove one: `$AISDLC task remove <G-id> <T-id> --reason "<why>"`. It refuses while another task depends on it; change that dependency first. The removal is logged under `## Removed tasks` in `goal.md`.
+     - remove one: `$AISDLC task remove <G-id> <T-id> --reason "<why>" --by user`. It refuses while another task depends on it; change that dependency first. The removal is logged under `## Removed tasks` in `goal.md`.
      - split one: add the new tasks, move the dependencies over, then remove the old one.
    - Don't ask what the codebase or an earlier decision already answers. Look it up instead, as cheaply as you can: the `accepted` ADR rows in `.aisdlc/registry.md` for decisions already made, and `$AISDLC graph query "<keywords>"` rather than a broad search of the code. Open only the ADRs and files that bear on the question. For documentation and ADR bodies, run `$AISDLC docs search <keywords>` and read only the sections it returns (path and line range); if it says documentation is not configured, search those files directly, and never read the index in `.aisdlc/cache/`.
 6. Stop when there are no open questions left, or when the user says to stop. Record each unresolved question with `$AISDLC question add <G-id> "<question>"` (never write the `- **Open:**` line by hand), and tell the user that `/aisdlc:govern` will fail rule GOV-05 until they are answered (its `questions-resolved` check finds them).

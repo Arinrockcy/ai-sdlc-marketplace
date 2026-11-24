@@ -4,5 +4,5 @@
 >
 > Completed and cancelled goals. Unfinished goals and ADRs are in `registry.md`.
 
-| ID | Type | Title | Status | Links | Updated |
-|----|------|-------|--------|-------|---------|
+| ID | Type | Title | Status | Links | Owner | Updated |
+|----|------|-------|--------|-------|-------|---------|

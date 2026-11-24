@@ -10,6 +10,8 @@ argument-hint: "<goal description>"
 
 **Don't assume.** If something this step needs is unclear, missing or under-documented, and neither the code nor the `.aisdlc/` files answer it, ask the user. Never fill a gap with a guess or a silent default.
 
+**Who decided.** The script logs every change it makes in the goal's `decisions.md`, with the time and who made it (the name from `git config user.name`, or `AISDLC_ACTOR`). When the user made the choice in this conversation, add `--by user` to the command that carries it out, so the log shows it as theirs. When no command carries it out (merge or create, retry, which option to take), record it with `$AISDLC decision add <G-id> "<the choice>" --by user`. Never pass `--by user` for a choice you made yourself.
+
 Input: `$ARGUMENTS` (the text after the skill's name) is the goal description. If it is empty, ask the user for one.
 
 ## 0. Context (keep it cheap)
@@ -27,13 +29,13 @@ Otherwise tell the user which goals are unfinished: ID, title, status and gates.
 
 - **Merge into `<G-id>`.** Offer this only for `pending` goals, with one choice per pending goal. An in-progress or blocked goal can't be challenged again, so it can't take on new scope.
 - **Finish `<G-id>` first.** Don't create anything. Tell the user the next command for that goal: `/aisdlc:<next> <G-id>`, where `<next>` is the goal's `next` field from `goal list`. They re-run `/aisdlc:create-goal` afterwards. Run `$AISDLC hooks run post_create_goal` and stop.
-- **Cancel `<G-id>`.** For a goal the user no longer wants. Ask the user why, and pass their answer in their own words: `$AISDLC state move <G-id> cancelled --reason "<why>"`. Never write a reason for them. The script keeps every reason in the goal's `## Cancellations` log, and the goal keeps its ID and files and can be reopened later. Then start this section again, because other goals may still be unfinished.
+- **Cancel `<G-id>`.** For a goal the user no longer wants. Ask the user why, and pass their answer in their own words: `$AISDLC state move <G-id> cancelled --reason "<why>" --by user`. Never write a reason for them. The script keeps every reason in the goal's `## Cancellations` log, and the goal keeps its ID and files and can be reopened later. Then start this section again, because other goals may still be unfinished.
 - **Reopen `<G-id>`.** Offer this only for a `cancelled` goal the description overlaps. Show why it was cancelled (`cancellations` in `goal show`), so the user decides with that in mind. How it reopens depends on whether its work had started (any task not `pending` in `goal show`):
   - **Not started:** run `$AISDLC state move <G-id> pending`, then merge into it as below.
   - **Started:** a started goal can't take on new scope. Run `$AISDLC state move <G-id> blocked`, tell the user to resume it with `/aisdlc:implement <G-id>` and to re-run `/aisdlc:create-goal` for whatever it doesn't cover. Run `$AISDLC hooks run post_create_goal` and stop.
 - **Create a separate goal.** Continue with section 2. The new goal waits in `pending` alongside the others.
 
-Never pick for the user, even when the overlap looks obvious.
+Never pick for the user, even when the overlap looks obvious. Record the choice on the goal it concerns (the goal merged into, the goal to finish first, or the new goal once `goal new` made it) with `$AISDLC decision add <G-id> "<the choice>" --reason "<why, in the user's words>" --by user`.
 
 ### Merging into a pending goal
 1. Read the goal's `goal.md` and tasks. Run the intake questions (section 2) against the new description, skipping what the goal already answers. Record the answers under the goal's `## Clarifications`.
@@ -57,7 +59,7 @@ Before you write anything, find the gaps in the description and ask the user abo
 3. If you find no gaps, summarize your understanding in a few lines and ask the user to confirm it before continuing.
 
 ## 3. Goal
-- Run `$AISDLC goal new <short title>`. Open the `file` it returns.
+- Run `$AISDLC goal new <short title>`. Open the `file` it returns. The person running the session is recorded as `created_by` and as the first `owner`.
 - Record each intake answer with `$AISDLC question add <G-id> "<question>" --answer "<the user's answer>" --by user`, which writes it under `## Clarifications`, so `/aisdlc:challenge` doesn't ask it again.
 - Fill in Problem, Outcome / Acceptance Criteria (measurable), Scope In/Out, and Risks & Unknowns, using only the description, the answers and what the code shows. Anything the user deferred or couldn't answer is recorded with `$AISDLC question add <G-id> "<question>"`, which keeps it under Risks & Unknowns. Do **not** guess answers; `/aisdlc:challenge` resolves them, and governance rule GOV-05 fails while any `**Open:**` item remains.
 

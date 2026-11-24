@@ -10,6 +10,8 @@ argument-hint: "<G-id> [--all]"
 
 **Don't assume.** If something this step needs is unclear, missing or under-documented, and neither the code nor the `.aisdlc/` files answer it, ask the user. Never fill a gap with a guess or a silent default. This holds in `--all` mode too: stop and ask.
 
+**Who decided.** The script logs every change it makes in the goal's `decisions.md`, with the time and who made it (the name from `git config user.name`, or `AISDLC_ACTOR`). When the user made the choice in this conversation, add `--by user` to the command that carries it out, so the log shows it as theirs. When no command carries it out (merge or create, retry, which option to take), record it with `$AISDLC decision add <G-id> "<the choice>" --by user`. Never pass `--by user` for a choice you made yourself.
+
 Input: `$ARGUMENTS` (the text after the skill's name) is `<G-id>`, optionally followed by `--all`.
 
 The script enforces the order:
@@ -25,12 +27,13 @@ Once `pre_implement` has run, every way this run ends (a finished task in single
 ## 1. Gate and setup
 1. Run `$AISDLC gate require <G-id> implement`. If it exits non-zero, show the `problems` and stop. Never bypass the gate.
 2. Run `$AISDLC hooks run pre_implement`, then `$AISDLC goal show <G-id>`.
+   **Owner.** `goal show` returns `owner` (who owns the goal now), `created_by` and `you` (whose name this session records). If `owner` is someone other than `you`, tell the user who owns it and ask whether to take it over or to carry on for the owner. To take it over, ask why and run `$AISDLC goal owner <G-id> <name> --reason "<why>" --by user` with `you` as the name. If `owner` is empty, the goal was made before aisdlc recorded owners: tell the user that `$AISDLC goal backfill` fills every such goal from git history, and run it only if they agree. Never change the owner without asking.
 3. **Resuming a blocked goal** (status `blocked`): if no task is blocked, the goal was reopened after a cancel. Ask the user whether to resume it. If they agree, run `$AISDLC state move <G-id> in-progress`. If the gate refuses because the plan changed, show the message, run `post_implement` and stop; the user runs `/aisdlc:govern <G-id>` first.
    Otherwise list each blocked task with its `reason`. Ask the user which blockers are resolved. For each resolved one, run `$AISDLC task set <G-id> <T-id> pending`, then run `$AISDLC state move <G-id> in-progress`.
-   If none are resolved, ask whether to leave the goal blocked or cancel it. To cancel, ask the user why and pass their answer in their own words: `$AISDLC state move <G-id> cancelled --reason "<why>"`. Never write a reason for them. Either way, run `post_implement` and stop.
+   If none are resolved, ask whether to leave the goal blocked or cancel it. To cancel, ask the user why and pass their answer in their own words: `$AISDLC state move <G-id> cancelled --reason "<why>" --by user`. Never write a reason for them. Either way, run `post_implement` and stop.
 4. **First run** (status `pending`):
    1. **New stacks.** Run `$AISDLC detect-stack`. If `to_register` lists stacks, a stack plugin was installed after the plan was governed. Invoke each entry's `register_skill` (without plugin namespaces, the part after the `:`) now, before the goal starts, and skip one whose skill the agent doesn't have. The plan review didn't load that stack's standards, so tell the user and ask whether to continue or to run `/aisdlc:govern <G-id>` again first; if they choose governance, run `post_implement` and stop.
-   2. **Auto-commit.** If `auto_commit` is empty, ask the user whether to commit automatically after each passing task. Save the answer with `$AISDLC goal set <G-id> auto_commit true|false`.
+   2. **Auto-commit.** If `auto_commit` is empty, ask the user whether to commit automatically after each passing task. Save the answer with `$AISDLC goal set <G-id> auto_commit true|false --by user`.
    3. **Before-goal hook.** Run `$AISDLC goal preflight <G-id>`. It shows what the hook will run (`before_goal`; by default it fetches, checks out and pulls the base branch). When the hook switches branches, `warnings` says whether another goal is in progress or whether the checkout would leave this goal's planning files behind. If there are warnings, show them and ask whether to continue or stop. Don't refuse: the user may work in separate worktrees.
 
       Then run `$AISDLC hooks run before_goal --goal <G-id>`. If it fails, show the output and ask the user whether to retry, continue anyway or stop.
@@ -39,7 +42,7 @@ Once `pre_implement` has run, every way this run ends (a finished task in single
       - create the goal branch `suggested_branch` from `goal show` (`git checkout -b <suggested_branch>`)
       - stay on the current branch (on the base branch, the after-goal hook won't push: aisdlc never pushes the base branch)
       - use a branch name they provide
-      Save the result with `$AISDLC goal set <G-id> branch <name>`. Never force a branch the user didn't choose.
+      Save the result with `$AISDLC goal set <G-id> branch <name> --by user`. Never force a branch the user didn't choose.
    5. **Start.** Run `$AISDLC state move <G-id> in-progress`.
 5. **Interrupted task.** If `progress.in_progress` from `goal show` is not empty, an earlier run stopped mid-task. For each such task, ask the user whether to resume it (continue from the current state of the code and go to step 2.3 for it) or reset it with `$AISDLC task set <G-id> <T-id> pending`.
 6. **Stack standards.** Run `$AISDLC detect-stack`. Invoke every skill in `standards_skills` (for example `aisdlc-nodejs:nodejs-standards`) now, and follow each for the code of its stack in this run, except where the goal's `## Standards deviations` records a departure the user chose. If one isn't installed, tell the user that its stack plugin is missing or older than this workflow expects, and stop. If the list is empty, follow the conventions already in the repo. If the goal is already in progress and `to_register` lists stacks, a stack plugin was installed mid-goal: ask the user whether to register it now, so its gate applies to the remaining tasks, or after the goal.
@@ -70,15 +73,15 @@ Repeat these steps for each task:
    - Run `$AISDLC task verify <G-id> <T-id>`. It runs the task's `verify` command and then the `after_task` hook (for example, the stack's test command), and records the result.
    - If `verify` is a manual check (`manual: …`), carry out the check first, then pass what you observed: `$AISDLC task verify <G-id> <T-id> --evidence "<what you checked and saw>"`.
    - Check every acceptance criterion honestly. A passing command doesn't excuse an unmet criterion; treat that as a failure.
-   - If verification fails, show the failing output and ask the user to pick one: **Retry** (fix the problem and verify again), **Skip** or **Block** (both as in step 6).
+   - If verification fails, show the failing output and ask the user to pick one: **Retry** (fix the problem and verify again; record it with `$AISDLC decision add <G-id> "<T-id>: retry after a failed verify" --by user`), **Skip** or **Block** (both as in step 6).
 5. **Review.** Once verification passed, hand the task's change to the **code-reviewer** (see Roles). It records the result with `$AISDLC task review <G-id> <T-id> pass --evidence "<for each criterion, what shows it is met>"` or `$AISDLC task review <G-id> <T-id> fail --evidence "<the defects found, one per line, with file and line>"`. The script appends the round, with its full findings, to the goal's `code-review.md` and a one-line entry to the task's `## Review`, and prints `round` and `fails_in_a_row`. A task can't be marked done without a passing review. Running `task verify` again clears the review, so after any fix, verify and review again.
 6. **Failed review: the fix loop.** On `fail`, read `fails_in_a_row` from the `task review` output and decide:
-   - **Stuck.** If the defects the reviewer found are the ones the previous round already listed in `code-review.md` (a fix attempt changed nothing that matters), or the fixes keep breaking something else, stop the loop. Show the findings and ask the user to pick one: **Re-govern** (recommended: the task or its acceptance criteria may be wrong; run `$AISDLC gate set <G-id> govern pending`, then `post_implement`, and stop; the user runs `/aisdlc:govern <G-id>`, then `/aisdlc:implement <G-id>` resumes this task), **one more try**, **skip** or **block** (as below).
+   - **Stuck.** If the defects the reviewer found are the ones the previous round already listed in `code-review.md` (a fix attempt changed nothing that matters), or the fixes keep breaking something else, stop the loop. Show the findings and ask the user to pick one: **Re-govern** (recommended: the task or its acceptance criteria may be wrong; run `$AISDLC gate set <G-id> govern pending --by user`, then `post_implement`, and stop; the user runs `/aisdlc:govern <G-id>`, then `/aisdlc:implement <G-id>` resumes this task), **one more try**, **skip** or **block** (as below).
    - **Automatic retry.** If `fails_in_a_row` is 1 or 2, don't ask. Run one fix round: the **task-explorer** reads the findings and the code and returns a fix plan, the **implementer** applies it, then go back to step 4 (verify), and review again (step 5). At most 2 automatic retries.
    - **Ask the user.** If `fails_in_a_row` is 3 or more, the automatic retries are used up. Show the findings and ask how many more retries to run (0 stops the loop). Run that many fix rounds the same way without asking again, then ask again if the review still fails. If the user picks 0, ask whether to re-govern, skip or block.
    - A verify that fails inside the loop isn't a review failure: show its output and ask the user to pick retry, skip or block, as below.
-   - **Skip:** run `$AISDLC task set <G-id> <T-id> skipped --reason "<why>"`.
-   - **Block:** run `$AISDLC task set <G-id> <T-id> blocked --reason "<why>"`, then `$AISDLC hooks run on_block --goal <G-id> --task <T-id>`. Dependent tasks wait. Independent tasks can still run.
+   - **Skip:** run `$AISDLC task set <G-id> <T-id> skipped --reason "<why>" --by user`.
+   - **Block:** run `$AISDLC task set <G-id> <T-id> blocked --reason "<why>" --by user`, then `$AISDLC hooks run on_block --goal <G-id> --task <T-id>`. Dependent tasks wait. Independent tasks can still run.
 7. **On success:**
    - Tick the acceptance criteria in the task file, and make sure its Work log says what was done.
    - Run `$AISDLC task set <G-id> <T-id> done`.
@@ -110,4 +113,5 @@ All tasks are done or skipped at this point.
    - any skipped tasks, with their reasons
    - the commits made, or the work left uncommitted
    - whether the branch was pushed, and the coverage figures from `coverage check` (or why it failed, if the user finished anyway)
+   - who owns the goal, if it changed hands in this run, and that `decisions.md` in the goal folder has the full record
    - every `should` rule that failed without blocking, from `governance.plan.failed` and `governance.final.failed` in `goal show`, so the user sees them before moving on

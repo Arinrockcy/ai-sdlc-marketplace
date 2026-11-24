@@ -10,6 +10,8 @@ argument-hint: "[G-id] [--final]"
 
 **Don't assume.** If something this step needs is unclear, missing or under-documented, and neither the code nor the `.aisdlc/` files answer it, ask the user. Never fill a gap with a guess or a silent default. If a rule's wording leaves unclear how it applies to this goal, ask the user how to read it and record that reading in the Notes column.
 
+**Who decided.** The script logs every change it makes in the goal's `decisions.md`, with the time and who made it (the name from `git config user.name`, or `AISDLC_ACTOR`). When the user made the choice in this conversation, add `--by user` to the command that carries it out, so the log shows it as theirs. When no command carries it out (merge or create, retry, which option to take), record it with `$AISDLC decision add <G-id> "<the choice>" --by user`. Never pass `--by user` for a choice you made yourself.
+
 Run `$AISDLC hooks run post_govern` last in every mode.
 
 Each rule in `.aisdlc/governance.md` has:
@@ -31,9 +33,9 @@ The script owns the rules table. Change it only through the `governance add` and
    If a stack is active (`$AISDLC detect-stack` returns `standards_skills`), offer the catalog's two Stack standards rules, pointing at those skills (for example "Code follows `aisdlc-nodejs:nodejs-standards`", stage `final`) instead of copying its content. The `plan` one catches a plan that can't meet the standard before any code is written.
 3. Then ask, one question at a time, about anything the catalog doesn't cover that the project needs: coding standards, security and compliance, testing, review or approval needs, performance budgets, and what "done" means.
 4. For each agreed change:
-   - Add a rule: `$AISDLC governance add "<rule>" --severity must|should --stage plan|final [--check <name>]`. Ask the user which severity and stage they want. The script refuses to guess them.
-   - Change a rule: `$AISDLC governance set <GOV-id> rule|severity|stage|check <value>`.
-   - Remove a rule: `$AISDLC governance set <GOV-id> severity retired`. IDs are never deleted or renumbered, because reviews reference them.
+   - Add a rule: `$AISDLC governance add "<rule>" --severity must|should --stage plan|final [--check <name>] --by user`. Ask the user which severity and stage they want. The script refuses to guess them.
+   - Change a rule: `$AISDLC governance set <GOV-id> rule|severity|stage|check <value> --by user`.
+   - Remove a rule: `$AISDLC governance set <GOV-id> severity retired --by user`. IDs are never deleted or renumbered, because reviews reference them.
    - Put anything that "done" has to mean in a `final` rule. That is what makes it checked.
 5. Tell the user that changing a `plan` rule makes the plan review of every goal it applies to stale. Those goals have to be re-governed before their next task starts.
 
