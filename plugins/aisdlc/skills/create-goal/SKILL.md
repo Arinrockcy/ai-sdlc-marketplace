@@ -42,7 +42,7 @@ Never pick for the user, even when the overlap looks obvious. Record the choice 
 2. Extend Problem, Outcome / Acceptance Criteria, Scope and Risks & Unknowns with the new scope. Don't remove or reword existing content unless the user agrees. If the title no longer fits, ask whether to change it (`$AISDLC goal set <G-id> title "<title>"`).
 3. Add the new tasks as in section 4 (`task new` resets the govern gate if it had passed).
 4. The merged scope hasn't been through challenge or ADRs yet. If `gates.challenge` is `done`, run `$AISDLC gate set <G-id> challenge pending`. If `gates.adr` is `done`, run `$AISDLC gate set <G-id> adr pending`. Relay the `notes`.
-5. Continue with section 5, then section 6 for the merged goal. The next step is `/aisdlc:challenge <G-id>`.
+5. Continue with section 5, then section 6 for the merged goal. The next step is `/aisdlc:govern <G-id>`.
 
 ## 2. Intake questions (before writing the goal)
 Before you write anything, find the gaps in the description and ask the user about them. Don't write a goal the user didn't describe.
@@ -91,4 +91,4 @@ To change a task afterwards, use `task edit` or `task remove` as `/aisdlc:challe
 ## 6. Finish
 - Run `$AISDLC registry sync`, then `$AISDLC hooks run post_create_goal`.
 - Show the user the goal ID, the wave table from `tasks.md` and the open questions.
-- Next step: `/aisdlc:challenge <G-id>`. The gated order is challenge → adr → govern → implement.
+- Next step: `/aisdlc:govern <G-id>`. The gated order is govern → implement. The plan review asks the open questions and settles the ADR decision itself; `/aisdlc:challenge` and `/aisdlc:adr` are optional, for clarifying a goal or recording ADRs before the review.

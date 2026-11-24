@@ -55,7 +55,7 @@ Skills call the script (written `$AISDLC` in the skill files) and should never h
 - `registry.md`, `registry-archive.md` and `tasks.md` are generated views. Rebuild them rather than editing them. `registry.md` holds unfinished goals and every ADR. Finished goals go to the archive, so the file skills read whole only grows with open work.
 - Skills must not read an index that grows without bound (the archive, `GRAPH_REPORT.md`, the documentation index in `.aisdlc/cache/`, unfiltered `goal list`) in full. Filter it with the script, search it, or query it.
 
-**Strict gating** (`requireStep`/`setGate`): challenge → adr → govern → implement.
+**Strict gating** (`requireStep`/`setGate`): govern → implement. Govern needs no earlier gate: its plan review settles the ADR decision first and asks the open questions itself. Challenge and adr are optional steps that may run before or after it (each still resets govern). GOV-04 (`adr-recorded`) is what keeps a review from passing without an ADR decision.
 - `adr done` requires a linked ADR that is `accepted` (or `superseded`), or `adrs: none` plus `adr_reason`.
 - Rules in `governance.md` are rows of `ID | Rule | Severity | Stage | Check`, changed only through `governance add|set`:
   - Severity is `must|should|retired`. A bad value fails loudly.
@@ -97,6 +97,7 @@ These were settled with the repo owner:
 - No skill assumes. Anything unclear or under-documented that the code doesn't answer is asked, never guessed or defaulted silently.
 - `/aisdlc:create-goal` first checks for unfinished goals (pending, in-progress, blocked). It asks whether to merge into a pending goal, finish or cancel an unfinished one first, or create a separate goal, and never picks for the user. Merge is offered only for `pending` goals, because in-progress and blocked goals can't be re-challenged. A merge resets the challenge and adr gates.
 - `/aisdlc:create-goal` then asks intake questions about the gaps in the description, before writing the goal. Answers go under Clarifications so challenge doesn't repeat them.
+- `/aisdlc:govern <G-id>` is the first step after `/aisdlc:create-goal` (decided by the repo owner 2026-11-24, replacing challenge → adr → govern). Before its review it settles the ADR decision with the user, and on a goal no challenge or earlier review has read, the reviewer also does the code-reading pass, turning what it finds into questions for the user. `/aisdlc:challenge` and `/aisdlc:adr` stay as optional steps.
 - `/aisdlc:challenge` is clarification Q&A, one question at a time. It is not a critique.
 - There is no governance waiver.
 - Governance has two stages. `plan` rules gate implementation. `final` rules gate completion, and `/aisdlc:implement` runs the final review itself.

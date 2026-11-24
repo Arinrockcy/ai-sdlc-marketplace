@@ -2,6 +2,16 @@
 
 All notable changes to the `aisdlc` plugin. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/). Until 1.0.0, a minor version may include breaking changes; each one is listed under **Breaking** with its upgrade step.
 
+## [0.29.0] - 2026-11-24
+
+Governance comes first: the plan review no longer waits for challenge and the ADR step.
+
+### Changed
+- `gate require <G-id> govern` and `gate require <G-id> adr` no longer need earlier gates. `goal show` and `goal list` name `govern` as the next step of a goal that hasn't passed its review, and never `challenge` or `adr`.
+- `/aisdlc:govern <G-id>` settles the ADR decision with the user before its review starts (it follows `/aisdlc:adr`'s steps when `gate_adr` isn't done). On a goal that no challenge and no earlier review has read, the reviewer also reads the code each task touches and turns each mismatch or forced choice into a question for the user.
+- `/aisdlc:challenge` and `/aisdlc:adr` are optional. They still run, before or after the review, and each still resets the govern gate. GOV-04 (`adr-recorded`) still keeps a review from passing without an ADR decision.
+- `/aisdlc:create-goal` and `/aisdlc:challenge` name `/aisdlc:govern <G-id>` as the next step.
+
 ## [0.28.0] - 2026-11-24
 
 Governance can check whether anyone already started similar work on another branch.

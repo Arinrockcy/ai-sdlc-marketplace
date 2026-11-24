@@ -1848,13 +1848,10 @@ function requireStep(root, goal, step) {
   if (goal.status === 'cancelled') problems.push(`goal is cancelled; reopen it with \`state move ${goal.id} pending\` first`);
   if (step === 'challenge') {
     if (!['pending', 'cancelled'].includes(goal.status)) problems.push(`goal is ${goal.status}; challenge only runs on pending goals`);
-  } else if (step === 'adr') {
+  } else if (step === 'adr' || step === 'govern') {
+    // Govern comes first: its review asks the open questions and settles the ADR decision itself, so neither
+    // challenge nor the ADR step has to run before it. Both stay available, and GOV-04 still checks the ADR.
     if (goal.status === 'completed') problems.push('goal is already completed');
-    if (d.gate_challenge !== 'done') problems.push('run /aisdlc:challenge first (gate_challenge != done)');
-  } else if (step === 'govern') {
-    if (goal.status === 'completed') problems.push('goal is already completed');
-    if (d.gate_challenge !== 'done') problems.push('run /aisdlc:challenge first (gate_challenge != done)');
-    if (d.gate_adr !== 'done') problems.push('run /aisdlc:adr first (gate_adr != done)');
   } else if (step === 'implement' || step === 'final') {
     if (goal.status === 'completed') problems.push('goal is already completed');
     if (d.gate_govern !== 'passed') problems.push(`run /aisdlc:govern ${goal.id} first (gate_govern = ${d.gate_govern || 'pending'})`);
@@ -3080,13 +3077,12 @@ function linkAdr(root, adrId, goalId) {
   return invalidate(g, 'adr');
 }
 
-// The workflow step that moves a goal on: challenge, adr, govern, implement, reopen, or null once completed.
+// The workflow step that moves a goal on: govern, implement, reopen, or null once completed. Challenge and the ADR
+// step are optional, because the plan review covers both.
 function nextStep(root, g) {
   const d = g.data;
   if (g.status === 'completed') return null;
   if (g.status === 'cancelled') return 'reopen';
-  if (g.status === 'pending' && d.gate_challenge !== 'done') return 'challenge';
-  if (d.gate_adr !== 'done') return 'adr';
   if (d.gate_govern !== 'passed' || d.govern_fingerprint !== planFingerprint(root, g)) return 'govern';
   return 'implement';
 }

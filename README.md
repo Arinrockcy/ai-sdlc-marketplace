@@ -53,17 +53,17 @@ Requires Node.js 24+. Graphify and the documentation index are optional; `/aisdl
 ```
 /aisdlc:init
 /aisdlc:create-goal <description>   → checks unfinished goals (merge / finish first / cancel / separate), intake questions, then goal + task DAG (waves, risk-first)
-/aisdlc:challenge G-001             → one-question-at-a-time clarification
-/aisdlc:adr G-001                   → ADRs, or "none needed" with a reason
 /aisdlc:govern                      → edit project rules (no argument), with an optional rule catalog
-/aisdlc:govern G-001                → plan review: pass or fail against the plan-stage rules
+/aisdlc:govern G-001                → plan review, the first step after create-goal: settles the ADR decision, asks the open questions, then pass or fail against the plan-stage rules
+/aisdlc:challenge G-001             → optional: one-question-at-a-time clarification before the review
+/aisdlc:adr G-001                   → optional: ADRs, or "none needed" with a reason, before the review
 /aisdlc:implement G-001 [--all]     → task by task in DAG order, with hooks
 /aisdlc:govern G-001 --final        → final review of the finished work (implement runs it; init seeds GOV-06, a final rule)
 ```
 
 No step works from assumptions. When something is unclear or under-documented and the code doesn't answer it, the skill asks you, and answers are recorded under the goal's Clarifications.
 
-Each step refuses to run until the previous gate passes, and the script enforces it:
+Govern comes first. It needs no earlier step: before its review it records the ADR decision with you, and the review turns every gap it finds in the plan and the code into a question for you. `challenge` and `adr` can still run on their own, before or after it. The script enforces the rest:
 - A goal can't start before governance passes.
 - Tasks run in dependency order.
 - A task is done only after `task verify` passes and `task review` passes after it. Every review round is kept in the goal's `code-review.md` and the task file's `## Review`, next to a `## Work log` of what was done and what failed. A failed review re-runs explore, fix, verify and review on its own, up to 2 retries. After that it asks how many more to run, and if the same defects come back it asks you to re-govern the goal.

@@ -187,8 +187,9 @@ test('cli: full gated flow from init to completed', () => {
   assert.equal(run(['task', 'new', 'G-001', 'Bad', '--depends', 'T-09']).code, 1);
   assert.equal(run(['dag', 'write', 'G-001']).json.ok, true);
 
-  // Strict gating.
-  assert.equal(run(['gate', 'require', 'G-001', 'adr']).code, 1);
+  // Strict gating. Govern comes first: neither challenge nor the ADR step has to run before it.
+  assert.equal(run(['gate', 'require', 'G-001', 'govern']).code, 0);
+  assert.equal(run(['gate', 'require', 'G-001', 'adr']).code, 0);
   assert.equal(run(['gate', 'require', 'G-001', 'implement']).code, 1);
   run(['gate', 'set', 'G-001', 'challenge', 'done']);
   assert.equal(run(['gate', 'set', 'G-001', 'adr', 'done']).code, 1, 'adr gate needs a link or none+reason');
@@ -1210,9 +1211,10 @@ test('cli: goal list and show name the next step from status and gates', () => {
   run(['init']);
   run(['goal', 'new', 'A']);
   const next = () => run(['goal', 'show', 'G-001']).json.next;
-  assert.equal(next(), 'challenge');
+  // Govern is the first step; challenge and the ADR step are optional and never named as next.
+  assert.equal(next(), 'govern');
   run(['gate', 'set', 'G-001', 'challenge', 'done']);
-  assert.equal(next(), 'adr');
+  assert.equal(next(), 'govern');
   run(['adr', 'none', 'G-001', '--reason', 'no decision']);
   run(['gate', 'set', 'G-001', 'adr', 'done']);
   assert.equal(run(['goal', 'list']).json[0].next, 'govern');
@@ -1938,6 +1940,29 @@ test('checks: goal-defined needs both sides of Scope, and tasks-verifiable needs
 
   edit(file, (s) => s.replace('**Out:**\n', '**Out:**\n- None\n'));
   assert.doesNotMatch(problems('GOV-01'), /Scope/);
+});
+
+test('gates: govern runs first, settling the ADR itself, without challenge or the ADR step', () => {
+  const { run, dir } = project();
+  run(['init']);
+  const g = plannedGoal(run, dir, [['Do it']]);
+  const goalDir = path.join(dir, run(['goal', 'show', g.id]).json.dir);
+  assert.equal(run(['gate', 'require', g.id, 'govern']).code, 0);
+  assert.equal(run(['gate', 'set', g.id, 'govern', 'pending']).code, 0);
+  // GOV-04 still checks the ADR decision, so a review can't pass before it is recorded.
+  const gov04 = () => run(['governance', 'checks', g.id]).json.find((c) => c.rule === 'GOV-04').problems;
+  assert.match(gov04().join(), /adr none --reason/);
+  assert.equal(run(['adr', 'none', g.id, '--reason', 'no architectural change']).code, 0);
+  assert.deepEqual(gov04(), []);
+  writeReview(goalDir, g.id);
+  const passed = run(['gate', 'set', g.id, 'govern', 'passed']);
+  assert.equal(passed.code, 0, passed.stdout + passed.stderr);
+  const gates = run(['goal', 'show', g.id]).json.gates;
+  assert.deepEqual([gates.challenge, gates.adr, gates.govern], ['pending', 'pending', 'passed']);
+  assert.equal(run(['gate', 'require', g.id, 'implement']).code, 0);
+  // Running challenge afterwards is still allowed, and it makes the review stale.
+  assert.equal(run(['gate', 'set', g.id, 'challenge', 'done']).code, 0);
+  assert.equal(run(['gate', 'require', g.id, 'implement']).code, 1);
 });
 
 test('gates: an open question blocks govern, implement and completion, but not challenge or the ADR', () => {
