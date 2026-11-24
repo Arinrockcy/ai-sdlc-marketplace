@@ -2,6 +2,11 @@
 
 All notable changes to the `aisdlc-nodejs` plugin. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/).
 
+## [0.12.0] - 2026-11-24
+
+### Added
+- `nodejs-standards`: a helper function used by more than one file or module lives in the nearest owning `util/` folder (or the project's existing utilities folder) and every caller imports it; a helper only one module uses stays in that module until a second caller needs it. `util/` joins the feature layers, and the Done checklist has a matching item.
+
 ## [0.11.0] - 2026-10-02
 
 ### Added

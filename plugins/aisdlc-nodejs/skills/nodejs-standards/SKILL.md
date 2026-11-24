@@ -34,6 +34,7 @@ If these conflict (for example, a `type` that disagrees with `runtime.module_typ
 - In ES modules, write relative import specifiers with their file extension (`./order-service.js`), and use `import.meta.dirname` and `import.meta.filename` instead of `__dirname` and `__filename`.
 - Design behavior around focused class modules. Controllers, services, repositories, adapters, clients, and other components that own dependencies, state, or lifecycle must be classes with explicit constructor dependencies. Keep one primary class per module. Small stateless transformations may remain named functions; do not wrap them in empty utility classes.
 - No inline functions. Do not pass arrow functions or anonymous function expressions directly to callbacks, array methods, timers, promises, event handlers, object properties, or returned expressions. Declare an intention-revealing named function or class method and pass its reference. Put it at module scope when it needs no closure, otherwise use the narrowest valid named scope.
+- A helper function used by more than one file or module lives in the nearest owning `util/` folder (or the utilities folder the project already uses) as a named export, grouped by purpose, and every caller imports it from there. Never copy a helper into a second module or import a private helper from another module. A helper that only one module uses stays in that module as a named function, and moves to `util/` in the task that gives it a second caller.
 - In TypeScript projects, respect `strict`. Do not use `any` to silence errors; narrow the value or use `unknown`.
 - Use async/await. Always `await` or return promises, and never leave floating promises.
 - Throw `Error` instances (or the project's error classes) with context. Don't swallow errors in empty `catch` blocks.
@@ -42,7 +43,7 @@ If these conflict (for example, a `type` that disagrees with `runtime.module_typ
 
 ## Structure, constants, and configuration
 
-- Organize code by feature or bounded responsibility. Within a feature, use only the layers it needs, such as `controller/`, `service/`, `repository/`, `model/`, `config/`, `constant/`, and `test/`. Do not create empty ceremonial folders.
+- Organize code by feature or bounded responsibility. Within a feature, use only the layers it needs, such as `controller/`, `service/`, `repository/`, `model/`, `config/`, `constant/`, `util/`, and `test/`. Do not create empty ceremonial folders.
 - Put every static semantic value in the nearest owning `constant/` directory. Group constants by purpose and usage in files such as `constant/order-status.js`, `constant/retry-policy.js`, or their TypeScript equivalents. Never create a generic dumping ground such as `constants.js`.
 - Constants include fixed labels, lookup maps, event names, default values, regular expressions, header names, and option arrays. Runtime results and local immutable bindings may still use `const`; they are not static constants.
 - Do not hardcode deployable or environment-dependent configuration in implementation files. Ports, hosts, URLs, credentials, feature flags, timeouts, retry limits, filesystem locations, resource identifiers, and environment-specific limits belong in a focused `config/` module sourced from environment variables or the project's configuration provider.
@@ -128,6 +129,7 @@ If these conflict (for example, a `type` that disagrees with `runtime.module_typ
 - [ ] Negative, boundary, cleanup, and relevant performance cases are covered
 - [ ] Static constants are grouped by purpose under the nearest `constant/`; deployable configuration is validated in `config/`
 - [ ] Stateful/dependency-owning behavior uses focused class modules and no new inline functions remain
+- [ ] Helpers used by more than one file or module live in `util/`, not copied or kept private in one caller
 - [ ] Input never reaches a shell, an evaluator, a query string or a file path unchecked; no secrets in logs; TLS verification stays on
 - [ ] Long-running processes shut down on `SIGTERM`/`SIGINT`, and I/O accepts an `AbortSignal` with a configured deadline
 - [ ] Logging goes through the project's logger, with structured fields and levels; no debug logging or commented-out code is left behind
