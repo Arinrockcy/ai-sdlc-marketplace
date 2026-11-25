@@ -1847,7 +1847,7 @@ function requireStep(root, goal, step) {
   const problems = [];
   if (goal.status === 'cancelled') problems.push(`goal is cancelled; reopen it with \`state move ${goal.id} pending\` first`);
   if (step === 'challenge') {
-    if (!['pending', 'cancelled'].includes(goal.status)) problems.push(`goal is ${goal.status}; challenge only runs on pending goals`);
+    if (!['pending', 'cancelled'].includes(goal.status)) problems.push(`goal is ${goal.status}; /aisdlc:clarify only runs on pending goals`);
   } else if (step === 'adr' || step === 'govern') {
     // Govern comes first: its review asks the open questions and settles the ADR decision itself, so neither
     // challenge nor the ADR step has to run before it. Both stay available, and GOV-04 still checks the ADR.

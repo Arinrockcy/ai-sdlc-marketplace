@@ -1,49 +1,14 @@
 ---
 name: challenge
-description: Clarify an AI-SDLC goal by asking the user one question at a time until ambiguities, open questions and assumptions are resolved, then update the goal and tasks. Use when the user runs /aisdlc:challenge <goal-id>.
+description: Old name of /aisdlc:clarify, kept for one release. Hands over to the clarify skill with the same goal ID. Use when the user runs /aisdlc:challenge.
 argument-hint: "<G-id>"
 ---
 
-# aisdlc: challenge
+# aisdlc: challenge (renamed to clarify)
 
-`$AISDLC` below means `node "${CLAUDE_PLUGIN_ROOT}/scripts/aisdlc.mjs"`. Run it from the project root. Where a path in this skill still starts with an unexpanded variable, that variable stands for this plugin's folder: two levels above the folder that holds this SKILL.md. Skills are named `<plugin>:<skill>` (`/aisdlc:signoff`, `aisdlc-nodejs:nodejs-standards`); in an agent without plugin namespaces, such as GitHub Copilot, use only the `<skill>` part, both to load a skill and when you tell the user what to run (`/aisdlc:signoff` is `/signoff`, `aisdlc-nodejs:nodejs-standards` is `nodejs-standards`).
+Skills are named `<plugin>:<skill>` (`/aisdlc:clarify`); in an agent without plugin namespaces, such as GitHub Copilot, use only the `<skill>` part, both to load a skill and when you tell the user what to run (`/aisdlc:clarify` is `/clarify`).
 
-**Don't assume.** If something this step needs is unclear, missing or under-documented, and neither the code nor the `.aisdlc/` files answer it, ask the user. Never fill a gap with a guess or a silent default. Resolve a question only with the user's answer, never with your own inference.
+`/aisdlc:challenge` was renamed to `/aisdlc:clarify` in aisdlc 0.31.0. This name goes away in a later release.
 
-**Who decided.** The script logs every change it makes in the goal's `decisions.md`, with the time and who made it (the name from `git config user.name`, or `AISDLC_ACTOR`). When the user made the choice in this conversation, add `--by user` to the command that carries it out, so the log shows it as theirs. When no command carries it out (merge or create, retry, which option to take), record it with `$AISDLC decision add <G-id> "<the choice>" --by user`. Never pass `--by user` for a choice you made yourself.
-
-Input: `$ARGUMENTS` (the text after the skill's name) is the goal ID. If it is missing, run `$AISDLC goal list --status pending` and ask the user which goal.
-
-## Steps
-1. Run `$AISDLC gate require <G-id> challenge`. If it exits non-zero, show the `problems` and stop.
-2. Run `$AISDLC hooks run pre_challenge`.
-3. Run `$AISDLC goal show <G-id>`. Read `goal.md` and the task files. The Clarifications section already holds the answers from `/aisdlc:create-goal`'s intake questions; don't ask those again.
-4. Build an internal list of ambiguities. Start the code reading first, so it runs while you read the plan:
-   - **Code-reading pass.** If your agent can hand work to a sub-agent or a fresh session, give it the goal ID, the full command `$AISDLC` stands for, with the plugin folder written out as an absolute path, and this brief, but not your own reading of the plan: "Read goal.md, the task files and the linked ADRs. For each task, open the files under its Files and the code they call or are called by (`$AISDLC graph query "<keywords>"` finds them; otherwise search for the names). List each place where the plan doesn't match the code or leaves a choice the code forces: a data shape or path the plan doesn't cover, an edge case, an error the code would raise, an error code or a name that callers will see, a test or file that will have to change but isn't listed. Give each as a question the user can answer, with the options and, when you have a view, `Recommended: …` and why, citing the file and line. Don't change any file." Add what it returns to the list below, and drop what Clarifications already answer. Without a sub-agent, do the same reading yourself, task by task.
-
-   Sources:
-   - the goal's Risks & Unknowns section, especially its `- **Open:** …` items
-   - statements in the goal or tasks that rest on an assumption, not on the user's words, a Clarification or the code
-   - vague acceptance criteria (not measurable)
-   - unclear scope boundaries
-   - assumptions hidden in tasks
-   - missing verify commands
-   - dependencies that look wrong
-   - decisions that sound architectural (note these for `/aisdlc:adr`)
-   - the stack's standards: run `$AISDLC detect-stack` and load every skill in `standards_skills`. Check that the tasks carry the criteria each requires (for example declaration files, test layers, lint and coverage). Where the repo conflicts with it (another test runner, a threshold the tooling can't enforce), ask the user which way to go. Record a chosen departure under `## Standards deviations` in `goal.md` with the reason, so reviewers don't rebuild it from the Clarifications.
-5. Ask the user **one question at a time**. Use a structured question tool with 2 to 4 concrete options when one is available. Put the most important question first. After each answer:
-   - If it answers an open question (`$AISDLC question list <G-id>` shows them), record it with `$AISDLC question resolve <G-id> <Q-id> --answer "…" --by user`. It moves the item from Risks & Unknowns to Clarifications. Only the user's answer resolves it, in the user's own words.
-   - Otherwise record it with `$AISDLC question add <G-id> "<question>" --answer "…" --by user`, which adds it under `## Clarifications`.
-   - Before you start, run `$AISDLC question list <G-id>`. It also shows questions that hide: `- **Open:**` items in a task or another section (`elsewhere`), questions in Risks & Unknowns without the marker (`unmarked`), and TBD-style placeholders in the plan (`placeholders`). Run `$AISDLC question number <G-id>` to bring the first two under the list. A placeholder is a decision nobody made: ask the user what it should say.
-   - Update the affected goal sections and task files right away. After changing a goal criterion, check that the task criteria and Files still match it, and that the task's `verify` would fail while the changed criteria are unmet (step 7). Change tasks only through the script, never by renaming or deleting task files, so IDs are never reused:
-     - add one: `$AISDLC task new <G-id> "<title>" --risk … --depends … --verify "…"`
-     - change a planned field: `$AISDLC task edit <G-id> <T-id> title "<title>"`, `$AISDLC task edit <G-id> <T-id> depends T-01,T-02|none`, `$AISDLC task edit <G-id> <T-id> risk high|medium|low` or `$AISDLC task edit <G-id> <T-id> verify "<command>"`. A new title renames the file too.
-     - remove one: `$AISDLC task remove <G-id> <T-id> --reason "<why>" --by user`. It refuses while another task depends on it; change that dependency first. The removal is logged under `## Removed tasks` in `goal.md`.
-     - split one: add the new tasks, move the dependencies over, then remove the old one.
-   - Don't ask what the codebase or an earlier decision already answers. Look it up instead, as cheaply as you can: the `accepted` ADR rows in `.aisdlc/registry.md` for decisions already made, and `$AISDLC graph query "<keywords>"` rather than a broad search of the code. Open only the ADRs and files that bear on the question. For documentation and ADR bodies, run `$AISDLC docs search <keywords>` and read only the sections it returns (path and line range); if it says documentation is not configured, search those files directly, and never read the index in `.aisdlc/cache/`.
-6. Stop when there are no open questions left, or when the user says to stop. Record each unresolved question with `$AISDLC question add <G-id> "<question>"` (never write the `- **Open:**` line by hand), and tell the user that `/aisdlc:signoff` will fail rule GOV-05 until they are answered (its `questions-resolved` check finds them).
-7. Check the verify commands, so the plan review doesn't have to find what you can find now:
-   - Run `$AISDLC task precheck <G-id>`. It runs each pending task's `verify` on the code as it is now, before the task's work, clause by clause, and records nothing. A task in `passes_now` has a verify that already passes, so it proves nothing about that work: strengthen it with `$AISDLC task edit <G-id> <T-id> verify "<command>"` until it fails for what the task adds (a new test, file or text), unless every criterion of the task is about something that must stay as it is. For a task that `fails`, `failed` names the clause that failed. With `cause: environment` it failed for a missing tool, service or setting, which says nothing about the criteria: judge the clauses from there on by reading them.
-   - Go through each task criterion by criterion and name the part of its `verify`, or of the `after_task` hook, that fails while that criterion is unmet. Where nothing does, add a clause to the verify and say in the criterion what checks it. To show that a named test exists and passes, run it with the test runner's name filter (`jest -t '<name>'`, `vitest run -t '<name>'`, `pytest -k '<name>'`, or `node --test --test-isolation=none --test-name-pattern '<name>'`) rather than grepping for a comment: the script fails a filter that matches no test, so the clause fails until the test is written. `/aisdlc:signoff` asks the same of every criterion, so a gap left here comes back as a failed review. If you can't tell how a criterion could be checked, ask the user.
-8. Run `$AISDLC dag write <G-id>` to revalidate the DAG. Then run `$AISDLC gate set <G-id> challenge done`. If the output includes `notes` (governance reset, stale review), relay them to the user.
-9. Run `$AISDLC hooks run post_challenge`. Tell the user which architectural decisions came up and that the next step is `/aisdlc:signoff <G-id>`, which settles the ADR decision before its review (or `/aisdlc:adr <G-id>` first, to record ADRs on their own).
+1. Tell the user, in one line, that the command is now `/aisdlc:clarify` and that it works the same way.
+2. Load the `aisdlc:clarify` skill and follow it with the goal ID the user gave this one.

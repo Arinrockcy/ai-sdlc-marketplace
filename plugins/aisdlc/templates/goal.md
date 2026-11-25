@@ -42,4 +42,4 @@ updated: {{date}}
 
 ## Clarifications
 
-<!-- Q/A pairs from /aisdlc:create-goal intake and /aisdlc:challenge. -->
+<!-- Q/A pairs from /aisdlc:create-goal intake and /aisdlc:clarify. -->

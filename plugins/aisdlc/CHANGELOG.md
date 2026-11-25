@@ -2,6 +2,17 @@
 
 All notable changes to the `aisdlc` plugin. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/). Until 1.0.0, a minor version may include breaking changes; each one is listed under **Breaking** with its upgrade step.
 
+## [0.31.0] - 2026-11-25
+
+`/aisdlc:challenge` is renamed `/aisdlc:clarify`: it was always clarification Q&A, never a critique.
+
+### Changed
+- The `challenge` skill is now `clarify` (`/aisdlc:clarify`, `/clarify` in Copilot) and works the same way. Every skill, README line and script message names `/aisdlc:clarify`.
+- The gate, its field and its hooks keep their names (`challenge`, `gate_challenge`, `pre_challenge`, `post_challenge`), so existing `.aisdlc/` state works unchanged.
+
+### Deprecated
+- `/aisdlc:challenge` stays for this release as a small skill that hands over to `clarify`. It will be removed in a later release.
+
 ## [0.30.0] - 2026-11-25
 
 `/aisdlc:govern` is renamed `/aisdlc:signoff`: it is the one sign-off before implementing and after, now that it settles the ADR decision and asks the open questions itself.

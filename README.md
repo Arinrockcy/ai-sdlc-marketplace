@@ -4,7 +4,7 @@ A stack-agnostic AI-SDLC workflow for Claude Code and GitHub Copilot. Its skills
 
 | Plugin | Purpose |
 |--------|---------|
-| `aisdlc` | Core workflow: init, create-goal, challenge, adr, signoff, implement |
+| `aisdlc` | Core workflow: init, create-goal, clarify, adr, signoff, implement |
 | `aisdlc-nodejs` | Node.js stack: Node.js 24+, ES modules, coding standards, ESLint/coverage gates, SonarQube, vulnerability scans, and Express REST API/auth/JWT practices |
 | `dependency-guardian` | npm dependency scanner: finds vulnerable, deprecated and discouraged packages, CI-ready (`guardian.mjs scan`). Blocking unsafe agent-issued installs is planned, not yet available |
 
@@ -55,7 +55,7 @@ Requires Node.js 24+. Graphify and the documentation index are optional; `/aisdl
 /aisdlc:create-goal <description>   → checks unfinished goals (merge / finish first / cancel / separate), intake questions, then goal + task DAG (waves, risk-first)
 /aisdlc:signoff                      → edit project rules (no argument), with an optional rule catalog
 /aisdlc:signoff G-001                → plan review, the first step after create-goal: settles the ADR decision, asks the open questions, then pass or fail against the plan-stage rules
-/aisdlc:challenge G-001             → optional: one-question-at-a-time clarification before the review
+/aisdlc:clarify G-001             → optional: one-question-at-a-time clarification before the review
 /aisdlc:adr G-001                   → optional: ADRs, or "none needed" with a reason, before the review
 /aisdlc:implement G-001 [--all]     → task by task in DAG order, with hooks
 /aisdlc:signoff G-001 --final        → final review of the finished work (implement runs it; init seeds GOV-06, a final rule)
@@ -63,7 +63,7 @@ Requires Node.js 24+. Graphify and the documentation index are optional; `/aisdl
 
 No step works from assumptions. When something is unclear or under-documented and the code doesn't answer it, the skill asks you, and answers are recorded under the goal's Clarifications.
 
-Govern comes first. It needs no earlier step: before its review it records the ADR decision with you, and the review turns every gap it finds in the plan and the code into a question for you. `challenge` and `adr` can still run on their own, before or after it. The script enforces the rest:
+Govern comes first. It needs no earlier step: before its review it records the ADR decision with you, and the review turns every gap it finds in the plan and the code into a question for you. `clarify` and `adr` can still run on their own, before or after it. The script enforces the rest:
 - A goal can't start before governance passes.
 - Tasks run in dependency order.
 - A task is done only after `task verify` passes and `task review` passes after it. Every review round is kept in the goal's `code-review.md` and the task file's `## Review`, next to a `## Work log` of what was done and what failed. A failed review re-runs explore, fix, verify and review on its own, up to 2 retries. After that it asks how many more to run, and if the same defects come back it asks you to re-govern the goal.
@@ -75,10 +75,10 @@ Govern comes first. It needs no earlier step: before its review it records the A
 Governance is tied to what it reviewed:
 - Rules can name automatic checks (`goal-defined`, `tasks-verifiable`, `dag-valid`, `adr-recorded`, `questions-resolved`, `criteria-met`, `no-parallel-work`) that a review can't overrule.
 - Every row of a review needs a note: the evidence for a `pass`, the reason for a `fail` or `n/a`.
-- A `verify` command has to fail until its task's work is done. `aisdlc.mjs task precheck G-001` runs every pending task's verify on today's code and lists the ones that already pass; `create-goal`, `challenge` and the plan review all run it. The plan review also fills a `## Verify coverage` table, one row per task criterion, naming what fails while that criterion is unmet. It can't pass with an empty row, or pass the verify rule while a row says `none`, so one review finds every weak verify. `gate set G-001 govern passed` runs the precheck itself and refuses a verify that passes before its work, unless the review exempts the task in writing. `aisdlc.mjs task precheck all` sweeps every pending goal.
+- A `verify` command has to fail until its task's work is done. `aisdlc.mjs task precheck G-001` runs every pending task's verify on today's code and lists the ones that already pass; `create-goal`, `clarify` and the plan review all run it. The plan review also fills a `## Verify coverage` table, one row per task criterion, naming what fails while that criterion is unmet. It can't pass with an empty row, or pass the verify rule while a row says `none`, so one review finds every weak verify. `gate set G-001 govern passed` runs the precheck itself and refuses a verify that passes before its work, unless the review exempts the task in writing. `aisdlc.mjs task precheck all` sweeps every pending goal.
 - A failed plan review whose fixes are all written out in full (`(auto)`) and that has no question is fixed and run again without you, up to `govern.auto_fix_rounds` rounds (default 2, `0` turns it off).
 - The plan is fingerprinted when governance passes. Editing the goal, tasks, linked ADRs or plan rules afterwards blocks the next task until it is re-governed.
-- Re-running `challenge` or `adr`, linking another ADR, or adding or editing a task resets the governance gate. The old review is archived as `governance-review.stale-N.md`. Archived reviews are kept on purpose, as the goal's audit trail, and the next reviewer reads the latest one.
+- Re-running `clarify` or `adr`, linking another ADR, or adding or editing a task resets the governance gate. The old review is archived as `governance-review.stale-N.md`. Archived reviews are kept on purpose, as the goal's audit trail, and the next reviewer reads the latest one.
 - A reviewer that runs into a question only the user can answer writes it under Questions for the user. The review fails, the questions are asked, and the answers go under Clarifications, which later reviewers treat as settled.
 - There is no waiver.
 
@@ -159,6 +159,12 @@ See [`plugins/aisdlc/docs/stack-plugin-contract.md`](plugins/aisdlc/docs/stack-p
 ## Upgrading
 
 Each plugin keeps a changelog: [`aisdlc`](plugins/aisdlc/CHANGELOG.md), [`aisdlc-nodejs`](plugins/aisdlc-nodejs/CHANGELOG.md). Breaking changes are listed there with their upgrade step.
+
+### 0.30.x → 0.31.0 (`aisdlc`)
+
+`/aisdlc:challenge` is now `/aisdlc:clarify` (`/clarify` in Copilot). Nothing in `.aisdlc/` changes: the gate is still `challenge` (`gate_challenge`, `gate require <G-id> challenge`, `gates.challenge`), and the hooks are still `pre_challenge` and `post_challenge`.
+
+- Use `/aisdlc:clarify` in your docs, scripts and agent instructions. `/aisdlc:challenge` still works for this release and hands over to `clarify`.
 
 ### 0.29.x → 0.30.0 (`aisdlc`)
 

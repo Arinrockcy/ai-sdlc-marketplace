@@ -1126,7 +1126,7 @@ test('cli: goal moves follow the transition table, and a started goal never goes
   assert.match(move('pending').stderr, /can't go back to pending: T-01 already started\. Add tasks for new scope/);
   assert.equal(move('blocked').code, 0);
   assert.match(move('pending').stderr, /From blocked it can move to: in-progress, cancelled/);
-  assert.match(run(['gate', 'require', 'G-001', 'challenge']).json.problems.join(), /goal is blocked; challenge only runs on pending goals/);
+  assert.match(run(['gate', 'require', 'G-001', 'challenge']).json.problems.join(), /goal is blocked; \/aisdlc:clarify only runs on pending goals/);
 
   // A cancelled goal whose work started reopens as blocked, and resumes through the implement gate.
   assert.equal(move('cancelled', '--reason', 'on hold').code, 0);

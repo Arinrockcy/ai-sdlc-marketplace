@@ -13,11 +13,11 @@ const read = (name) => fs.readFileSync(path.join(SKILLS, name, 'SKILL.md'), 'utf
 
 // [skill, pattern the text must match, the rule it protects]
 const MUST = [
-  ['challenge', /\$AISDLC question add <G-id>/, 'challenge records questions with question add'],
-  ['challenge', /\$AISDLC question resolve <G-id> <Q-id>/, 'challenge closes open questions with question resolve'],
-  ['challenge', /one question at a time/i, 'challenge asks one question at a time'],
-  ['challenge', /Only the user's answer resolves it/, 'only the user\'s answer resolves a question'],
-  ['challenge', /never write the `- \*\*Open:\*\*` line by hand/, 'challenge never hand-writes Open lines'],
+  ['clarify', /\$AISDLC question add <G-id>/, 'challenge records questions with question add'],
+  ['clarify', /\$AISDLC question resolve <G-id> <Q-id>/, 'challenge closes open questions with question resolve'],
+  ['clarify', /one question at a time/i, 'challenge asks one question at a time'],
+  ['clarify', /Only the user's answer resolves it/, 'only the user\'s answer resolves a question'],
+  ['clarify', /never write the `- \*\*Open:\*\*` line by hand/, 'challenge never hand-writes Open lines'],
   ['create-goal', /\$AISDLC question add <G-id> "<question>" --answer "<the user's answer>" --by user/, 'intake answers are recorded as the user\'s'],
   ['create-goal', /Do \*\*not\*\* guess answers/, 'create-goal does not guess answers'],
   ['create-goal', /Never pick for the user/, 'create-goal never picks between merge, finish and separate'],
@@ -38,12 +38,12 @@ const MUST = [
   ['signoff', /\*\*Fix it without the user\*\* when `auto_fix` is true/, 'govern fixes and re-reviews mechanical failures on its own'],
   ['signoff', /repeats a fix from the last one/, 'the auto-fix loop stops when a fix does not hold'],
   ['signoff', /exempt it with a `- <T-id>: <why>` line/, 'a verify that must pass before the work is exempted in writing'],
-  ['challenge', /\*\*Code-reading pass\.\*\*/, 'challenge reads the code each task touches for design questions'],
-  ['challenge', /but not your own reading of the plan/, 'the code reader gets fresh eyes'],
-  ...['create-goal', 'challenge', 'signoff'].map((skill) => [skill, /rather than grepping for a comment/, 'a named test is checked with the runner\'s name filter']),
-  ['challenge', /\$AISDLC task precheck <G-id>/, 'challenge runs every verify before the work'],
-  ...['create-goal', 'challenge'].map((skill) => [skill, /name the part of its `verify`, or of the `after_task` hook, that fails while that criterion is unmet/, 'planning names what checks each criterion']),
-  ...['create-goal', 'challenge', 'adr', 'implement', 'signoff'].flatMap((skill) => [
+  ['clarify', /\*\*Code-reading pass\.\*\*/, 'challenge reads the code each task touches for design questions'],
+  ['clarify', /but not your own reading of the plan/, 'the code reader gets fresh eyes'],
+  ...['create-goal', 'clarify', 'signoff'].map((skill) => [skill, /rather than grepping for a comment/, 'a named test is checked with the runner\'s name filter']),
+  ['clarify', /\$AISDLC task precheck <G-id>/, 'challenge runs every verify before the work'],
+  ...['create-goal', 'clarify'].map((skill) => [skill, /name the part of its `verify`, or of the `after_task` hook, that fails while that criterion is unmet/, 'planning names what checks each criterion']),
+  ...['create-goal', 'clarify', 'adr', 'implement', 'signoff'].flatMap((skill) => [
     [skill, /\$AISDLC docs search <keywords>/, 'documentation is searched before it is read'],
     [skill, /never read the index in `\.aisdlc\/cache\/`/i, 'the documentation index is never read whole'],
   ]),
@@ -81,7 +81,7 @@ test('skill contracts: no skill tells the agent to do what the workflow forbids'
 });
 
 test('skill contracts: the question tool is how answers get collected, never the model\'s own text', () => {
-  for (const name of ['challenge', 'signoff', 'create-goal']) {
+  for (const name of ['clarify', 'signoff', 'create-goal']) {
     assert.match(read(name), /structured question tool|Ask the user/i, `${name} asks the user`);
   }
 });

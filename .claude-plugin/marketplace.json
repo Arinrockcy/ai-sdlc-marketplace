@@ -8,8 +8,8 @@
     {
       "name": "aisdlc",
       "source": "./plugins/aisdlc",
-      "description": "Core AI-SDLC workflow: init, create-goal, challenge, adr, signoff, implement.",
-      "version": "0.30.0",
+      "description": "Core AI-SDLC workflow: init, create-goal, clarify, adr, signoff, implement.",
+      "version": "0.31.0",
       "category": "development"
     },
     {

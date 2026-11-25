@@ -27,7 +27,7 @@ Run `$AISDLC goal list --status pending,in-progress,blocked` to get the unfinish
 
 Otherwise tell the user which goals are unfinished: ID, title, status and gates. Run `$AISDLC goal overlap <keywords>` with the main words of the new description. It lists the unfinished goals that share wording with it, with the shared words, and `likely` names the ones that overlap strongly. It only measures wording, so read those goals yourself before you say whether the new description overlaps any of them, and name the shared words. Then ask what to do, one question, with these choices:
 
-- **Merge into `<G-id>`.** Offer this only for `pending` goals, with one choice per pending goal. An in-progress or blocked goal can't be challenged again, so it can't take on new scope.
+- **Merge into `<G-id>`.** Offer this only for `pending` goals, with one choice per pending goal. An in-progress or blocked goal can't be clarified again, so it can't take on new scope.
 - **Finish `<G-id>` first.** Don't create anything. Tell the user the next command for that goal: `/aisdlc:<next> <G-id>`, where `<next>` is the goal's `next` field from `goal list`. They re-run `/aisdlc:create-goal` afterwards. Run `$AISDLC hooks run post_create_goal` and stop.
 - **Cancel `<G-id>`.** For a goal the user no longer wants. Ask the user why, and pass their answer in their own words: `$AISDLC state move <G-id> cancelled --reason "<why>" --by user`. Never write a reason for them. The script keeps every reason in the goal's `## Cancellations` log, and the goal keeps its ID and files and can be reopened later. Then start this section again, because other goals may still be unfinished.
 - **Reopen `<G-id>`.** Offer this only for a `cancelled` goal the description overlaps. Show why it was cancelled (`cancellations` in `goal show`), so the user decides with that in mind. How it reopens depends on whether its work had started (any task not `pending` in `goal show`):
@@ -60,8 +60,8 @@ Before you write anything, find the gaps in the description and ask the user abo
 
 ## 3. Goal
 - Run `$AISDLC goal new <short title>`. Open the `file` it returns. The person running the session is recorded as `created_by` and as the first `owner`.
-- Record each intake answer with `$AISDLC question add <G-id> "<question>" --answer "<the user's answer>" --by user`, which writes it under `## Clarifications`, so `/aisdlc:challenge` doesn't ask it again.
-- Fill in Problem, Outcome / Acceptance Criteria (measurable), Scope In/Out, and Risks & Unknowns, using only the description, the answers and what the code shows. Anything the user deferred or couldn't answer is recorded with `$AISDLC question add <G-id> "<question>"`, which keeps it under Risks & Unknowns. Do **not** guess answers; `/aisdlc:challenge` resolves them, and governance rule GOV-05 fails while any `**Open:**` item remains.
+- Record each intake answer with `$AISDLC question add <G-id> "<question>" --answer "<the user's answer>" --by user`, which writes it under `## Clarifications`, so `/aisdlc:clarify` doesn't ask it again.
+- Fill in Problem, Outcome / Acceptance Criteria (measurable), Scope In/Out, and Risks & Unknowns, using only the description, the answers and what the code shows. Anything the user deferred or couldn't answer is recorded with `$AISDLC question add <G-id> "<question>"`, which keeps it under Risks & Unknowns. Do **not** guess answers; `/aisdlc:clarify` resolves them, and governance rule GOV-05 fails while any `**Open:**` item remains.
 
 ## 4. Split into tasks
 Apply these rules in order. If a split depends on something the user hasn't said (for example, whether existing data needs migrating), ask; don't assume.
@@ -79,7 +79,7 @@ $AISDLC task new <G-id> "<title>" --risk high|medium|low --depends T-01,T-02 --v
 ```
 Then fill in each task file's What, Acceptance Criteria and Files sections.
 
-To change a task afterwards, use `task edit` or `task remove` as `/aisdlc:challenge` describes. Never rename or delete task files by hand: the script keeps task IDs unique and logs removals.
+To change a task afterwards, use `task edit` or `task remove` as `/aisdlc:clarify` describes. Never rename or delete task files by hand: the script keeps task IDs unique and logs removals.
 
 ## 5. Validate and write the plan
 - Run `$AISDLC dag write <G-id>`. It rejects cycles and unknown dependencies and writes `tasks.md` with waves. Fix any errors it reports. Its `warnings` name tasks in the same wave that list the same file under Files: add a dependency if one has to go first, or keep them parallel if the changes don't conflict.
@@ -91,4 +91,4 @@ To change a task afterwards, use `task edit` or `task remove` as `/aisdlc:challe
 ## 6. Finish
 - Run `$AISDLC registry sync`, then `$AISDLC hooks run post_create_goal`.
 - Show the user the goal ID, the wave table from `tasks.md` and the open questions.
-- Next step: `/aisdlc:signoff <G-id>`. The gated order is signoff → implement. The plan review asks the open questions and settles the ADR decision itself; `/aisdlc:challenge` and `/aisdlc:adr` are optional, for clarifying a goal or recording ADRs before the review.
+- Next step: `/aisdlc:signoff <G-id>`. The gated order is signoff → implement. The plan review asks the open questions and settles the ADR decision itself; `/aisdlc:clarify` and `/aisdlc:adr` are optional, for clarifying a goal or recording ADRs before the review.
