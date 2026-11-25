@@ -5,7 +5,7 @@ description: Design, implement, review, or secure production Express REST APIs i
 
 # Express REST API
 
-Skills are named `<plugin>:<skill>` (`/aisdlc:govern`, `aisdlc-nodejs:nodejs-standards`); in an agent without plugin namespaces, such as GitHub Copilot, use only the `<skill>` part, both to load a skill and when you tell the user what to run (`/aisdlc:govern` is `/govern`, `aisdlc-nodejs:nodejs-standards` is `nodejs-standards`).
+Skills are named `<plugin>:<skill>` (`/aisdlc:signoff`, `aisdlc-nodejs:nodejs-standards`); in an agent without plugin namespaces, such as GitHub Copilot, use only the `<skill>` part, both to load a skill and when you tell the user what to run (`/aisdlc:signoff` is `/signoff`, `aisdlc-nodejs:nodejs-standards` is `nodejs-standards`).
 
 Apply [`aisdlc-nodejs:nodejs-standards`](../nodejs-standards/SKILL.md) first. This skill adds Express and HTTP-specific guidance; it does not replace the plugin's runtime, structure, dependency-approval, lint, test, or coverage rules. Preserve a project's established contract and authentication system unless the task explicitly changes them.
 

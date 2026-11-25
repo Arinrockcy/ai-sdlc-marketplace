@@ -1854,10 +1854,10 @@ function requireStep(root, goal, step) {
     if (goal.status === 'completed') problems.push('goal is already completed');
   } else if (step === 'implement' || step === 'final') {
     if (goal.status === 'completed') problems.push('goal is already completed');
-    if (d.gate_govern !== 'passed') problems.push(`run /aisdlc:govern ${goal.id} first (gate_govern = ${d.gate_govern || 'pending'})`);
-    else if (!d.govern_fingerprint) problems.push(`governance passed before aisdlc 0.2.0, which records what it reviewed; re-run /aisdlc:govern ${goal.id}`);
+    if (d.gate_govern !== 'passed') problems.push(`run /aisdlc:signoff ${goal.id} first (gate_govern = ${d.gate_govern || 'pending'})`);
+    else if (!d.govern_fingerprint) problems.push(`governance passed before aisdlc 0.2.0, which records what it reviewed; re-run /aisdlc:signoff ${goal.id}`);
     else if (d.govern_fingerprint !== planFingerprint(root, goal)) {
-      problems.push(`the plan (goal, tasks, linked ADRs or plan rules) changed after governance passed; re-run /aisdlc:govern ${goal.id}`);
+      problems.push(`the plan (goal, tasks, linked ADRs or plan rules) changed after governance passed; re-run /aisdlc:signoff ${goal.id}`);
     }
     const p = goalProgress(listTasks(goal));
     if (!p.dag_ok) problems.push(`task DAG invalid: ${p.dag_errors.join('; ')}`);
@@ -1966,7 +1966,7 @@ function assertOpen(goal) {
 // Resets `from` and every later gate to pending, and archives the reviews that no longer count.
 function invalidate(goal, from) {
   const d = readDoc(goal.file).data;
-  const rerun = { adr: `/aisdlc:adr ${goal.id}`, govern: `/aisdlc:govern ${goal.id}`, final: `/aisdlc:govern ${goal.id} --final` };
+  const rerun = { adr: `/aisdlc:adr ${goal.id}`, govern: `/aisdlc:signoff ${goal.id}`, final: `/aisdlc:signoff ${goal.id} --final` };
   const patch = {};
   const notes = [];
   for (const gate of GATE_ORDER.slice(GATE_ORDER.indexOf(from))) {
@@ -2358,7 +2358,7 @@ const commands = {
     }
     if (status === 'completed') {
       if (!goalProgress(listTasks(g)).complete) fail(`${id} still has unfinished tasks; cannot complete.`);
-      if (activeRules(root, 'final').length && g.data.gate_final !== 'passed') fail(`${id} needs a passing final governance review; run /aisdlc:govern ${id} --final.`);
+      if (activeRules(root, 'final').length && g.data.gate_final !== 'passed') fail(`${id} needs a passing final governance review; run /aisdlc:signoff ${id} --final.`);
     }
     const dest = path.join(aisdlcDir(root), 'goals', status, path.basename(g.dir));
     if (dest !== g.dir) {
@@ -3077,13 +3077,13 @@ function linkAdr(root, adrId, goalId) {
   return invalidate(g, 'adr');
 }
 
-// The workflow step that moves a goal on: govern, implement, reopen, or null once completed. Challenge and the ADR
+// The workflow step that moves a goal on: signoff, implement, reopen, or null once completed. Challenge and the ADR
 // step are optional, because the plan review covers both.
 function nextStep(root, g) {
   const d = g.data;
   if (g.status === 'completed') return null;
   if (g.status === 'cancelled') return 'reopen';
-  if (d.gate_govern !== 'passed' || d.govern_fingerprint !== planFingerprint(root, g)) return 'govern';
+  if (d.gate_govern !== 'passed' || d.govern_fingerprint !== planFingerprint(root, g)) return 'signoff';
   return 'implement';
 }
 

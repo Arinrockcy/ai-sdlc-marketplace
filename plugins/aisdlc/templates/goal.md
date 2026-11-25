@@ -34,7 +34,7 @@ updated: {{date}}
 
 ## Risks & Unknowns
 
-<!-- Write each unanswered question as `- **Open:** <question>`. /aisdlc:govern fails GOV-05 while any remain. -->
+<!-- Write each unanswered question as `- **Open:** <question>`. /aisdlc:signoff fails GOV-05 while any remain. -->
 
 ## Standards deviations
 

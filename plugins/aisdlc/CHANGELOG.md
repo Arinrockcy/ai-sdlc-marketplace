@@ -2,6 +2,20 @@
 
 All notable changes to the `aisdlc` plugin. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/). Until 1.0.0, a minor version may include breaking changes; each one is listed under **Breaking** with its upgrade step.
 
+## [0.30.0] - 2026-11-25
+
+`/aisdlc:govern` is renamed `/aisdlc:signoff`: it is the one sign-off before implementing and after, now that it settles the ADR decision and asks the open questions itself.
+
+### Changed
+- The `govern` skill is now `signoff` (`/aisdlc:signoff`, `/signoff` in Copilot), with the same modes: no argument edits the rules, `<G-id>` runs the plan review, `<G-id> --final` the final review. Every skill, template, README line and script message names `/aisdlc:signoff`.
+- The gate, its fields, its hooks and its config keep their names (`govern`, `gate_govern`, `govern_fingerprint`, `pre_govern`, `post_govern`, `govern.auto_fix_rounds`), so existing `.aisdlc/` state works unchanged.
+
+### Deprecated
+- `/aisdlc:govern` stays for this release as a small skill that hands over to `signoff`. It will be removed in a later release.
+
+### Breaking
+- `goal show` and `goal list` report `next: signoff` instead of `next: govern`.
+
 ## [0.29.0] - 2026-11-24
 
 Governance comes first: the plan review no longer waits for challenge and the ADR step.

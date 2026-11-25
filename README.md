@@ -4,7 +4,7 @@ A stack-agnostic AI-SDLC workflow for Claude Code and GitHub Copilot. Its skills
 
 | Plugin | Purpose |
 |--------|---------|
-| `aisdlc` | Core workflow: init, create-goal, challenge, adr, govern, implement |
+| `aisdlc` | Core workflow: init, create-goal, challenge, adr, signoff, implement |
 | `aisdlc-nodejs` | Node.js stack: Node.js 24+, ES modules, coding standards, ESLint/coverage gates, SonarQube, vulnerability scans, and Express REST API/auth/JWT practices |
 | `dependency-guardian` | npm dependency scanner: finds vulnerable, deprecated and discouraged packages, CI-ready (`guardian.mjs scan`). Blocking unsafe agent-issued installs is planned, not yet available |
 
@@ -32,7 +32,7 @@ VS Code picks up plugins that Copilot CLI installed. To install them from VS Cod
 
 Install the plugin for each language the project uses. The workflow detects the project's languages from their marker files (each stack plugin declares its own) and registers every installed plugin by itself: `/aisdlc:init` does it at setup, and `/aisdlc:create-goal` and `/aisdlc:implement` pick up a plugin installed later. A repository with several languages gets each one's standards and task gate.
 
-Copilot doesn't namespace plugin skills, so drop the prefix from the commands below: `/aisdlc:govern G-001` is `/govern G-001`, and `/aisdlc-nodejs:nodejs-register` is `/nodejs-register`. `/init` is Copilot's own command, so start with a prompt such as `Use the aisdlc init skill` instead. A project skill of the same name (for example in `.github/skills/`) hides the plugin's, and when two installed plugins have skills of the same name, Copilot loads only one of them without a warning.
+Copilot doesn't namespace plugin skills, so drop the prefix from the commands below: `/aisdlc:signoff G-001` is `/signoff G-001`, and `/aisdlc-nodejs:nodejs-register` is `/nodejs-register`. `/init` is Copilot's own command, so start with a prompt such as `Use the aisdlc init skill` instead. A project skill of the same name (for example in `.github/skills/`) hides the plugin's, and when two installed plugins have skills of the same name, Copilot loads only one of them without a warning.
 
 The Node.js plugin also provides `/aisdlc-nodejs:express-rest-api` for designing, implementing, or reviewing Express endpoints, authentication, authorization, JWTs, sessions/tokens, and production API security.
 
@@ -53,12 +53,12 @@ Requires Node.js 24+. Graphify and the documentation index are optional; `/aisdl
 ```
 /aisdlc:init
 /aisdlc:create-goal <description>   → checks unfinished goals (merge / finish first / cancel / separate), intake questions, then goal + task DAG (waves, risk-first)
-/aisdlc:govern                      → edit project rules (no argument), with an optional rule catalog
-/aisdlc:govern G-001                → plan review, the first step after create-goal: settles the ADR decision, asks the open questions, then pass or fail against the plan-stage rules
+/aisdlc:signoff                      → edit project rules (no argument), with an optional rule catalog
+/aisdlc:signoff G-001                → plan review, the first step after create-goal: settles the ADR decision, asks the open questions, then pass or fail against the plan-stage rules
 /aisdlc:challenge G-001             → optional: one-question-at-a-time clarification before the review
 /aisdlc:adr G-001                   → optional: ADRs, or "none needed" with a reason, before the review
 /aisdlc:implement G-001 [--all]     → task by task in DAG order, with hooks
-/aisdlc:govern G-001 --final        → final review of the finished work (implement runs it; init seeds GOV-06, a final rule)
+/aisdlc:signoff G-001 --final        → final review of the finished work (implement runs it; init seeds GOV-06, a final rule)
 ```
 
 No step works from assumptions. When something is unclear or under-documented and the code doesn't answer it, the skill asks you, and answers are recorded under the goal's Clarifications.
@@ -160,6 +160,13 @@ See [`plugins/aisdlc/docs/stack-plugin-contract.md`](plugins/aisdlc/docs/stack-p
 
 Each plugin keeps a changelog: [`aisdlc`](plugins/aisdlc/CHANGELOG.md), [`aisdlc-nodejs`](plugins/aisdlc-nodejs/CHANGELOG.md). Breaking changes are listed there with their upgrade step.
 
+### 0.29.x → 0.30.0 (`aisdlc`)
+
+`/aisdlc:govern` is now `/aisdlc:signoff` (`/signoff` in Copilot). Nothing in `.aisdlc/` changes: the gate is still `govern` (`gate_govern`, `govern_fingerprint`, `gate require <G-id> govern`), the hooks are still `pre_govern` and `post_govern`, and `govern.auto_fix_rounds` keeps its name.
+
+- Use `/aisdlc:signoff` in your docs, scripts and agent instructions. `/aisdlc:govern` still works for this release and hands over to `signoff`.
+- `goal show` and `goal list` now report `next: signoff` instead of `next: govern`. Update anything that matches on that value.
+
 ### 0.26.x → 0.27.0 (`aisdlc`)
 
 Every change records who made it.
@@ -181,7 +188,7 @@ The plan gate runs every pending verify itself.
 
 The plan review names what checks every task criterion.
 
-- A `governance-review.md` written before the upgrade has no `## Verify coverage` table, so `gate set <G-id> govern passed` refuses it. Start the review again: `$AISDLC gate set <G-id> govern pending`, then `$AISDLC governance review <G-id>`, or simply re-run `/aisdlc:govern <G-id>`. Goals that already passed governance keep their result.
+- A `governance-review.md` written before the upgrade has no `## Verify coverage` table, so `gate set <G-id> govern passed` refuses it. Start the review again: `$AISDLC gate set <G-id> govern pending`, then `$AISDLC governance review <G-id>`, or simply re-run `/aisdlc:signoff <G-id>`. Goals that already passed governance keep their result.
 - The table is only written and required while an active plan rule uses the `tasks-verifiable` check (GOV-02 in the baseline).
 - Before governing a goal planned earlier, run `$AISDLC task precheck <G-id>` and strengthen every verify in `passes_now`: the review now fails the rule for each one.
 
@@ -348,9 +355,9 @@ Goal and ADR files need no edits.
 Update the plugin, then in each project that already has `.aisdlc/`:
 
 1. **Write a note on every review row.** A governance review in progress needs a note on each `pass` row too, citing the evidence, before `gate set … passed` accepts it. Gates that already passed are not re-checked.
-2. **Turn on the new checks (recommended).** Run `/aisdlc:govern`: it offers both. By hand:
-   - `node <plugin>/scripts/aisdlc.mjs governance set GOV-05 check questions-resolved`. Unanswered questions under Risks & Unknowns then need the form `- **Open:** <question>`. This changes a plan rule, so goals past governance but not completed need `/aisdlc:govern <G-id>` again before their next task.
-   - `node <plugin>/scripts/aisdlc.mjs governance add "The finished code meets every acceptance criterion of the goal and of each done task." --severity must --stage final --check criteria-met`. Goals in progress then need the final review (`/aisdlc:govern <G-id> --final`, which `/aisdlc:implement` runs) before they complete.
+2. **Turn on the new checks (recommended).** Run `/aisdlc:signoff`: it offers both. By hand:
+   - `node <plugin>/scripts/aisdlc.mjs governance set GOV-05 check questions-resolved`. Unanswered questions under Risks & Unknowns then need the form `- **Open:** <question>`. This changes a plan rule, so goals past governance but not completed need `/aisdlc:signoff <G-id>` again before their next task.
+   - `node <plugin>/scripts/aisdlc.mjs governance add "The finished code meets every acceptance criterion of the goal and of each done task." --severity must --stage final --check criteria-met`. Goals in progress then need the final review (`/aisdlc:signoff <G-id> --final`, which `/aisdlc:implement` runs) before they complete.
 3. **Run `/aisdlc:init` again.** It creates the `goals/cancelled/` folder. `state move … cancelled` also creates it when needed.
 4. **Check any tooling around `.aisdlc/`.** Completed goals now refuse every change, and `state move` fails when `--reason` is given for a state other than `cancelled`.
 5. **Check for started goals sitting in `pending`.** `state move` now only allows these moves: pending → in-progress or cancelled; in-progress → blocked, completed, cancelled, or pending (only before any task starts); blocked → in-progress or cancelled; cancelled → pending or blocked. A goal that 0.2.0 moved back to `pending` after a task started keeps working, but `challenge` and the create-goal merge will re-plan work already done. Move it on with `/aisdlc:implement <G-id>`, which moves it to in-progress. `challenge` also refuses blocked goals now.
@@ -361,8 +368,8 @@ Goal files from 0.2.0 need no edits. A missing `cancel_reason` field counts as e
 
 Update the plugin, then in each project that already has `.aisdlc/`:
 
-1. **Re-govern goals that already passed.** Run `/aisdlc:govern <G-id>` for every goal that is past governance but not completed. 0.2.0 records what each review covered, and older reviews have no such record. Until you re-govern, `/aisdlc:implement` refuses with "governance passed before aisdlc 0.2.0". The earlier review is archived as `governance-review.stale-N.md`. Completed goals need nothing.
-2. **Turn on the automatic checks (recommended).** Your `governance.md` keeps working as it is: every rule becomes a `plan` rule with no check. To get the checks new projects start with, run `/aisdlc:govern` and ask it to set these checks (or run the script's `governance set <id> check <name>` yourself):
+1. **Re-govern goals that already passed.** Run `/aisdlc:signoff <G-id>` for every goal that is past governance but not completed. 0.2.0 records what each review covered, and older reviews have no such record. Until you re-govern, `/aisdlc:implement` refuses with "governance passed before aisdlc 0.2.0". The earlier review is archived as `governance-review.stale-N.md`. Completed goals need nothing.
+2. **Turn on the automatic checks (recommended).** Your `governance.md` keeps working as it is: every rule becomes a `plan` rule with no check. To get the checks new projects start with, run `/aisdlc:signoff` and ask it to set these checks (or run the script's `governance set <id> check <name>` yourself):
 
    | Rule | Check |
    |------|-------|
@@ -372,7 +379,7 @@ Update the plugin, then in each project that already has `.aisdlc/`:
    | GOV-04 | `adr-recorded` |
 
    The first change rewrites the rules table in the new `ID | Rule | Severity | Stage | Check` format and keeps the rest of the file. With checks on, re-governing fails any goal whose `goal.md` lacks a Problem or acceptance criteria, or whose tasks lack acceptance criteria or a `verify` command. Fill those in first.
-3. **Optionally add final-stage rules.** `/aisdlc:govern` now offers a rule catalog. Rules with stage `final` are checked against the finished code before a goal completes. Goals in progress pick them up automatically, so their completion then needs `/aisdlc:govern <G-id> --final`.
+3. **Optionally add final-stage rules.** `/aisdlc:signoff` now offers a rule catalog. Rules with stage `final` are checked against the finished code before a goal completes. Goals in progress pick them up automatically, so their completion then needs `/aisdlc:signoff <G-id> --final`.
 4. **Check any tooling around `.aisdlc/`.** If you have scripts that depend on the following, update them:
    - `governance-review.stale.md`: archives are now numbered.
    - `task verify` passing a task that has no verify command and no `after_task` hook: it now requires `--evidence`.

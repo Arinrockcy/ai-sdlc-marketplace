@@ -6,7 +6,7 @@ argument-hint: "<goal description>"
 
 # aisdlc: create-goal
 
-`$AISDLC` below means `node "${CLAUDE_PLUGIN_ROOT}/scripts/aisdlc.mjs"`. Run it from the project root. Where a path in this skill still starts with an unexpanded variable, that variable stands for this plugin's folder: two levels above the folder that holds this SKILL.md. Skills are named `<plugin>:<skill>` (`/aisdlc:govern`, `aisdlc-nodejs:nodejs-standards`); in an agent without plugin namespaces, such as GitHub Copilot, use only the `<skill>` part, both to load a skill and when you tell the user what to run (`/aisdlc:govern` is `/govern`, `aisdlc-nodejs:nodejs-standards` is `nodejs-standards`).
+`$AISDLC` below means `node "${CLAUDE_PLUGIN_ROOT}/scripts/aisdlc.mjs"`. Run it from the project root. Where a path in this skill still starts with an unexpanded variable, that variable stands for this plugin's folder: two levels above the folder that holds this SKILL.md. Skills are named `<plugin>:<skill>` (`/aisdlc:signoff`, `aisdlc-nodejs:nodejs-standards`); in an agent without plugin namespaces, such as GitHub Copilot, use only the `<skill>` part, both to load a skill and when you tell the user what to run (`/aisdlc:signoff` is `/signoff`, `aisdlc-nodejs:nodejs-standards` is `nodejs-standards`).
 
 **Don't assume.** If something this step needs is unclear, missing or under-documented, and neither the code nor the `.aisdlc/` files answer it, ask the user. Never fill a gap with a guess or a silent default.
 
@@ -42,7 +42,7 @@ Never pick for the user, even when the overlap looks obvious. Record the choice 
 2. Extend Problem, Outcome / Acceptance Criteria, Scope and Risks & Unknowns with the new scope. Don't remove or reword existing content unless the user agrees. If the title no longer fits, ask whether to change it (`$AISDLC goal set <G-id> title "<title>"`).
 3. Add the new tasks as in section 4 (`task new` resets the govern gate if it had passed).
 4. The merged scope hasn't been through challenge or ADRs yet. If `gates.challenge` is `done`, run `$AISDLC gate set <G-id> challenge pending`. If `gates.adr` is `done`, run `$AISDLC gate set <G-id> adr pending`. Relay the `notes`.
-5. Continue with section 5, then section 6 for the merged goal. The next step is `/aisdlc:govern <G-id>`.
+5. Continue with section 5, then section 6 for the merged goal. The next step is `/aisdlc:signoff <G-id>`.
 
 ## 2. Intake questions (before writing the goal)
 Before you write anything, find the gaps in the description and ask the user about them. Don't write a goal the user didn't describe.
@@ -86,9 +86,9 @@ To change a task afterwards, use `task edit` or `task remove` as `/aisdlc:challe
 - Review the waves. If one wave holds one huge task, or the graph is a single long chain, reconsider the split.
 - Check the verify commands, so the plan review doesn't have to find what you can find now:
   - Run `$AISDLC task precheck <G-id>`. It runs each task's `verify` on the code as it is now, before the task's work, clause by clause, and records nothing. A task in `passes_now` has a verify that already passes, so it proves nothing about that work: strengthen it with `$AISDLC task edit <G-id> <T-id> verify "<command>"` until it fails for what the task adds (a new test, file or text), unless every criterion of the task is about something that must stay as it is. For a task that `fails`, `failed` names the clause that failed. With `cause: environment` it failed for a missing tool, service or setting, which says nothing about the criteria: judge the clauses from there on by reading them.
-  - Go through each task criterion by criterion and name the part of its `verify`, or of the `after_task` hook, that fails while that criterion is unmet. Where nothing does, add a clause to the verify and say in the criterion what checks it. To show that a named test exists and passes, run it with the test runner's name filter (`jest -t '<name>'`, `vitest run -t '<name>'`, `pytest -k '<name>'`, or `node --test --test-isolation=none --test-name-pattern '<name>'`) rather than grepping for a comment: the script fails a filter that matches no test, so the clause fails until the test is written. `/aisdlc:govern` asks the same of every criterion, so a gap left here comes back as a failed review. If you can't tell how a criterion could be checked, ask the user.
+  - Go through each task criterion by criterion and name the part of its `verify`, or of the `after_task` hook, that fails while that criterion is unmet. Where nothing does, add a clause to the verify and say in the criterion what checks it. To show that a named test exists and passes, run it with the test runner's name filter (`jest -t '<name>'`, `vitest run -t '<name>'`, `pytest -k '<name>'`, or `node --test --test-isolation=none --test-name-pattern '<name>'`) rather than grepping for a comment: the script fails a filter that matches no test, so the clause fails until the test is written. `/aisdlc:signoff` asks the same of every criterion, so a gap left here comes back as a failed review. If you can't tell how a criterion could be checked, ask the user.
 
 ## 6. Finish
 - Run `$AISDLC registry sync`, then `$AISDLC hooks run post_create_goal`.
 - Show the user the goal ID, the wave table from `tasks.md` and the open questions.
-- Next step: `/aisdlc:govern <G-id>`. The gated order is govern → implement. The plan review asks the open questions and settles the ADR decision itself; `/aisdlc:challenge` and `/aisdlc:adr` are optional, for clarifying a goal or recording ADRs before the review.
+- Next step: `/aisdlc:signoff <G-id>`. The gated order is signoff → implement. The plan review asks the open questions and settles the ADR decision itself; `/aisdlc:challenge` and `/aisdlc:adr` are optional, for clarifying a goal or recording ADRs before the review.

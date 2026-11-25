@@ -888,10 +888,10 @@ test('cli: a plan change after governance passed needs a new review; progress do
   // A new task resets governance and archives the review without overwriting older archives.
   const added = run(['task', 'new', 'G-001', 'Extra', '--verify', REAL_VERIFY]);
   assert.deepEqual(added.json.notes, [
-    'gate_govern reset to pending; re-run /aisdlc:govern G-001',
+    'gate_govern reset to pending; re-run /aisdlc:signoff G-001',
     'governance-review.md is now stale (moved to governance-review.stale-1.md)',
   ]);
-  assert.match(run(['task', 'set', 'G-001', 'T-02', 'in-progress']).stderr, /run \/aisdlc:govern G-001 first/);
+  assert.match(run(['task', 'set', 'G-001', 'T-02', 'in-progress']).stderr, /run \/aisdlc:signoff G-001 first/);
   fill(path.join(dir, added.json.file));
   writeReview(goalDir, 'G-001');
   run(['gate', 'set', 'G-001', 'govern', 'passed']);
@@ -906,7 +906,7 @@ test('cli: linking another ADR after the adr gate reopens it', () => {
   run(['init']);
   governedGoal(run, dir, [['A']]);
   const r = run(['adr', 'new', 'Use', 'Redis', '--goal', 'G-001']);
-  assert.deepEqual(r.json.notes.slice(0, 2), ['gate_adr reset to pending; re-run /aisdlc:adr G-001', 'gate_govern reset to pending; re-run /aisdlc:govern G-001']);
+  assert.deepEqual(r.json.notes.slice(0, 2), ['gate_adr reset to pending; re-run /aisdlc:adr G-001', 'gate_govern reset to pending; re-run /aisdlc:signoff G-001']);
   assert.equal(run(['goal', 'show', 'G-001']).json.gates.adr, 'pending');
   assert.equal(run(['adr', 'link', 'ADR-001', 'G-001']).json.notes.length, 0, 'an existing link changes nothing');
 });
@@ -1212,12 +1212,12 @@ test('cli: goal list and show name the next step from status and gates', () => {
   run(['goal', 'new', 'A']);
   const next = () => run(['goal', 'show', 'G-001']).json.next;
   // Govern is the first step; challenge and the ADR step are optional and never named as next.
-  assert.equal(next(), 'govern');
+  assert.equal(next(), 'signoff');
   run(['gate', 'set', 'G-001', 'challenge', 'done']);
-  assert.equal(next(), 'govern');
+  assert.equal(next(), 'signoff');
   run(['adr', 'none', 'G-001', '--reason', 'no decision']);
   run(['gate', 'set', 'G-001', 'adr', 'done']);
-  assert.equal(run(['goal', 'list']).json[0].next, 'govern');
+  assert.equal(run(['goal', 'list']).json[0].next, 'signoff');
   run(['state', 'move', 'G-001', 'cancelled', '--reason', 'x']);
   assert.equal(next(), 'reopen');
 });

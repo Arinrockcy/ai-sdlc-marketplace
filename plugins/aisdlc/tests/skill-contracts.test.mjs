@@ -22,28 +22,28 @@ const MUST = [
   ['create-goal', /Do \*\*not\*\* guess answers/, 'create-goal does not guess answers'],
   ['create-goal', /Never pick for the user/, 'create-goal never picks between merge, finish and separate'],
   ['create-goal', /\$AISDLC goal overlap/, 'create-goal checks overlap with unfinished goals'],
-  ['govern', /\*\*Never assume\.\*\*/, 'the reviewer never assumes'],
-  ['govern', /## Questions for the user/, 'gaps become questions for the user'],
-  ['govern', /Recommended: /, 'the reviewer gives a recommendation with each question'],
-  ['govern', /recommendation is advice, never the answer/, 'a recommendation is not an answer'],
-  ['govern', /fresh eyes/i, 'the review runs in a sub-agent or fresh session'],
-  ['govern', /\$AISDLC question add <G-id> "<question>" --answer "<the user's answer>" --by user/, 'govern records answers as the user\'s'],
-  ['govern', /\$AISDLC goal overlap <G-id>/, 'govern checks overlap'],
-  ['govern', /\$AISDLC task precheck <G-id>`/, 'the reviewer runs every verify before the work'],
-  ['govern', /Fill in every row of `## Verify coverage`/, 'the reviewer names what checks every criterion'],
-  ['govern', /never a sample/, 'the review of verify commands covers every criterion'],
-  ['govern', /\$AISDLC task precheck <G-id> <T-id>/, 'a task changed by an answer or fix is re-checked before the next review'],
+  ['signoff', /\*\*Never assume\.\*\*/, 'the reviewer never assumes'],
+  ['signoff', /## Questions for the user/, 'gaps become questions for the user'],
+  ['signoff', /Recommended: /, 'the reviewer gives a recommendation with each question'],
+  ['signoff', /recommendation is advice, never the answer/, 'a recommendation is not an answer'],
+  ['signoff', /fresh eyes/i, 'the review runs in a sub-agent or fresh session'],
+  ['signoff', /\$AISDLC question add <G-id> "<question>" --answer "<the user's answer>" --by user/, 'govern records answers as the user\'s'],
+  ['signoff', /\$AISDLC goal overlap <G-id>/, 'govern checks overlap'],
+  ['signoff', /\$AISDLC task precheck <G-id>`/, 'the reviewer runs every verify before the work'],
+  ['signoff', /Fill in every row of `## Verify coverage`/, 'the reviewer names what checks every criterion'],
+  ['signoff', /never a sample/, 'the review of verify commands covers every criterion'],
+  ['signoff', /\$AISDLC task precheck <G-id> <T-id>/, 'a task changed by an answer or fix is re-checked before the next review'],
   ['create-goal', /\$AISDLC task precheck <G-id>/, 'create-goal runs every verify before the work'],
-  ['govern', /Start each fix with `\(auto\)`/, 'the reviewer tags fixes that need no choice'],
-  ['govern', /\*\*Fix it without the user\*\* when `auto_fix` is true/, 'govern fixes and re-reviews mechanical failures on its own'],
-  ['govern', /repeats a fix from the last one/, 'the auto-fix loop stops when a fix does not hold'],
-  ['govern', /exempt it with a `- <T-id>: <why>` line/, 'a verify that must pass before the work is exempted in writing'],
+  ['signoff', /Start each fix with `\(auto\)`/, 'the reviewer tags fixes that need no choice'],
+  ['signoff', /\*\*Fix it without the user\*\* when `auto_fix` is true/, 'govern fixes and re-reviews mechanical failures on its own'],
+  ['signoff', /repeats a fix from the last one/, 'the auto-fix loop stops when a fix does not hold'],
+  ['signoff', /exempt it with a `- <T-id>: <why>` line/, 'a verify that must pass before the work is exempted in writing'],
   ['challenge', /\*\*Code-reading pass\.\*\*/, 'challenge reads the code each task touches for design questions'],
   ['challenge', /but not your own reading of the plan/, 'the code reader gets fresh eyes'],
-  ...['create-goal', 'challenge', 'govern'].map((skill) => [skill, /rather than grepping for a comment/, 'a named test is checked with the runner\'s name filter']),
+  ...['create-goal', 'challenge', 'signoff'].map((skill) => [skill, /rather than grepping for a comment/, 'a named test is checked with the runner\'s name filter']),
   ['challenge', /\$AISDLC task precheck <G-id>/, 'challenge runs every verify before the work'],
   ...['create-goal', 'challenge'].map((skill) => [skill, /name the part of its `verify`, or of the `after_task` hook, that fails while that criterion is unmet/, 'planning names what checks each criterion']),
-  ...['create-goal', 'challenge', 'adr', 'implement', 'govern'].flatMap((skill) => [
+  ...['create-goal', 'challenge', 'adr', 'implement', 'signoff'].flatMap((skill) => [
     [skill, /\$AISDLC docs search <keywords>/, 'documentation is searched before it is read'],
     [skill, /never read the index in `\.aisdlc\/cache\/`/i, 'the documentation index is never read whole'],
   ]),
@@ -81,7 +81,7 @@ test('skill contracts: no skill tells the agent to do what the workflow forbids'
 });
 
 test('skill contracts: the question tool is how answers get collected, never the model\'s own text', () => {
-  for (const name of ['challenge', 'govern', 'create-goal']) {
+  for (const name of ['challenge', 'signoff', 'create-goal']) {
     assert.match(read(name), /structured question tool|Ask the user/i, `${name} asks the user`);
   }
 });

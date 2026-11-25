@@ -1,6 +1,6 @@
 # Governance Rule Catalog
 
-Optional rules `/aisdlc:govern` (no argument) offers. The user picks which to add and can change the wording, severity or stage. Nothing here applies until it is added to `.aisdlc/governance.md`.
+Optional rules `/aisdlc:signoff` (no argument) offers. The user picks which to add and can change the wording, severity or stage. Nothing here applies until it is added to `.aisdlc/governance.md`.
 
 | Topic | Rule | Suggested severity | Stage |
 |-------|------|--------------------|-------|

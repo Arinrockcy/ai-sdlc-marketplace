@@ -1,10 +1,10 @@
 # Governance
 
 Rules every goal must satisfy. Each rule has an ID so reviews can reference it.
-Edit via `/aisdlc:govern` (no argument), which uses `aisdlc.mjs governance add|set`. Never delete or renumber a rule; set its severity to `retired` instead.
+Edit via `/aisdlc:signoff` (no argument), which uses `aisdlc.mjs governance add|set`. Never delete or renumber a rule; set its severity to `retired` instead.
 
 - **Severity:** `must` blocks the gate when it fails, `should` is reported but does not block, `retired` is no longer checked.
-- **Stage:** `plan` rules are reviewed by `/aisdlc:govern <G-id>` before implementation. `final` rules are reviewed by `/aisdlc:govern <G-id> --final` against the finished work, before the goal completes.
+- **Stage:** `plan` rules are reviewed by `/aisdlc:signoff <G-id>` before implementation. `final` rules are reviewed by `/aisdlc:signoff <G-id> --final` against the finished work, before the goal completes.
 - **Check:** an automatic check the script runs (`goal-defined`, `tasks-verifiable`, `dag-valid`, `adr-recorded`, `questions-resolved`, `criteria-met`), or `-`. A review cannot mark a rule `pass` or `n/a` while its check fails.
 
 ## Rules

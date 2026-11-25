@@ -8,7 +8,7 @@ A plugin marketplace for Claude Code and GitHub Copilot that ships a stack-agnos
 - `plugins/aisdlc`: the core plugin
 - `plugins/aisdlc-nodejs`: a reference stack plugin
 
-Skills must stay agent-neutral markdown, because GitHub Copilot loads the same plugins, and Codex and Cursor adapters are planned. Put Claude-specific details only in path variables (`${CLAUDE_PLUGIN_ROOT}`, `$ARGUMENTS`). Copilot leaves those variables as written (it shows the model the skill's folder instead) and doesn't namespace skills (`/govern`, not `/aisdlc:govern`; its skill tool loads `nodejs-standards`, not `aisdlc-nodejs:nodejs-standards`), so:
+Skills must stay agent-neutral markdown, because GitHub Copilot loads the same plugins, and Codex and Cursor adapters are planned. Put Claude-specific details only in path variables (`${CLAUDE_PLUGIN_ROOT}`, `$ARGUMENTS`). Copilot leaves those variables as written (it shows the model the skill's folder instead) and doesn't namespace skills (`/signoff`, not `/aisdlc:signoff`; its skill tool loads `nodejs-standards`, not `aisdlc-nodejs:nodejs-standards`), so:
 - A skill that uses one of them, a `plugin:skill` name, or the `standards_skills` from `detect-stack` keeps the preamble sentence that says what it stands for. `tests/skills.test.mjs` checks this.
 - A step that hands work to a sub-agent passes the resolved `$AISDLC` command: the sub-agent doesn't see the skill's folder.
 - Frontmatter must parse as strict YAML: quote a value that contains `: `. Claude Code accepts it unquoted, but Copilot skips the skill.
@@ -55,7 +55,7 @@ Skills call the script (written `$AISDLC` in the skill files) and should never h
 - `registry.md`, `registry-archive.md` and `tasks.md` are generated views. Rebuild them rather than editing them. `registry.md` holds unfinished goals and every ADR. Finished goals go to the archive, so the file skills read whole only grows with open work.
 - Skills must not read an index that grows without bound (the archive, `GRAPH_REPORT.md`, the documentation index in `.aisdlc/cache/`, unfiltered `goal list`) in full. Filter it with the script, search it, or query it.
 
-**Strict gating** (`requireStep`/`setGate`): govern → implement. Govern needs no earlier gate: its plan review settles the ADR decision first and asks the open questions itself. Challenge and adr are optional steps that may run before or after it (each still resets govern). GOV-04 (`adr-recorded`) is what keeps a review from passing without an ADR decision.
+**Strict gating** (`requireStep`/`setGate`): govern → implement (the govern gate is what `/aisdlc:signoff` sets; it kept its name when the skill was renamed in 0.30.0). Govern needs no earlier gate: its plan review settles the ADR decision first and asks the open questions itself. Challenge and adr are optional steps that may run before or after it (each still resets govern). GOV-04 (`adr-recorded`) is what keeps a review from passing without an ADR decision.
 - `adr done` requires a linked ADR that is `accepted` (or `superseded`), or `adrs: none` plus `adr_reason`.
 - Rules in `governance.md` are rows of `ID | Rule | Severity | Stage | Check`, changed only through `governance add|set`:
   - Severity is `must|should|retired`. A bad value fails loudly.
@@ -97,11 +97,11 @@ These were settled with the repo owner:
 - No skill assumes. Anything unclear or under-documented that the code doesn't answer is asked, never guessed or defaulted silently.
 - `/aisdlc:create-goal` first checks for unfinished goals (pending, in-progress, blocked). It asks whether to merge into a pending goal, finish or cancel an unfinished one first, or create a separate goal, and never picks for the user. Merge is offered only for `pending` goals, because in-progress and blocked goals can't be re-challenged. A merge resets the challenge and adr gates.
 - `/aisdlc:create-goal` then asks intake questions about the gaps in the description, before writing the goal. Answers go under Clarifications so challenge doesn't repeat them.
-- `/aisdlc:govern <G-id>` is the first step after `/aisdlc:create-goal` (decided by the repo owner 2026-11-24, replacing challenge → adr → govern). Before its review it settles the ADR decision with the user, and on a goal no challenge or earlier review has read, the reviewer also does the code-reading pass, turning what it finds into questions for the user. `/aisdlc:challenge` and `/aisdlc:adr` stay as optional steps.
+- `/aisdlc:signoff <G-id>` is the first step after `/aisdlc:create-goal` (decided by the repo owner 2026-11-24, replacing challenge → adr → govern). Before its review it settles the ADR decision with the user, and on a goal no challenge or earlier review has read, the reviewer also does the code-reading pass, turning what it finds into questions for the user. `/aisdlc:challenge` and `/aisdlc:adr` stay as optional steps.
 - `/aisdlc:challenge` is clarification Q&A, one question at a time. It is not a critique.
 - There is no governance waiver.
 - Governance has two stages. `plan` rules gate implementation. `final` rules gate completion, and `/aisdlc:implement` runs the final review itself.
-- `init` seeds GOV-06 (`must`, `final`, check `criteria-met`), so finished code is reviewed against its acceptance criteria by default. Init also offers `/aisdlc:govern` for the project's own rules.
+- `init` seeds GOV-06 (`must`, `final`, check `criteria-met`), so finished code is reviewed against its acceptance criteria by default. Init also offers `/aisdlc:signoff` for the project's own rules.
 - Every review row needs a note, and a `pass` note cites evidence. Reviews run in a sub-agent or fresh session when the agent supports one.
 - A verify command has to fail until its task's work is done, and a weak one is found early and all at once. `task precheck` runs each pending task's verify on the code as it is and records nothing; `/aisdlc:create-goal`, `/aisdlc:challenge` and the plan review run it. The plan review covers every task criterion in `## Verify coverage`, never a sample, and a task changed by an answer or a fix is re-checked before the review runs again.
 - A failed plan review with no question and every Required Fix tagged `(auto)` (written out in full, no choice) is fixed and re-reviewed by the session on its own, with a fresh reviewer each round, up to `govern.auto_fix_rounds` (default 2, `0` off). It stops for the user when a fix comes back. Anything that offers options, or changes Scope, a goal criterion or an ADR, is `(ask)` and goes to the user.
@@ -110,7 +110,7 @@ These were settled with the repo owner:
 - Unanswered questions are recorded as `- **Open:** …` under Risks & Unknowns, and the `questions-resolved` check on GOV-05 fails while any remain.
 - Goals can be cancelled and reopened. A cancel always records the user's reason, and the `## Cancellations` log keeps every one for good. A started goal never returns to `pending`. It takes new scope only as new tasks, which reset governance. Several goals may be in progress at once: `/aisdlc:implement` warns before `before_goal` switches branches under another goal and asks, but never refuses.
 - A task added after governance passed (including one discovered mid-implement) resets governance. Implement stops until the goal is re-governed.
-- `/aisdlc:govern` offers `templates/governance-catalog.md` rules as choices and never adds one silently. `governance add` requires an explicit severity and stage.
+- `/aisdlc:signoff` offers `templates/governance-catalog.md` rules as choices and never adds one silently. `governance add` requires an explicit severity and stage.
 - `/aisdlc:implement` runs one task per invocation unless `--all` or `implement.mode: "auto"` is set.
 - A goal auto-completes once all tasks pass.
 - Stacks are detected, not chosen. Init registers every detected stack whose plugin is installed without asking, and `/aisdlc:create-goal` and `/aisdlc:implement` register a stack plugin installed later (mid-goal, implement asks first). A repository can have several active stacks.

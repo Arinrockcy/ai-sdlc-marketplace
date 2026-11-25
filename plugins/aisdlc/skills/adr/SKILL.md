@@ -6,7 +6,7 @@ argument-hint: "<G-id>"
 
 # aisdlc: adr
 
-`$AISDLC` below means `node "${CLAUDE_PLUGIN_ROOT}/scripts/aisdlc.mjs"`. Run it from the project root. Where a path in this skill still starts with an unexpanded variable, that variable stands for this plugin's folder: two levels above the folder that holds this SKILL.md. Skills are named `<plugin>:<skill>` (`/aisdlc:govern`, `aisdlc-nodejs:nodejs-standards`); in an agent without plugin namespaces, such as GitHub Copilot, use only the `<skill>` part, both to load a skill and when you tell the user what to run (`/aisdlc:govern` is `/govern`, `aisdlc-nodejs:nodejs-standards` is `nodejs-standards`).
+`$AISDLC` below means `node "${CLAUDE_PLUGIN_ROOT}/scripts/aisdlc.mjs"`. Run it from the project root. Where a path in this skill still starts with an unexpanded variable, that variable stands for this plugin's folder: two levels above the folder that holds this SKILL.md. Skills are named `<plugin>:<skill>` (`/aisdlc:signoff`, `aisdlc-nodejs:nodejs-standards`); in an agent without plugin namespaces, such as GitHub Copilot, use only the `<skill>` part, both to load a skill and when you tell the user what to run (`/aisdlc:signoff` is `/signoff`, `aisdlc-nodejs:nodejs-standards` is `nodejs-standards`).
 
 **Don't assume.** If something this step needs is unclear, missing or under-documented, and neither the code nor the `.aisdlc/` files answer it, ask the user. Never fill a gap with a guess or a silent default. If the context a decision depends on (scale, constraints, who owns what) isn't recorded, ask before you write options.
 
@@ -27,4 +27,4 @@ ADRs are project-wide and live in `.aisdlc/adr/ADR-NNN-slug.md` (Nygard format).
 6. If there are no candidates, confirm with the user. Then run `$AISDLC adr none <G-id> --reason "<why>"`. This also removes the goal from any ADRs it was linked to before.
 7. Update the tasks the decisions affect, then run `$AISDLC dag write <G-id>`.
 8. Run `$AISDLC gate set <G-id> adr done`. Linking a new ADR (or recording `none`) on a goal whose adr gate was already done resets that gate and every gate after it. The command's `notes` say so, so always finish with this step. The script refuses if no ADR is linked and no `none` reason is recorded, or if a linked ADR is not `accepted` (or `superseded`). A `proposed` ADR means the user hasn't agreed yet; settle it with them first.
-9. Run `$AISDLC hooks run post_adr`. The next step is `/aisdlc:govern <G-id>`.
+9. Run `$AISDLC hooks run post_adr`. The next step is `/aisdlc:signoff <G-id>`.
