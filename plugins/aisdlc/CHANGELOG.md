@@ -2,6 +2,17 @@
 
 All notable changes to the `aisdlc` plugin. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/). Until 1.0.0, a minor version may include breaking changes; each one is listed under **Breaking** with its upgrade step.
 
+## [0.32.0] - 2026-11-25
+
+Clarify asks everything up front, and each answer reaches the tasks it changes.
+
+### Added
+- `question add|resolve … --answer "…" --by user --tasks T-01,T-02` names the tasks an answer changes. The goal's Clarifications line ends with `(tasks: T-01, T-02)`, each of those task files gets a copy of the answer under its own `## Clarifications` (created before `## Notes`), and the decision log names the tasks. It refuses an unknown task, a `done` or `skipped` task, and `--tasks` without `--answer`. The question scan doesn't read a task's Clarifications for placeholders, since they hold settled answers.
+
+### Changed
+- `/aisdlc:clarify` shows the whole numbered list of questions first, with the tasks each touches, then asks them in groups of up to 4 (with options and a recommendation each), recording every answer before the next round. A question that decides what another means gets its own earlier round. The user may skip any question or stop. It replaces asking one question at a time.
+- `/aisdlc:clarify` and `/aisdlc:signoff` pass `--tasks` with every answer that changes a task.
+
 ## [0.31.0] - 2026-11-25
 
 `/aisdlc:challenge` is renamed `/aisdlc:clarify`: it was always clarification Q&A, never a critique.

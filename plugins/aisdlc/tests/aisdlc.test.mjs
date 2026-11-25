@@ -2056,6 +2056,37 @@ test('verify: a command that passes but runs no tests does not verify the task',
   assert.match(v.stderr, /ran no tests, so it proves nothing/);
 });
 
+test('question: --tasks tags an answer with the tasks it changes and copies it into each of them', () => {
+  const { run, dir } = project();
+  run(['init']);
+  const g = run(['goal', 'new', 'Tagged']).json;
+  const goalFile = path.join(dir, g.file);
+  const t1 = run(['task', 'new', g.id, 'First', '--verify', 'true']).json;
+  const t2 = run(['task', 'new', g.id, 'Second', '--depends', 'T-01']).json;
+  const taskText = (t) => fs.readFileSync(path.join(dir, t.file), 'utf8');
+
+  run(['question', 'add', g.id, 'Which store?']);
+  const resolved = run(['question', 'resolve', g.id, 'Q-1', '--answer', 'SQL Server', '--by', 'user', '--tasks', 'T-01,T-02']).json;
+  assert.deepEqual(resolved.tasks, ['T-01', 'T-02']);
+  assert.match(fs.readFileSync(goalFile, 'utf8'), /- \*\*Q:\*\* Q-1: Which store\? \*\*A \(user\):\*\* SQL Server \(tasks: T-01, T-02\)/);
+  for (const t of [t1, t2]) {
+    assert.match(taskText(t), /## Clarifications\n\n- \*\*Q:\*\* Q-1: Which store\? \*\*A \(user\):\*\* SQL Server \(from G-001's Clarifications\)\n\n## Notes/, `${t.id} gets the answer before its Notes`);
+  }
+
+  const added = run(['question', 'add', g.id, 'Retries?', '--answer', 'From settings, TBD per vendor', '--by', 'user', '--tasks', 'T-02']).json;
+  assert.deepEqual([added.id, added.tasks], ['Q-2', ['T-02']]);
+  assert.match(taskText(t2), /Q-1: [^\n]*\n- \*\*Q:\*\* Q-2: Retries\?/, 'a second answer goes under the same section');
+  assert.doesNotMatch(taskText(t1), /Q-2/);
+  assert.deepEqual(run(['question', 'list', g.id]).json.placeholders, [], 'a copied answer is settled, not a gap');
+  assert.match(fs.readFileSync(path.join(path.dirname(goalFile), 'decisions.md'), 'utf8'), /Q-2 answered: Retries\? → From settings, TBD per vendor \(tasks: T-02\)/);
+
+  assert.match(run(['question', 'add', g.id, 'Unknown?', '--answer', 'x', '--by', 'user', '--tasks', 'T-09']).stderr, /has no task T-09/);
+  assert.match(run(['question', 'add', g.id, 'Bad?', '--answer', 'x', '--by', 'user', '--tasks', 'first']).stderr, /is not a list of task IDs/);
+  assert.match(run(['question', 'add', g.id, 'Open?', '--tasks', 'T-01']).stderr, /--tasks needs --answer/);
+  assert.match(run(['question', 'list', g.id, '--tasks', 'T-01']).stderr, /--tasks goes with question add or question resolve/);
+  assert.doesNotMatch(fs.readFileSync(goalFile, 'utf8'), /Unknown\?|Bad\?|Open\?/, 'a refused call writes nothing');
+});
+
 test('question: open items in tasks, unmarked questions and placeholders block, and question number brings them under the script', () => {
   const { run, dir } = project();
   run(['init']);

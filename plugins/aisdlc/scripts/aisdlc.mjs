@@ -244,7 +244,7 @@ function withKeys(data, add) {
 
 // Every option takes a value, even one that starts with "--" (e.g. --verify "--version").
 // Unknown options fail, so a typo in a skill can't be silently ignored.
-export const OPTIONS = new Set(['depends', 'risk', 'verify', 'reason', 'evidence', 'goal', 'task', 'status', 'stack', 'graph', 'base-branch', 'dir', 'severity', 'stage', 'check', 'budget', 'answer', 'by', 'owner']);
+export const OPTIONS = new Set(['depends', 'risk', 'verify', 'reason', 'evidence', 'goal', 'task', 'status', 'stack', 'graph', 'base-branch', 'dir', 'severity', 'stage', 'check', 'budget', 'answer', 'by', 'owner', 'tasks']);
 
 function parseArgs(argv) {
   const pos = [];
@@ -295,6 +295,23 @@ function nextId(prefix, existing, width) {
 const REMOVED_TASKS = /^removed tasks\b/i;
 // What the agent writes while it works; the plan review never judged it.
 const TASK_PROGRESS_SECTIONS = /^(notes|work log|review|explored)\b/i;
+// A task's copy of the goal's answers that change it (`question add|resolve --tasks`). It is plan text, so it counts in
+// the plan fingerprint, but it holds settled answers, so the question scan doesn't read it for gaps.
+const TASK_CLARIFICATIONS = /^clarifications\b/i;
+
+// Adds a line under the task's `## Clarifications`, creating the section before `## Notes` (or at the end) when missing.
+function addTaskClarification(file, line) {
+  const doc = readDoc(file);
+  const lines = bodyLines(doc.body);
+  if (sectionRange(lines, TASK_CLARIFICATIONS)) doc.body = appendToSection(doc.body, TASK_CLARIFICATIONS, 'Clarifications', line);
+  else {
+    const at = lines.findIndex((l) => /^##\s+notes\b/i.test(l));
+    if (at < 0) doc.body = appendToSection(doc.body, TASK_CLARIFICATIONS, 'Clarifications', line);
+    else { lines.splice(at, 0, '## Clarifications', '', line, ''); doc.body = lines.join('\n'); }
+  }
+  if ('updated' in doc.data) doc.data.updated = today();
+  writeDoc(file, doc);
+}
 const TASK_REVIEW = /^review\b/i;
 // The task-explorer's list of files to change, written by `task explore`. A hint for the implementer, never plan.
 const TASK_EXPLORED = /^explored\b/i;
@@ -1559,7 +1576,7 @@ function questionScan(goal, root) {
       if (inRisks && /^\s*[-*]\s+\S/.test(line) && /\?\s*$/.test(line)) {
         found.unmarked.push({ text: line.replace(/^\s*[-*]\s+/, '').trim(), where: src.where, file: src.file, line: i, prefix: line.match(/^(\s*[-*]\s+)/)[1] });
       }
-      const planned = src.isGoal ? /^(problem|outcome|scope)\b/i.test(heading) : !TASK_PROGRESS_SECTIONS.test(heading);
+      const planned = src.isGoal ? /^(problem|outcome|scope)\b/i.test(heading) : !TASK_PROGRESS_SECTIONS.test(heading) && !TASK_CLARIFICATIONS.test(heading);
       // A placeholder written as code (`TODO`) is something the work talks about, not a gap in the plan.
       if (planned && PLACEHOLDER.test(line.replace(/`[^`]*`/g, ''))) found.placeholders.push({ text: line.trim(), where: src.where });
     });
@@ -2609,8 +2626,26 @@ const commands = {
     const openItems = () => risks().map((line) => line.match(OPEN_ITEM)).filter(Boolean).map((m) => ({ id: m[2] || null, text: m[3].trim() }));
     const nextQ = () => `Q-${Math.max(0, ...[...doc.body.matchAll(/\bQ-(\d+)\b/g)].map((m) => Number(m[1]))) + 1}`;
     const save = () => { if ('updated' in doc.data) doc.data.updated = today(); writeDoc(g.file, doc); };
-    const answered = (id, text, answer) => appendToSection(doc.body, /^clarifications\b/i, 'Clarifications', `- **Q:** ${id}: ${text} **A (user):** ${answer}`);
     const answer = typeof opts.answer === 'string' ? opts.answer.trim().replace(/\s*\n\s*/g, ' ') : '';
+    // `--tasks T-02,T-04` names the tasks an answer changes: the goal's record is tagged with them, and each task gets
+    // a copy of the answer under its own Clarifications, so whoever works on the task reads it there.
+    const tagged = (() => {
+      if (opts.tasks === undefined) return [];
+      if (!['add', 'resolve'].includes(action)) fail('--tasks goes with question add or question resolve.');
+      if (!answer) fail('--tasks needs --answer: it names the tasks an answer changes.');
+      const ids = String(opts.tasks).split(',').map((x) => x.trim()).filter(Boolean);
+      if (!ids.length || ids.some((x) => !/^T-\d+(\.\d+)?$/.test(x))) fail(`--tasks "${opts.tasks}" is not a list of task IDs. Use --tasks T-01,T-02.`);
+      return [...new Set(ids)].map((x) => {
+        const t = listTasks(g).find((task) => task.id === x);
+        if (!t) fail(`${g.id} has no task ${x}. \`goal show ${g.id}\` lists them.`);
+        if (['done', 'skipped'].includes(t.status)) fail(`${x} is ${t.status}; an answer can't change finished work. Add a task for the change instead.`);
+        return t;
+      });
+    })();
+    const record = (id, text) => `- **Q:** ${id}: ${text} **A (user):** ${answer}${tagged.length ? ` (tasks: ${tagged.map((t) => t.id).join(', ')})` : ''}`;
+    const answered = (id, text) => appendToSection(doc.body, /^clarifications\b/i, 'Clarifications', record(id, text));
+    const copyToTasks = (id, text) => { for (const t of tagged) addTaskClarification(t.file, `- **Q:** ${id}: ${text} **A (user):** ${answer} (from ${g.id}'s Clarifications)`); };
+    const onTasks = () => (tagged.length ? ` (tasks: ${tagged.map((t) => t.id).join(', ')})` : '');
     // Only the user's answer settles a question. The script can't tell who typed it, so the caller has to say so:
     // `--by user` attests that the user gave this answer in this session, and the record shows it.
     if (answer && opts.by !== 'user') fail('--answer needs --by user: it attests the user gave this answer. A recommendation or your own reading is not an answer; ask the user.');
@@ -2624,17 +2659,18 @@ const commands = {
     if (action === 'add') {
       // Without --answer the question stays open and blocks govern. With it, the user already answered: it is recorded as settled.
       const text = rest.join(' ').trim().replace(/\s*\n\s*/g, ' ');
-      if (!text) fail('Usage: question add <G-id> <question> [--answer "<the user\'s answer>" --by user]');
+      if (!text) fail('Usage: question add <G-id> <question> [--answer "<the user\'s answer>" --by user [--tasks T-01,T-02]]');
       const by = signature(root, opts);
       const id = nextQ();
-      doc.body = answer ? answered(id, text, answer) : appendToSection(doc.body, /^risks\b/i, 'Risks & Unknowns', `- **Open:** ${id}: ${text}`);
+      doc.body = answer ? answered(id, text) : appendToSection(doc.body, /^risks\b/i, 'Risks & Unknowns', `- **Open:** ${id}: ${text}`);
       save();
-      logDecision(root, g, answer ? `${id} answered: ${text} → ${answer}` : `${id} asked: ${text}`, by);
-      return out({ goal: g.id, id, status: answer ? 'answered' : 'open' });
+      copyToTasks(id, text);
+      logDecision(root, g, answer ? `${id} answered: ${text} → ${answer}${onTasks()}` : `${id} asked: ${text}`, by);
+      return out({ goal: g.id, id, status: answer ? 'answered' : 'open', ...(tagged.length ? { tasks: tagged.map((t) => t.id) } : {}) });
     }
     if (action === 'resolve') {
       const [id] = rest;
-      if (!/^Q-\d+$/.test(id || '') || !answer) fail('Usage: question resolve <G-id> <Q-id> --answer "<the user\'s answer>" --by user');
+      if (!/^Q-\d+$/.test(id || '') || !answer) fail('Usage: question resolve <G-id> <Q-id> --answer "<the user\'s answer>" --by user [--tasks T-01,T-02]');
       const by = signature(root, opts);
       const lines = bodyLines(doc.body);
       const r = sectionRange(lines, /^risks\b/i);
@@ -2642,10 +2678,11 @@ const commands = {
       if (at < 0) fail(`${g.id} has no open question ${id}. \`question list ${g.id}\` shows them.`);
       const text = lines[at].match(OPEN_ITEM)[3].trim();
       lines.splice(at, 1);
-      doc.body = appendToSection(lines.join('\n'), /^clarifications\b/i, 'Clarifications', `- **Q:** ${id}: ${text} **A (user):** ${answer}`);
+      doc.body = appendToSection(lines.join('\n'), /^clarifications\b/i, 'Clarifications', record(id, text));
       save();
-      logDecision(root, g, `${id} answered: ${text} → ${answer}`, by);
-      return out({ goal: g.id, id, status: 'answered', still_open: openItems().length });
+      copyToTasks(id, text);
+      logDecision(root, g, `${id} answered: ${text} → ${answer}${onTasks()}`, by);
+      return out({ goal: g.id, id, status: 'answered', still_open: openItems().length, ...(tagged.length ? { tasks: tagged.map((t) => t.id) } : {}) });
     }
     if (action === 'number') {
       // Brings every stray question under the script: numbers hand-written Open items, tracks unmarked questions,
@@ -2679,7 +2716,7 @@ const commands = {
       save();
       return out({ goal: g.id, numbered: ids });
     }
-    fail('Usage: question list <G-id> | add <G-id> <question> [--answer "…" --by user] | resolve <G-id> <Q-id> --answer "…" --by user | number <G-id>');
+    fail('Usage: question list <G-id> | add <G-id> <question> [--answer "…" --by user [--tasks …]] | resolve <G-id> <Q-id> --answer "…" --by user [--tasks …] | number <G-id>');
   },
 
   dag([action, goalId]) {

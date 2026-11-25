@@ -1,6 +1,6 @@
 ---
 name: clarify
-description: Clarify an AI-SDLC goal by asking the user one question at a time until ambiguities, open questions and assumptions are resolved, then update the goal and tasks. Use when the user runs /aisdlc:clarify <goal-id>.
+description: Clarify an AI-SDLC goal. Lists every open question, ambiguity and missing point at once, asks them in groups of up to 4, records each answer in the goal and in the tasks it changes, and updates the goal and tasks. Use when the user runs /aisdlc:clarify <goal-id>.
 argument-hint: "<G-id>"
 ---
 
@@ -31,9 +31,14 @@ Input: `$ARGUMENTS` (the text after the skill's name) is the goal ID. If it is m
    - dependencies that look wrong
    - decisions that sound architectural (note these for `/aisdlc:adr`)
    - the stack's standards: run `$AISDLC detect-stack` and load every skill in `standards_skills`. Check that the tasks carry the criteria each requires (for example declaration files, test layers, lint and coverage). Where the repo conflicts with it (another test runner, a threshold the tooling can't enforce), ask the user which way to go. Record a chosen departure under `## Standards deviations` in `goal.md` with the reason, so reviewers don't rebuild it from the Clarifications.
-5. Ask the user **one question at a time**. Use a structured question tool with 2 to 4 concrete options when one is available. Put the most important question first. After each answer:
-   - If it answers an open question (`$AISDLC question list <G-id>` shows them), record it with `$AISDLC question resolve <G-id> <Q-id> --answer "…" --by user`. It moves the item from Risks & Unknowns to Clarifications. Only the user's answer resolves it, in the user's own words.
-   - Otherwise record it with `$AISDLC question add <G-id> "<question>" --answer "…" --by user`, which adds it under `## Clarifications`.
+5. **Show the whole list first**, then ask it **in groups of up to 4 questions**.
+   - Show every question as one short numbered line, most important first, with the tasks it touches (`T-02, T-04`, or `goal` when it changes no task yet). Say how many there are and that the user may skip any question or stop at any point. Nothing is answered for them.
+   - Ask the questions in that order, up to 4 per round. Use a structured question tool when one is available: it takes several questions at once, each with 2 to 4 concrete options and your recommendation first, marked "(Recommended)". Without one, ask the round as a numbered list with the options under each question. A recommendation is advice, never the answer.
+   - A question whose answer decides what another one means goes in its own round, before the one it decides, so the later question is asked with the answer in hand. Drop any question an earlier answer settles, and add any it raises to a later round.
+   After each round, record every answer before asking the next round:
+   - If it answers an open question (`$AISDLC question list <G-id>` shows them), record it with `$AISDLC question resolve <G-id> <Q-id> --answer "…" --by user --tasks T-01,T-02`. It moves the item from Risks & Unknowns to Clarifications. Only the user's answer resolves it, in the user's own words.
+   - Otherwise record it with `$AISDLC question add <G-id> "<question>" --answer "…" --by user --tasks T-01,T-02`, which adds it under `## Clarifications`.
+   - `--tasks` names every task the answer changes. The script tags the goal's record with them and copies the answer under `## Clarifications` in each of those task files, so whoever implements the task reads it there. Leave `--tasks` out only when the answer changes no task (only the goal, or nothing yet). A finished task (`done` or `skipped`) can't take an answer: add a task for the change instead.
    - Before you start, run `$AISDLC question list <G-id>`. It also shows questions that hide: `- **Open:**` items in a task or another section (`elsewhere`), questions in Risks & Unknowns without the marker (`unmarked`), and TBD-style placeholders in the plan (`placeholders`). Run `$AISDLC question number <G-id>` to bring the first two under the list. A placeholder is a decision nobody made: ask the user what it should say.
    - Update the affected goal sections and task files right away. After changing a goal criterion, check that the task criteria and Files still match it, and that the task's `verify` would fail while the changed criteria are unmet (step 7). Change tasks only through the script, never by renaming or deleting task files, so IDs are never reused:
      - add one: `$AISDLC task new <G-id> "<title>" --risk … --depends … --verify "…"`

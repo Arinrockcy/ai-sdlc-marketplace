@@ -61,7 +61,7 @@ Requires Node.js 24+. Graphify and the documentation index are optional; `/aisdl
 /aisdlc:signoff G-001 --final        → final review of the finished work (implement runs it; init seeds GOV-06, a final rule)
 ```
 
-No step works from assumptions. When something is unclear or under-documented and the code doesn't answer it, the skill asks you, and answers are recorded under the goal's Clarifications.
+No step works from assumptions. When something is unclear or under-documented and the code doesn't answer it, the skill asks you, and answers are recorded under the goal's Clarifications. `/aisdlc:clarify` lists every open question first and asks them in groups of up to 4; each answer is tagged with the tasks it changes and copied into those task files (`question add|resolve … --tasks T-01,T-02`), so the implementer reads it in the task.
 
 Govern comes first. It needs no earlier step: before its review it records the ADR decision with you, and the review turns every gap it finds in the plan and the code into a question for you. `clarify` and `adr` can still run on their own, before or after it. The script enforces the rest:
 - A goal can't start before governance passes.

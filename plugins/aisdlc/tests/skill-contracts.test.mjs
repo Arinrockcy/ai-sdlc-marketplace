@@ -15,7 +15,10 @@ const read = (name) => fs.readFileSync(path.join(SKILLS, name, 'SKILL.md'), 'utf
 const MUST = [
   ['clarify', /\$AISDLC question add <G-id>/, 'challenge records questions with question add'],
   ['clarify', /\$AISDLC question resolve <G-id> <Q-id>/, 'challenge closes open questions with question resolve'],
-  ['clarify', /one question at a time/i, 'challenge asks one question at a time'],
+  ['clarify', /\*\*Show the whole list first\*\*/, 'clarify shows every question before asking any'],
+  ['clarify', /in groups of up to 4 questions/, 'clarify asks in groups of up to 4'],
+  ['clarify', /--by user --tasks T-01,T-02/, 'clarify tags each answer with the tasks it changes'],
+  ['clarify', /may skip any question or stop at any point/, 'answering is up to the user'],
   ['clarify', /Only the user's answer resolves it/, 'only the user\'s answer resolves a question'],
   ['clarify', /never write the `- \*\*Open:\*\*` line by hand/, 'challenge never hand-writes Open lines'],
   ['create-goal', /\$AISDLC question add <G-id> "<question>" --answer "<the user's answer>" --by user/, 'intake answers are recorded as the user\'s'],
