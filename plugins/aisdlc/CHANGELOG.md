@@ -2,6 +2,15 @@
 
 All notable changes to the `aisdlc` plugin. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/). Until 1.0.0, a minor version may include breaking changes; each one is listed under **Breaking** with its upgrade step.
 
+## [0.33.0] - 2026-11-25
+
+Signoff asks its questions the way clarify does.
+
+### Changed
+- `/aisdlc:signoff <G-id>` shows the whole numbered list of the reviewer's questions first, with the tasks each touches, then asks them in groups of up to 4 (options and the reviewer's recommendation each), recording every answer before the next group. A skipped question is recorded as open and fails GOV-05 on the next review. It replaces asking one question at a time.
+- `/aisdlc:signoff <G-id> --final` asks its questions the same way.
+- `/aisdlc:signoff` with no argument lists the topics it will ask about, then asks in groups of up to 4.
+
 ## [0.32.0] - 2026-11-25
 
 Clarify asks everything up front, and each answer reaches the tasks it changes.
